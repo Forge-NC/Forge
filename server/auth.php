@@ -85,11 +85,20 @@ function _check_token(string $token, string $token_file): array {
         return ['valid' => false, 'error' => 'Token has been revoked'];
     }
 
+    // Determine role with backward compat
+    $role = 'tester';  // default
+    if (isset($entry['role']) && in_array($entry['role'], array('owner', 'admin', 'tester'))) {
+        $role = $entry['role'];
+    } elseif (isset($entry['label']) && strpos($entry['label'], 'admin') !== false) {
+        $role = 'admin';  // backward compat for tokens without role field
+    }
+
     return [
         'valid' => true,
         'method' => 'token',
-        'label' => $entry['label'] ?? 'unknown',
+        'label' => isset($entry['label']) ? $entry['label'] : 'unknown',
         'token_hash' => $hash,
+        'role' => $role,
     ];
 }
 

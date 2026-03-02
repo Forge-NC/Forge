@@ -1349,13 +1349,9 @@ class CommandHandler:
             token = secrets.token_hex(32)
             token_hash = hashlib.sha256(token.encode()).hexdigest()
 
-            print(f"\n{BOLD}Generated telemetry token:{RESET}")
-            print(f"  {GREEN}Token:{RESET}  {token}")
-            print(f"  {DIM}Hash:   {token_hash}{RESET}")
-            print(f"  {DIM}Label:  {label}{RESET}")
-
             # Attempt server registration
             admin_token = self.engine.config.get("telemetry_token", "")
+            server_ok = False
             if admin_token:
                 try:
                     import requests
@@ -1371,23 +1367,100 @@ class CommandHandler:
                         "label": label,
                     }, headers={"X-Forge-Token": admin_token}, timeout=5)
                     if resp.status_code == 200:
-                        print(f"  {GREEN}Registered on server.{RESET}")
-                    else:
-                        print(f"  {YELLOW}Server registration failed "
-                              f"({resp.status_code}). Add hash to "
-                              f"tokens.json manually.{RESET}")
+                        server_ok = True
                 except Exception:
-                    print(f"  {YELLOW}Could not reach server. "
-                          f"Add hash to tokens.json manually.{RESET}")
+                    pass
+
+            # Detect repo URL for onboarding instructions
+            repo_url = ""
+            if nwo:
+                repo_url = f"https://github.com/{nwo}.git"
+
+            print(f"\n{BOLD}Generated telemetry token for {CYAN}{label}{RESET}")
+            print()
+            print(f"  {BOLD}--- Send these instructions to your tester ---{RESET}")
+            print()
+            print(f"  1. Install Python 3.10+ from {CYAN}https://python.org{RESET}")
+            print(f"  2. Install Ollama from {CYAN}https://ollama.com{RESET}")
+            if nwo:
+                print(f"  3. Accept the GitHub invite you received by email")
+                print(f"  4. Run this command:")
+                print()
+                print(f"     {GREEN}git clone {repo_url} && cd Forge && "
+                      f"python install.py --token {token} "
+                      f"--label \"{label}\"{RESET}")
             else:
-                print(f"\n  {DIM}No telemetry_token in config -- "
-                      f"add hash to server/data/tokens.json manually.{RESET}")
-            print(f"\n{DIM}Give the token (not the hash) to the tester.{RESET}")
+                print(f"  3. Run this command:")
+                print()
+                print(f"     {GREEN}cd Forge && python install.py "
+                      f"--token {token} --label \"{label}\"{RESET}")
+            print()
+            print(f"  5. Double-click {CYAN}Forge NC{RESET} on your desktop")
+            print()
+            print(f"  {DIM}Token:  {token}{RESET}")
+            print(f"  {DIM}Hash:   {token_hash}{RESET}")
+            if server_ok:
+                print(f"  {GREEN}Registered on server: yes{RESET}")
+            else:
+                if admin_token:
+                    print(f"  {YELLOW}Registered on server: failed "
+                          f"(add hash to tokens.json manually){RESET}")
+                else:
+                    print(f"  {YELLOW}Registered on server: no "
+                          f"(no telemetry_token in config){RESET}")
+
+        elif sub == "role":
+            if not subarg or len(subarg.split()) < 2:
+                self.io.print_error(
+                    "Usage: /admin role <label> <owner|admin|tester>")
+                return True
+            parts_r = subarg.split(None, 1)
+            role_label = parts_r[0]
+            role_value = parts_r[1].lower().strip()
+            if role_value not in ("owner", "admin", "tester"):
+                self.io.print_error(
+                    f"Invalid role '{role_value}'. "
+                    f"Must be: owner, admin, or tester")
+                return True
+
+            admin_token = self.engine.config.get("telemetry_token", "")
+            if not admin_token:
+                self.io.print_error(
+                    "No telemetry_token in config. "
+                    "Only the server owner can change roles.")
+                return True
+
+            try:
+                import requests
+                url = self.engine.config.get("telemetry_url", "")
+                if not url:
+                    url = "https://dirt-star.com/Forge/token_admin.php"
+                else:
+                    url = url.replace("telemetry_receiver.php",
+                                      "token_admin.php")
+                resp = requests.post(url, json={
+                    "action": "set_role",
+                    "label": role_label,
+                    "role": role_value,
+                }, headers={"X-Forge-Token": admin_token}, timeout=5)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("success"):
+                        print(f"  {GREEN}{role_label} is now "
+                              f"{role_value}.{RESET}")
+                    else:
+                        self.io.print_error(
+                            f"Failed: {data.get('error', 'unknown')}")
+                else:
+                    self.io.print_error(
+                        f"Server returned {resp.status_code}")
+            except Exception as ex:
+                self.io.print_error(f"Failed: {ex}")
 
         else:
             self.io.print_error(
                 "Usage: /admin [list | invite <user> | remove <user> "
-                "| pending | token <label>]")
+                "| pending | token <label> | role <label> <role>]")
         return True
 
     # ── Command dispatch table ──

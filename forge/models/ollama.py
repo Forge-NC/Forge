@@ -97,9 +97,25 @@ class OllamaBackend:
         # Fallback: ~4 chars per token for English/code
         return max(1, len(text) // 4)
 
+    def _unload_model(self, model_name: str):
+        """Ask Ollama to unload a model from VRAM (keep_alive=0)."""
+        try:
+            self._session.post(
+                f"{self.base_url}/api/generate",
+                json={"model": model_name, "keep_alive": 0},
+                timeout=10,
+            )
+        except Exception:
+            pass
+
     def embed(self, texts, embed_model: str = "nomic-embed-text",
-              keep_alive: str = "10m") -> list[list[float]]:
+              keep_alive: str = "0") -> list[list[float]]:
         """Generate embeddings for one or more texts.
+
+        Uses keep_alive=0 by default so the embed model unloads immediately
+        after use, freeing VRAM for the main LLM. For batch operations (>5
+        texts), temporarily unloads the main LLM first to guarantee enough
+        VRAM for the embedding model.
 
         Args:
             texts: A single string or list of strings to embed.
@@ -113,12 +129,20 @@ class OllamaBackend:
         if isinstance(texts, str):
             texts = [texts]
 
+        # For batch embedding (indexing), free VRAM by unloading the main LLM.
+        # It reloads automatically on the next chat/generate call.
+        batch_mode = len(texts) > 5
+        if batch_mode:
+            self._unload_model(self.model)
+
         BATCH_SIZE = 50
         all_embeddings: list[list[float]] = []
 
         try:
             for i in range(0, len(texts), BATCH_SIZE):
                 batch = texts[i:i + BATCH_SIZE]
+
+                # Try new API first (/api/embed with "input" field)
                 r = self._session.post(
                     f"{self.base_url}/api/embed",
                     json={
@@ -128,11 +152,56 @@ class OllamaBackend:
                     },
                     timeout=self.timeout,
                 )
+
+                if r.status_code == 404:
+                    # Old Ollama: fall back to /api/embeddings (one at a time)
+                    for text in batch:
+                        r2 = self._session.post(
+                            f"{self.base_url}/api/embeddings",
+                            json={
+                                "model": embed_model,
+                                "prompt": text,
+                            },
+                            timeout=self.timeout,
+                        )
+                        if r2.status_code != 200:
+                            log.warning("Embed request failed: %s %s",
+                                        r2.status_code, r2.text[:200])
+                            return []
+                        emb = r2.json().get("embedding", [])
+                        if emb:
+                            all_embeddings.append(emb)
+                    continue
+
+                if r.status_code == 500 and not batch_mode:
+                    # VRAM OOM — unload main model and retry once
+                    log.info("Embed 500 error, unloading main model and retrying")
+                    self._unload_model(self.model)
+                    import time as _time
+                    _time.sleep(1)
+                    r = self._session.post(
+                        f"{self.base_url}/api/embed",
+                        json={
+                            "model": embed_model,
+                            "input": batch,
+                            "keep_alive": keep_alive,
+                        },
+                        timeout=self.timeout,
+                    )
+
                 if r.status_code != 200:
                     log.warning("Embed request failed: %s %s",
                                 r.status_code, r.text[:200])
                     return []
-                embeddings = r.json().get("embeddings", [])
+
+                data = r.json()
+                # New Ollama: "embeddings" (plural, list of vectors)
+                embeddings = data.get("embeddings", [])
+                if not embeddings:
+                    # Some versions return "embedding" (singular)
+                    single = data.get("embedding", [])
+                    if single:
+                        embeddings = [single]
                 all_embeddings.extend(embeddings)
         except Exception as e:
             log.warning("Embedding failed: %s", e)

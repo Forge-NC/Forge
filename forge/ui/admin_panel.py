@@ -458,12 +458,12 @@ class AdminPanelDialog:
         # ── Window ──
         self._win = ctk.CTkToplevel(parent)
         self._win.title("Forge Admin Panel")
-        self._win.geometry("580x550")
+        self._win.geometry("580x700")
         self._win.transient(parent)
         self._win.grab_set()
         self._win.configure(fg_color=COLORS["bg_dark"])
         self._win.resizable(True, True)
-        self._win.minsize(520, 450)
+        self._win.minsize(520, 550)
         self._win.protocol("WM_DELETE_WINDOW", self._close)
 
         # Theme listener
@@ -473,7 +473,7 @@ class AdminPanelDialog:
         # Center on parent
         self._win.update_idletasks()
         px = parent.winfo_x() + (parent.winfo_width() - 580) // 2
-        py = parent.winfo_y() + (parent.winfo_height() - 550) // 2
+        py = parent.winfo_y() + (parent.winfo_height() - 700) // 2
         self._win.geometry(f"+{max(0, px)}+{max(0, py)}")
 
         # ── Header ──
@@ -684,6 +684,15 @@ class AdminPanelDialog:
             command=self._generate_token,
         ).pack(side="left")
 
+        ctk.CTkButton(
+            gen_row, text="Refresh", width=130,
+            fg_color=COLORS["bg_card"],
+            hover_color=COLORS["bg_panel"],
+            text_color=COLORS["white"],
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            command=self._refresh_tokens,
+        ).pack(side="right")
+
         # Generated token display (hidden initially)
         self._token_display_frame = ctk.CTkFrame(
             frame, fg_color=COLORS["bg_panel"],
@@ -721,6 +730,21 @@ class AdminPanelDialog:
             text_color=COLORS["gray"], anchor="w",
         )
         self._token_status.pack(fill="x", padx=12, pady=(0, 8))
+
+        # Token list from server
+        self._token_list_frame = ctk.CTkFrame(
+            frame, fg_color=COLORS["bg_panel"],
+            corner_radius=6, border_width=1, border_color=COLORS["border"],
+        )
+        self._token_list_frame.pack(fill="x", padx=12, pady=(0, 8))
+
+        self._token_list_loading = ctk.CTkLabel(
+            self._token_list_frame,
+            text="  Click Refresh to load tokens",
+            font=ctk.CTkFont(*FONT_MONO_XS),
+            text_color=COLORS["gray"], anchor="w",
+        )
+        self._token_list_loading.pack(fill="x", padx=8, pady=6)
 
     def _build_repo_section(self):
         """Build the Repository Info section."""
@@ -812,6 +836,9 @@ class AdminPanelDialog:
         # Auto-refresh collaborators if we have a repo
         if nwo:
             self._do_refresh_collaborators()
+
+        # Auto-refresh token list
+        self._do_refresh_tokens()
 
     def _update_repo_info(self, nwo, branch, gh_user):
         """Update repository info labels (called on main thread)."""
@@ -1163,6 +1190,239 @@ class AdminPanelDialog:
                     text="  Clipboard copy failed",
                     text_color=COLORS["red"],
                 )
+
+    # ── Token list management ─────────────────────────────────
+
+    def _refresh_tokens(self):
+        """Fetch token list from server (background thread)."""
+        self._token_status.configure(
+            text="  Loading tokens...", text_color=COLORS["yellow"])
+        threading.Thread(target=self._do_refresh_tokens, daemon=True).start()
+
+    def _do_refresh_tokens(self):
+        """Fetch token list from server (background thread)."""
+        admin_token = self._config.get("telemetry_token", "")
+        url = "https://dirt-star.com/Forge/token_admin.php"
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                url, method="GET",
+                headers={
+                    "X-Forge-Token": admin_token,
+                },
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                result = json.loads(resp.read())
+            if result.get("success"):
+                tokens = result.get("tokens", [])
+                self._win.after(0, self._populate_token_list, tokens)
+            else:
+                err = result.get("error", "unknown")
+                self._win.after(0, self._token_status.configure,
+                                {"text": f"  Failed: {err}",
+                                 "text_color": COLORS["red"]})
+        except Exception as e:
+            self._win.after(0, self._token_status.configure,
+                            {"text": f"  Server unreachable: {e}",
+                             "text_color": COLORS["red"]})
+
+    def _populate_token_list(self, tokens):
+        """Rebuild token list UI (called on main thread)."""
+        for child in self._token_list_frame.winfo_children():
+            child.destroy()
+
+        if not tokens:
+            ctk.CTkLabel(
+                self._token_list_frame,
+                text="  No tokens registered",
+                font=ctk.CTkFont(*FONT_MONO_XS),
+                text_color=COLORS["gray"], anchor="w",
+            ).pack(fill="x", padx=8, pady=6)
+            self._token_status.configure(
+                text="  0 tokens", text_color=COLORS["gray"])
+            return
+
+        active = [t for t in tokens if not t.get("revoked")]
+        revoked = [t for t in tokens if t.get("revoked")]
+
+        for tok in active:
+            self._build_token_row(tok)
+
+        if revoked:
+            ctk.CTkFrame(
+                self._token_list_frame, fg_color=COLORS["border"],
+                height=1, corner_radius=0,
+            ).pack(fill="x", padx=8, pady=4)
+            ctk.CTkLabel(
+                self._token_list_frame,
+                text="  Revoked:",
+                font=ctk.CTkFont(*FONT_MONO_XS),
+                text_color=COLORS["gray"], anchor="w",
+            ).pack(fill="x", padx=8, pady=(0, 2))
+            for tok in revoked:
+                self._build_token_row(tok, revoked=True)
+
+        self._token_status.configure(
+            text=f"  {len(active)} active, {len(revoked)} revoked",
+            text_color=COLORS["gray"])
+
+    def _build_token_row(self, tok, revoked=False):
+        """Build a single token row in the token list."""
+        row = ctk.CTkFrame(self._token_list_frame, fg_color="transparent")
+        row.pack(fill="x", padx=8, pady=2)
+
+        label = tok.get("label", "unknown")
+        role = tok.get("role", "tester")
+
+        # Role badge color
+        role_colors = {
+            "owner": COLORS["cyan"],
+            "admin": COLORS["yellow"],
+            "tester": COLORS["gray"],
+        }
+        badge_color = role_colors.get(role, COLORS["gray"])
+
+        # Label
+        lbl_color = COLORS["gray"] if revoked else COLORS["white"]
+        ctk.CTkLabel(
+            row, text=f"  {label}",
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            text_color=lbl_color, anchor="w",
+        ).pack(side="left")
+
+        # Role badge
+        ctk.CTkLabel(
+            row, text=f"[{role}]",
+            font=ctk.CTkFont(*FONT_MONO_XS),
+            text_color=badge_color,
+        ).pack(side="left", padx=(6, 0))
+
+        if revoked:
+            ctk.CTkLabel(
+                row, text="REVOKED",
+                font=ctk.CTkFont(*FONT_MONO_XS),
+                text_color=COLORS["red"],
+            ).pack(side="left", padx=(6, 0))
+            return
+
+        # Role dropdown (only for active tokens)
+        role_var = ctk.StringVar(value=role)
+        role_menu = ctk.CTkOptionMenu(
+            row,
+            variable=role_var,
+            values=["tester", "admin", "owner"],
+            fg_color=COLORS["bg_card"],
+            button_color=COLORS["cyan_dim"],
+            button_hover_color=COLORS["cyan"],
+            dropdown_fg_color=COLORS["bg_card"],
+            dropdown_hover_color=COLORS["cyan_dim"],
+            text_color=COLORS["white"],
+            font=ctk.CTkFont(*FONT_MONO_XS),
+            dropdown_font=ctk.CTkFont(*FONT_MONO_XS),
+            width=80,
+            command=lambda new_role, lbl=label: self._change_role(lbl, new_role),
+        )
+        role_menu.pack(side="right", padx=(4, 0))
+
+        # Revoke button
+        ctk.CTkButton(
+            row, text="Revoke", width=130,
+            fg_color=COLORS["bg_card"],
+            hover_color=COLORS["red"],
+            text_color=COLORS["white"],
+            font=ctk.CTkFont(*FONT_MONO_XS),
+            height=24,
+            command=lambda hp=tok.get("hash_prefix", ""): self._revoke_token(hp),
+        ).pack(side="right", padx=(4, 0))
+
+    def _change_role(self, label, new_role):
+        """Change a token's role (background thread)."""
+        self._token_status.configure(
+            text=f"  Changing {label} to {new_role}...",
+            text_color=COLORS["yellow"])
+
+        def _do():
+            admin_token = self._config.get("telemetry_token", "")
+            url = "https://dirt-star.com/Forge/token_admin.php"
+            try:
+                import urllib.request
+                payload = json.dumps({
+                    "action": "set_role",
+                    "label": label,
+                    "role": new_role,
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    url, data=payload, method="POST",
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Forge-Token": admin_token,
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    result = json.loads(resp.read())
+                if result.get("success"):
+                    self._win.after(0, self._token_status.configure,
+                                    {"text": f"  {label} is now {new_role}",
+                                     "text_color": COLORS["green"]})
+                    # Refresh list
+                    self._do_refresh_tokens()
+                else:
+                    err = result.get("error", "unknown")
+                    self._win.after(0, self._token_status.configure,
+                                    {"text": f"  Failed: {err}",
+                                     "text_color": COLORS["red"]})
+            except Exception as e:
+                self._win.after(0, self._token_status.configure,
+                                {"text": f"  Failed: {e}",
+                                 "text_color": COLORS["red"]})
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _revoke_token(self, hash_prefix):
+        """Revoke a token (background thread)."""
+        if not hash_prefix:
+            self._token_status.configure(
+                text="  Cannot revoke: no hash prefix",
+                text_color=COLORS["red"])
+            return
+
+        self._token_status.configure(
+            text="  Revoking token...", text_color=COLORS["yellow"])
+
+        def _do():
+            admin_token = self._config.get("telemetry_token", "")
+            url = "https://dirt-star.com/Forge/token_admin.php"
+            try:
+                import urllib.request
+                payload = json.dumps({
+                    "action": "revoke",
+                    "token_hash": hash_prefix,
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    url, data=payload, method="POST",
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Forge-Token": admin_token,
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    result = json.loads(resp.read())
+                if result.get("success"):
+                    self._win.after(0, self._token_status.configure,
+                                    {"text": "  Token revoked",
+                                     "text_color": COLORS["green"]})
+                    self._do_refresh_tokens()
+                else:
+                    err = result.get("error", "unknown")
+                    self._win.after(0, self._token_status.configure,
+                                    {"text": f"  Failed: {err}",
+                                     "text_color": COLORS["red"]})
+            except Exception as e:
+                self._win.after(0, self._token_status.configure,
+                                {"text": f"  Failed: {e}",
+                                 "text_color": COLORS["red"]})
+
+        threading.Thread(target=_do, daemon=True).start()
 
     # ── Repo actions ──────────────────────────────────────────
 

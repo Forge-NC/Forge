@@ -134,7 +134,19 @@ class CodebaseIndex:
             log.error("Embedding failed for %s: %s", abs_path, exc)
             return 0
 
+        if not raw_embeddings:
+            log.warning("Empty embedding result for %s", abs_path)
+            return 0
+
         embeddings = np.array(raw_embeddings, dtype=np.float32)
+
+        # Guard against wrong-shape arrays (e.g. old Ollama returning flat list)
+        if embeddings.ndim == 1:
+            embeddings = embeddings.reshape(1, -1)
+        if embeddings.ndim != 2 or embeddings.shape[0] == 0:
+            log.warning("Unexpected embedding shape %s for %s",
+                        embeddings.shape, abs_path)
+            return 0
 
         # Normalise so cosine similarity == dot product
         norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
@@ -230,6 +242,10 @@ class CodebaseIndex:
             raw = self._embed_fn([query])
         except Exception as exc:
             log.error("Query embedding failed: %s", exc)
+            return []
+
+        if not raw or not raw[0]:
+            log.warning("Empty query embedding result")
             return []
 
         q_vec = np.array(raw[0], dtype=np.float32)

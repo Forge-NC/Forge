@@ -15,12 +15,20 @@ require_once __DIR__ . '/auth.php';
 
 header('Content-Type: application/json');
 
-// -- Authenticate and require admin --
+// -- Authenticate and require admin/owner role --
 $auth = require_auth();
-$label = isset($auth['label']) ? $auth['label'] : '';
-if (strpos($label, 'admin') === false) {
+$caller_role = isset($auth['role']) ? $auth['role'] : 'tester';
+// Backward compat fallback
+if ($caller_role === 'tester') {
+    $label_check = isset($auth['label']) ? $auth['label'] : '';
+    if (strpos($label_check, 'admin') !== false) {
+        $caller_role = 'admin';
+    }
+}
+if (!in_array($caller_role, array('owner', 'admin'))) {
     http_response_code(403);
-    echo json_encode(['error' => 'Admin access required']);
+    header('Content-Type: application/json');
+    echo json_encode(array('error' => 'Admin or owner access required'));
     exit;
 }
 
@@ -55,12 +63,14 @@ if ($action === 'list') {
 }
 
 if ($action === 'register') {
-    handle_register($body, $TOKEN_FILE);
+    handle_register($body, $TOKEN_FILE, $caller_role);
 } elseif ($action === 'revoke') {
-    handle_revoke($body, $TOKEN_FILE);
+    handle_revoke($body, $TOKEN_FILE, $caller_role);
+} elseif ($action === 'set_role') {
+    handle_role_change($body, $TOKEN_FILE, $caller_role);
 } else {
     http_response_code(400);
-    echo json_encode(['error' => 'Unknown action: ' . $action]);
+    echo json_encode(array('error' => 'Unknown action: ' . $action));
     exit;
 }
 
@@ -84,28 +94,42 @@ function save_tokens($path, array $tokens) {
     file_put_contents($path, json_encode($tokens, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
 }
 
+function role_rank($role) {
+    $ranks = array('tester' => 0, 'admin' => 1, 'owner' => 2);
+    return isset($ranks[$role]) ? $ranks[$role] : 0;
+}
+
 function list_tokens($path) {
     $tokens = load_tokens($path);
     $result = array();
     foreach ($tokens as $hash => $entry) {
+        // Determine role with 3-tier fallback
+        $role = 'tester';
+        if (isset($entry['role']) && in_array($entry['role'], array('owner', 'admin', 'tester'))) {
+            $role = $entry['role'];
+        } elseif (isset($entry['label']) && strpos($entry['label'], 'admin') !== false) {
+            $role = 'admin';
+        }
+
         $result[] = array(
             'hash_prefix' => substr($hash, 0, 12) . '...',
             'label'       => isset($entry['label']) ? $entry['label'] : 'unknown',
             'created'     => isset($entry['created']) ? $entry['created'] : null,
             'revoked'     => !empty($entry['revoked']),
+            'role'        => $role,
         );
     }
     return $result;
 }
 
-function handle_register(array $body, $path) {
+function handle_register(array $body, $path, $caller_role) {
     $hash  = isset($body['token_hash']) ? $body['token_hash'] : '';
     $label = isset($body['label']) ? $body['label'] : '';
 
     // Validate hash: exactly 64 hex characters
     if (!preg_match('/^[a-f0-9]{64}$/i', $hash)) {
         http_response_code(400);
-        echo json_encode(['error' => 'token_hash must be exactly 64 hex characters']);
+        echo json_encode(array('error' => 'token_hash must be exactly 64 hex characters'));
         exit;
     }
 
@@ -113,7 +137,22 @@ function handle_register(array $body, $path) {
     $label = preg_replace('/[^a-zA-Z0-9_-]/', '', $label);
     if ($label === '') {
         http_response_code(400);
-        echo json_encode(['error' => 'label is required (alphanumeric, dash, underscore)']);
+        echo json_encode(array('error' => 'label is required (alphanumeric, dash, underscore)'));
+        exit;
+    }
+
+    // Determine role for new token
+    $new_role = isset($body['role']) ? $body['role'] : 'tester';
+    if (!in_array($new_role, array('owner', 'admin', 'tester'))) {
+        http_response_code(400);
+        echo json_encode(array('error' => 'Invalid role. Must be owner, admin, or tester'));
+        exit;
+    }
+
+    // Only owner can create admin/owner tokens
+    if ($new_role !== 'tester' && $caller_role !== 'owner') {
+        http_response_code(403);
+        echo json_encode(array('error' => 'Only owner can create admin or owner tokens'));
         exit;
     }
 
@@ -122,7 +161,7 @@ function handle_register(array $body, $path) {
 
     if (isset($tokens[$hash])) {
         http_response_code(409);
-        echo json_encode(['error' => 'Token already exists']);
+        echo json_encode(array('error' => 'Token already exists'));
         exit;
     }
 
@@ -130,14 +169,15 @@ function handle_register(array $body, $path) {
         'created' => gmdate('Y-m-d\TH:i:s\Z'),
         'revoked' => false,
         'label'   => $label,
+        'role'    => $new_role,
     );
     save_tokens($path, $tokens);
 
-    echo json_encode(array('status' => 'ok', 'label' => $label));
+    echo json_encode(array('status' => 'ok', 'label' => $label, 'role' => $new_role));
     exit;
 }
 
-function handle_revoke(array $body, $path) {
+function handle_revoke(array $body, $path, $caller_role) {
     $hash_input = isset($body['token_hash']) ? $body['token_hash'] : '';
     if ($hash_input === '') {
         http_response_code(400);
@@ -174,5 +214,50 @@ function handle_revoke(array $body, $path) {
     $tokens[$match_key]['revoked'] = true;
     save_tokens($path, $tokens);
     echo json_encode(array('status' => 'ok', 'revoked' => $tokens[$match_key]['label']));
+    exit;
+}
+
+function handle_role_change(array $body, $path, $caller_role) {
+    if ($caller_role !== 'owner') {
+        http_response_code(403);
+        echo json_encode(array('error' => 'Only owner can change roles'));
+        exit;
+    }
+
+    $target_label = isset($body['label']) ? $body['label'] : '';
+    $new_role = isset($body['role']) ? $body['role'] : '';
+
+    if ($target_label === '') {
+        http_response_code(400);
+        echo json_encode(array('error' => 'label is required'));
+        exit;
+    }
+
+    if (!in_array($new_role, array('owner', 'admin', 'tester'))) {
+        http_response_code(400);
+        echo json_encode(array('error' => 'Invalid role. Must be owner, admin, or tester'));
+        exit;
+    }
+
+    $tokens = load_tokens($path);
+    $found_key = null;
+    foreach ($tokens as $hash => $entry) {
+        $entry_label = isset($entry['label']) ? $entry['label'] : '';
+        if ($entry_label === $target_label) {
+            $found_key = $hash;
+            break;
+        }
+    }
+
+    if ($found_key === null) {
+        http_response_code(404);
+        echo json_encode(array('error' => 'Token with label not found'));
+        exit;
+    }
+
+    $tokens[$found_key]['role'] = $new_role;
+    save_tokens($path, $tokens);
+
+    echo json_encode(array('status' => 'ok', 'label' => $target_label, 'role' => $new_role));
     exit;
 }

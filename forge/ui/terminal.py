@@ -657,6 +657,7 @@ def print_help():
             ("/admin remove <user>", "Remove a collaborator"),
             ("/admin pending", "Show pending invitations"),
             ("/admin token <label>", "Generate a telemetry token for a tester"),
+            ("/admin role <label> <role>", "Change token role (owner/admin/tester)"),
         ]),
         ("System", [
             ("/hardware", "Show GPU/CPU/RAM and model recommendation"),

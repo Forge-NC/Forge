@@ -12,6 +12,7 @@ dependencies = [
     "customtkinter>=5.2",
     "tiktoken>=0.7",
     "pyyaml>=6.0",
+    "sounddevice>=0.4",
     "pyreadline3>=3.4; sys_platform == 'win32'",
 ]
 

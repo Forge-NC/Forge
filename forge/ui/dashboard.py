@@ -951,6 +951,10 @@ class ForgeLauncher:
         self._build_session_card()
         self._build_memory_card()
 
+        # Update notification card (only if behind)
+        if getattr(self, "_update_behind", 0) > 0:
+            self._build_update_card()
+
         # Register edge glow + border color + widget glow on the dashboard.
         # Wrapped in try/except so a failure here can't kill card management,
         # voice init, or state polling below.
@@ -1932,6 +1936,133 @@ class ForgeLauncher:
         name_entry.bind("<Return>", lambda e: on_save())
         dialog.wait_window()
 
+    def _show_telemetry_setup(self):
+        """Show first-run telemetry quick-setup dialog."""
+        self._telemetry_setup_done = False
+
+        dialog = ctk.CTkToplevel(self._root)
+        dialog.title("Quick Setup")
+        dialog.geometry("400x280")
+        dialog.transient(self._root)
+        dialog.grab_set()
+        dialog.configure(fg_color=COLORS["bg_dark"])
+        dialog.resizable(False, False)
+
+        # Center
+        dialog.update_idletasks()
+        px = self._root.winfo_x() + (self._root.winfo_width() - 400) // 2
+        py = self._root.winfo_y() + (self._root.winfo_height() - 280) // 2
+        dialog.geometry(f"+{max(0, px)}+{max(0, py)}")
+
+        ctk.CTkLabel(
+            dialog, text="Telemetry Setup",
+            font=ctk.CTkFont(*FONT_TITLE_SM),
+            text_color=COLORS["cyan"],
+        ).pack(pady=(16, 4))
+
+        ctk.CTkLabel(
+            dialog,
+            text="Paste the telemetry token from your admin.\nLeave blank to skip.",
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            text_color=COLORS["gray"],
+        ).pack(pady=(0, 12))
+
+        ctk.CTkLabel(
+            dialog, text="Token:",
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            text_color=COLORS["white"], anchor="w",
+        ).pack(fill="x", padx=40)
+
+        token_entry = ctk.CTkEntry(
+            dialog,
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            fg_color=COLORS["bg_card"],
+            text_color=COLORS["white"],
+            border_color=COLORS["border"],
+            border_width=1, corner_radius=4,
+            width=320, height=30,
+            placeholder_text="64-char hex token",
+        )
+        token_entry.pack(padx=40, pady=(2, 8))
+
+        ctk.CTkLabel(
+            dialog, text="Label:",
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            text_color=COLORS["white"], anchor="w",
+        ).pack(fill="x", padx=40)
+
+        # Auto-generate label from hostname + GPU
+        auto_label = ""
+        try:
+            import socket
+            hostname = socket.gethostname().split(".")[0].lower()
+            auto_label = hostname
+            try:
+                from forge.hardware import detect_gpu
+                gpu = detect_gpu()
+                gpu_name = gpu.get("name", "")
+                if gpu_name:
+                    short = gpu_name.split()[-1].lower()
+                    auto_label = f"{hostname}-{short}"
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        label_entry = ctk.CTkEntry(
+            dialog,
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            fg_color=COLORS["bg_card"],
+            text_color=COLORS["white"],
+            border_color=COLORS["border"],
+            border_width=1, corner_radius=4,
+            width=320, height=30,
+        )
+        label_entry.pack(padx=40, pady=(2, 12))
+        if auto_label:
+            label_entry.insert(0, auto_label)
+
+        btn_row = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_row.pack(fill="x", padx=40, pady=(0, 16))
+
+        def on_skip():
+            self._telemetry_setup_done = True
+            dialog.destroy()
+
+        def on_save():
+            tok = token_entry.get().strip()
+            lbl = label_entry.get().strip()
+            if tok:
+                self._config.set("telemetry_enabled", True)
+                self._config.set("telemetry_token", tok)
+                if lbl:
+                    self._config.set("telemetry_label", lbl)
+                self._config.save()
+            self._telemetry_setup_done = True
+            dialog.destroy()
+
+        ctk.CTkButton(
+            btn_row, text="Save", width=130,
+            fg_color=COLORS["cyan_dim"],
+            hover_color=COLORS["cyan"],
+            text_color=COLORS["bg_dark"],
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            height=32,
+            command=on_save,
+        ).pack(side="left", padx=(0, 8))
+
+        ctk.CTkButton(
+            btn_row, text="Skip", width=130,
+            fg_color=COLORS["bg_card"],
+            hover_color=COLORS["bg_panel"],
+            text_color=COLORS["gray"],
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            height=32,
+            command=on_skip,
+        ).pack(side="left")
+
+        dialog.protocol("WM_DELETE_WINDOW", on_skip)
+
     def _boot_sequence(self):
         # Set Ollama env vars (needed when launched via pythonw without .bat)
         os.environ.setdefault("OLLAMA_FLASH_ATTENTION", "1")
@@ -1950,6 +2081,17 @@ class ForgeLauncher:
                     break
             # Reload persona after setup
             persona = get_persona()
+
+        # First-run telemetry setup (if no token configured)
+        _telem_token = self._config.get("telemetry_token", "")
+        _telem_on = self._config.get("telemetry_enabled", False)
+        if not _telem_token and not _telem_on:
+            self._root.after(0, self._show_telemetry_setup)
+            import time as _time2
+            for _ in range(300):  # up to 30s
+                _time2.sleep(0.1)
+                if getattr(self, "_telemetry_setup_done", False) or not self._running:
+                    break
 
         # Update subtitle with persona name
         if persona.name != "Forge":
@@ -2055,6 +2197,34 @@ class ForgeLauncher:
         except Exception:
             pass
 
+        # Auto-update check (silent on failure)
+        self._update_behind = 0
+        try:
+            import subprocess as _sp
+            _flags = {}
+            if os.name == "nt":
+                _flags["creationflags"] = _sp.CREATE_NO_WINDOW
+            _sp.run(
+                ["git", "fetch", "origin"],
+                cwd=str(Path(__file__).parent.parent.parent),
+                capture_output=True, timeout=10, **_flags,
+            )
+            result = _sp.run(
+                ["git", "rev-list", "--count", "HEAD..origin/master"],
+                cwd=str(Path(__file__).parent.parent.parent),
+                capture_output=True, text=True, timeout=5, **_flags,
+            )
+            if result.returncode == 0:
+                count = int(result.stdout.strip())
+                self._update_behind = count
+                if count > 0:
+                    self._add_status(
+                        f"[!!] Update available: {count} new commit{'s' if count != 1 else ''}")
+                else:
+                    self._add_status("[OK] Forge is up to date")
+        except Exception:
+            pass  # Silent failure -- no network, no git, etc.
+
         time.sleep(0.2)
         persona = get_persona()
         self._add_status(f"[OK] {persona.name} is ready")
@@ -2070,6 +2240,51 @@ class ForgeLauncher:
         self._boot_complete = True
         if self._root and self._running:
             self._root.after(500, self._swap_to_dashboard)
+
+    # ── Update notification card ──
+
+    def _build_update_card(self):
+        """Build an update notification card at the top of the dashboard."""
+        n = getattr(self, "_update_behind", 0)
+        if n <= 0:
+            return
+
+        card = ctk.CTkFrame(
+            self._dash_frame, fg_color=COLORS["bg_card"],
+            corner_radius=8, border_width=1, border_color=COLORS["yellow"],
+        )
+        card.pack(fill="x", padx=12, pady=(8, 4))
+        self._update_card = card
+
+        inner = ctk.CTkFrame(card, fg_color="transparent")
+        inner.pack(fill="x", padx=12, pady=8)
+
+        ctk.CTkLabel(
+            inner,
+            text=f"Update Available  --  {n} new commit{'s' if n != 1 else ''}",
+            font=ctk.CTkFont(*FONT_MONO_BOLD),
+            text_color=COLORS["yellow"], anchor="w",
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            inner, text="Dismiss", width=130,
+            fg_color=COLORS["bg_panel"],
+            hover_color=COLORS["bg_card"],
+            text_color=COLORS["gray"],
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            height=28,
+            command=lambda: self._update_card.pack_forget(),
+        ).pack(side="right", padx=(4, 0))
+
+        ctk.CTkButton(
+            inner, text="Update Now", width=130,
+            fg_color=COLORS["cyan_dim"],
+            hover_color=COLORS["cyan"],
+            text_color=COLORS["bg_dark"],
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            height=28,
+            command=self._check_for_updates,
+        ).pack(side="right", padx=(4, 0))
 
     # ── Terminal launch ──
 
