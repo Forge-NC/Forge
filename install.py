@@ -20,7 +20,7 @@ def main():
     print("  " + "=" * 40)
 
     # 1. Create venv if it doesn't exist
-    print("\n  [1/4] Setting up Python environment...")
+    print("\n  [1/5] Setting up Python environment...")
     if not (venv_dir / "Scripts" / "python.exe").exists() and \
        not (venv_dir / "bin" / "python").exists():
         print("  [..] Creating virtual environment...")
@@ -49,7 +49,7 @@ def main():
     )
 
     # 2. Install Forge with all dependencies (core + voice)
-    print("\n  [2/4] Installing Forge + all dependencies...")
+    print("\n  [2/5] Installing Forge + all dependencies...")
     try:
         result = subprocess.run(
             [str(venv_python), "-m", "pip", "install", "-e",
@@ -72,7 +72,7 @@ def main():
         print(f"    {venv_python} -m pip install -e \"{project_dir}[voice]\"")
 
     # 3. Verify installation
-    print("\n  [3/4] Verifying installation...")
+    print("\n  [3/5] Verifying installation...")
     try:
         result = subprocess.run(
             [str(venv_python), "-c",
@@ -100,8 +100,40 @@ def main():
     except subprocess.CalledProcessError:
         print("  [--] Voice input: not available")
 
-    # 4. Create desktop shortcut
-    print("\n  [4/4] Creating desktop shortcut...")
+    # 4. Telemetry opt-in (optional)
+    print("\n  [4/5] Telemetry (optional)")
+    print("        Forge can send anonymous, redacted usage data to help us improve.")
+    print("        No prompts or AI responses are included -- only session metadata")
+    print("        (model name, token counts, duration, platform).")
+    try:
+        choice = input("\n        Enable anonymous telemetry? [y/N]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        choice = "n"
+
+    if choice in ("y", "yes"):
+        config_dir = Path.home() / ".forge"
+        config_path = config_dir / "config.yaml"
+        try:
+            config_dir.mkdir(parents=True, exist_ok=True)
+            if config_path.exists():
+                text = config_path.read_text(encoding="utf-8")
+                if "telemetry_enabled" not in text:
+                    text += ("\n# -- Telemetry --\n"
+                             "telemetry_enabled: true\n"
+                             "telemetry_redact: true\n")
+                else:
+                    text = text.replace(
+                        "telemetry_enabled: false",
+                        "telemetry_enabled: true")
+                config_path.write_text(text, encoding="utf-8")
+            print("  [OK] Telemetry enabled (change anytime in Settings)")
+        except Exception:
+            print("  [--] Could not update config -- enable telemetry later in Settings")
+    else:
+        print("  [OK] Telemetry disabled (enable later in Settings if you want)")
+
+    # 5. Create desktop shortcut
+    print("\n  [5/5] Creating desktop shortcut...")
     desktop = Path.home() / "Desktop"
 
     if os.name == "nt":

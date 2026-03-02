@@ -117,7 +117,7 @@ class ForgeSettingsDialog:
             corner_radius=6)
         self._tabs.pack(fill="both", expand=True, padx=8, pady=(4, 0))
 
-        for name in ["Safety", "Models", "Context", "Agent", "Voice", "UI"]:
+        for name in ["Safety", "Models", "Context", "Agent", "Voice", "UI", "Telemetry"]:
             self._tabs.add(name)
 
         self._build_safety_tab()
@@ -126,6 +126,7 @@ class ForgeSettingsDialog:
         self._build_agent_tab()
         self._build_voice_tab()
         self._build_ui_tab()
+        self._build_telemetry_tab()
 
         # ── Button row ──
         btn_frame = ctk.CTkFrame(self._win, fg_color=COLORS["bg_dark"],
@@ -399,6 +400,62 @@ class ForgeSettingsDialog:
         self._add_switch(tab, "show_billing_on_start", "Show Billing on Start")
         self._add_switch(tab, "show_cache_on_start", "Show Cache on Start")
         self._add_entry(tab, "starting_balance", "Starting Balance ($)")
+
+    # ── Telemetry tab ─────────────────────────────────────────────
+
+    def _build_telemetry_tab(self):
+        tab = self._tabs.tab("Telemetry")
+        tab.configure(fg_color=COLORS["bg_dark"])
+
+        ctk.CTkLabel(tab, text="  Anonymous Usage Data",
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["cyan_dim"],
+                     anchor="w").pack(fill="x", padx=16, pady=(8, 2))
+
+        self._add_desc(tab,
+            "When enabled, Forge sends a redacted audit summary at the end "
+            "of each session. This helps improve Forge. No user prompts or "
+            "AI responses are included unless you disable redaction below.")
+
+        self._add_switch(tab, "telemetry_enabled", "Enable Telemetry")
+        self._add_desc(tab,
+            "Opt-in: sends session metadata (model, tokens, duration, "
+            "threat counts) to the Forge team. Disabled by default.")
+
+        self._add_switch(tab, "telemetry_redact", "Redact Sensitive Data")
+        self._add_desc(tab,
+            "When ON (default), strips all user prompts, AI responses, "
+            "file contents, and shell commands. Only metadata is sent.")
+
+        self._add_entry(tab, "telemetry_url", "Custom Endpoint")
+        self._add_desc(tab,
+            "Leave blank to use the default Forge telemetry server. "
+            "Enterprise users can point this to their own receiver.")
+
+        # Separator
+        ctk.CTkFrame(tab, fg_color=COLORS["border"], height=1
+                     ).pack(fill="x", padx=16, pady=(10, 6))
+
+        ctk.CTkLabel(tab, text="  What gets sent (with redaction ON):",
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["white"],
+                     anchor="w").pack(fill="x", padx=16, pady=(4, 2))
+
+        for item in [
+            "Session duration, turn count, model name",
+            "Token counts (input/output/cached)",
+            "Threat detection counts (not content)",
+            "Continuity grade, plan verification pass/fail",
+            "Platform, Forge version, machine ID (hashed hostname)",
+        ]:
+            ctk.CTkLabel(tab, text=f"    * {item}",
+                         font=ctk.CTkFont(*FONT_MONO_XS),
+                         text_color=COLORS["gray"],
+                         anchor="w").pack(fill="x", padx=16, pady=0)
+
+        self._add_desc(tab,
+            "Machine ID is a one-way hash. "
+            "Your hostname cannot be recovered from it.")
 
     # ── Widget helpers ────────────────────────────────────────────
 

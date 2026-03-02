@@ -81,6 +81,11 @@ DEFAULTS = {
 
     # Enterprise
     "enterprise_mode": False,          # flips safety defaults for governance
+
+    # Telemetry (opt-in, disabled by default)
+    "telemetry_enabled": False,           # send redacted session data on exit
+    "telemetry_url": "",                  # custom endpoint (leave blank for default)
+    "telemetry_redact": True,             # strip prompts/responses (metadata only)
 }
 
 # Path to the config file
@@ -165,6 +170,13 @@ starting_balance: 50.0
 # ── Enterprise ──
 # When true: strict plan verification, forensics always on, safety >= 2
 enterprise_mode: false
+
+# ── Telemetry (opt-in) ──
+# When enabled, sends a redacted audit summary to the Forge team on session exit.
+# No user prompts or AI responses are included unless you set telemetry_redact to false.
+# telemetry_enabled: false
+# telemetry_url: ""
+# telemetry_redact: true
 """
 
 
@@ -402,6 +414,9 @@ _VALIDATORS = {
     "effects_enabled": lambda v: isinstance(v, bool),
     "router_enabled": lambda v: isinstance(v, bool),
     "enterprise_mode": lambda v: isinstance(v, bool),
+    "telemetry_enabled": lambda v: isinstance(v, bool),
+    "telemetry_url": lambda v: isinstance(v, str),
+    "telemetry_redact": lambda v: isinstance(v, bool),
 }
 
 

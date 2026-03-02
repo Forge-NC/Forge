@@ -1,0 +1,12 @@
+# Forge Telemetry - protect data directories from direct access
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^data/ - [F,L]
+    RewriteRule ^rate_limits/ - [F,L]
+</IfModule>
+
+# Fallback for servers without mod_rewrite
+<FilesMatch "\.(zip|txt)$">
+    Require all denied
+</FilesMatch>

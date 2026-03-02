@@ -970,16 +970,22 @@ class CommandHandler:
     # ── Audit export ──
 
     def _cmd_export(self, arg: str) -> bool:
-        """Export full audit package as a zip bundle."""
+        """Export full audit package as a zip bundle.
+
+        Flags: --redact (strip sensitive content), --upload (send to server)
+        """
         from forge.audit import AuditExporter
         e = self.engine
 
         redact = False
+        upload = False
         path_override = None
         parts = arg.strip().split()
         for p in parts:
             if p == "--redact":
                 redact = True
+            elif p == "--upload":
+                upload = True
             elif not p.startswith("-"):
                 path_override = Path(p)
 
@@ -999,11 +1005,39 @@ class CommandHandler:
                 model=e.llm.model,
                 cwd=e.cwd,
             )
-            out_path = exporter.export(package, path=path_override, redact=redact)
-            print(exporter.format_summary(package))
-            self.io.print_info(f"Audit exported: {out_path}")
-            if redact:
-                self.io.print_info("(Redacted mode — sensitive content stripped)")
+
+            if not upload:
+                out_path = exporter.export(
+                    package, path=path_override, redact=redact)
+                print(exporter.format_summary(package))
+                self.io.print_info(f"Audit exported: {out_path}")
+                if redact:
+                    self.io.print_info(
+                        "(Redacted mode — sensitive content stripped)")
+            else:
+                from forge.telemetry import upload_telemetry
+                use_redact = redact or e.config.get("telemetry_redact", True)
+                self.io.print_info("Uploading audit bundle...")
+                upload_telemetry(
+                    forensics=e.forensics,
+                    memory=e.memory,
+                    stats=e.stats,
+                    billing=e.billing,
+                    crucible=e.crucible,
+                    continuity=e.continuity,
+                    plan_verifier=e.plan_verifier,
+                    reliability=getattr(e, "reliability", None),
+                    session_start=e._session_start,
+                    turn_count=e._turn_count,
+                    model=e.llm.model,
+                    cwd=e.cwd,
+                    redact=use_redact,
+                    telemetry_url=e.config.get("telemetry_url", ""),
+                    blocking=True,
+                )
+                label = "Upload complete (redacted)" if use_redact \
+                    else "Upload complete"
+                self.io.print_info(label)
         except Exception as ex:
             self.io.print_error(f"Export failed: {ex}")
         return True

@@ -3259,4 +3259,29 @@ class ForgeEngine:
         if report_path:
             print(f"  {DIM}Forensics report: {report_path}{RESET}")
 
+        # Telemetry upload (non-blocking, silent fail)
+        if self.config.get("telemetry_enabled", False):
+            try:
+                from forge.telemetry import upload_telemetry
+                upload_telemetry(
+                    forensics=self.forensics,
+                    memory=self.memory,
+                    stats=self.stats,
+                    billing=self.billing,
+                    crucible=self.crucible,
+                    continuity=self.continuity,
+                    plan_verifier=self.plan_verifier,
+                    reliability=getattr(self, "reliability", None),
+                    session_start=self._session_start,
+                    turn_count=self._turn_count,
+                    model=self.llm.model,
+                    cwd=self.cwd,
+                    redact=self.config.get("telemetry_redact", True),
+                    telemetry_url=self.config.get("telemetry_url", ""),
+                    blocking=False,
+                )
+                print(f"  {DIM}Telemetry: uploaded{RESET}")
+            except Exception:
+                pass
+
         print(f"{BOLD}{'=' * 60}{RESET}\n")
