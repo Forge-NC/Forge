@@ -649,6 +649,15 @@ def print_help():
             ("/theme", "List available themes"),
             ("/theme <name>", "Switch UI color theme"),
         ]),
+        ("Updates & Admin", [
+            ("/update", "Check for available updates from GitHub"),
+            ("/update --yes", "Pull and apply updates"),
+            ("/admin", "List GitHub collaborators"),
+            ("/admin invite <user>", "Invite a collaborator (push access)"),
+            ("/admin remove <user>", "Remove a collaborator"),
+            ("/admin pending", "Show pending invitations"),
+            ("/admin token <label>", "Generate a telemetry token for a tester"),
+        ]),
         ("System", [
             ("/hardware", "Show GPU/CPU/RAM and model recommendation"),
             ("/cd [path]", "Change working directory"),

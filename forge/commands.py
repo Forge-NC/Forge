@@ -1129,6 +1129,267 @@ class CommandHandler:
             "Usage: /benchmark list | run [suite] | results [suite] | compare")
         return True
 
+    # ── Update & Admin commands ──
+
+    def _cmd_update(self, arg: str) -> bool:
+        """Check for and apply updates from the remote repository."""
+        import subprocess
+        from forge.tools.git_tools import _run_git, is_git_repo
+
+        forge_root = str(Path(__file__).resolve().parents[1])
+
+        if not is_git_repo(forge_root):
+            self.io.print_error("Forge is not installed from a git repository.")
+            return True
+
+        self.io.print_info("Checking for updates...")
+        fetch_out = _run_git(["fetch", "origin"], forge_root, timeout=15)
+        if fetch_out.startswith("Error:"):
+            self.io.print_error(f"Fetch failed: {fetch_out}")
+            return True
+
+        branch_out = _run_git(
+            ["rev-parse", "--abbrev-ref", "HEAD"], forge_root)
+        branch = branch_out.strip() if not branch_out.startswith("Error:") \
+            else "master"
+        remote_ref = f"origin/{branch}"
+
+        behind_out = _run_git(
+            ["rev-list", "--count", f"HEAD..{remote_ref}"], forge_root)
+        try:
+            behind_count = int(behind_out.strip())
+        except ValueError:
+            behind_count = 0
+
+        if behind_count == 0:
+            print(f"\n  {GREEN}Forge is up to date.{RESET}")
+            return True
+
+        self.io.print_info(f"{behind_count} new commit(s) available.")
+        changelog = _run_git(
+            ["log", "--oneline", f"HEAD..{remote_ref}"], forge_root)
+        print(f"\n{DIM}Incoming changes:{RESET}")
+        for line in changelog.strip().split("\n")[:15]:
+            print(f"  {line}")
+        if behind_count > 15:
+            print(f"  {DIM}... and {behind_count - 15} more{RESET}")
+
+        if arg.strip().lower() != "--yes":
+            print(f"\n{YELLOW}Run /update --yes to apply these changes.{RESET}")
+            return True
+
+        self.io.print_info("Pulling updates...")
+        pull_out = _run_git(
+            ["pull", "--ff-only", "origin", branch],
+            forge_root, timeout=30)
+        if "Error:" in pull_out or "fatal:" in pull_out.lower():
+            self.io.print_error(f"Pull failed: {pull_out}")
+            self.io.print_info(
+                "Try resolving manually: cd to Forge dir, run 'git pull'")
+            return True
+
+        print(f"\n  {GREEN}Updated successfully.{RESET}")
+
+        changed = _run_git(
+            ["diff", "--name-only", f"HEAD~{behind_count}", "HEAD"],
+            forge_root)
+        changed_files = changed.strip().split("\n") \
+            if changed.strip() else []
+
+        if "pyproject.toml" in changed_files:
+            self.io.print_info(
+                "pyproject.toml changed -- reinstalling dependencies...")
+            venv_py = Path(forge_root) / ".venv" / "Scripts" / "python.exe"
+            if not venv_py.exists():
+                venv_py = Path(forge_root) / ".venv" / "bin" / "python"
+            if venv_py.exists():
+                extra = {}
+                if os.name == "nt":
+                    extra["creationflags"] = subprocess.CREATE_NO_WINDOW
+                try:
+                    subprocess.run(
+                        [str(venv_py), "-m", "pip", "install", "-e",
+                         forge_root, "--quiet"],
+                        capture_output=True, timeout=120, **extra)
+                    self.io.print_info("Dependencies updated.")
+                except Exception as ex:
+                    self.io.print_error(f"pip install failed: {ex}")
+
+        core = {"forge/engine.py", "forge/commands.py", "forge/config.py",
+                "forge/context.py", "forge/__main__.py", "forge/__init__.py"}
+        core_hit = [f for f in changed_files if f in core]
+        if core_hit:
+            print(f"\n{YELLOW}Core files changed: {', '.join(core_hit)}")
+            print(f"Restart Forge to use the new code.{RESET}")
+        else:
+            self.io.print_info("No core files changed -- update is live.")
+        return True
+
+    def _cmd_admin(self, arg: str) -> bool:
+        """GitHub collaborator management and token administration."""
+        import subprocess
+        import json as _json
+        import secrets
+        import hashlib
+
+        forge_root = str(Path(__file__).resolve().parents[1])
+
+        # Detect repo owner/name from git remote
+        extra = {}
+        if os.name == "nt":
+            extra["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+        def _gh(gh_args, timeout=15):
+            try:
+                r = subprocess.run(
+                    ["gh"] + gh_args, capture_output=True, text=True,
+                    timeout=timeout, **extra)
+                return r.returncode == 0, r.stdout.strip()
+            except FileNotFoundError:
+                return False, "gh CLI not found. Install: https://cli.github.com"
+            except subprocess.TimeoutExpired:
+                return False, "Command timed out"
+
+        def _get_nwo():
+            from forge.tools.git_tools import _run_git
+            url = _run_git(["remote", "get-url", "origin"], forge_root)
+            if url.startswith("Error:"):
+                return None
+            url = url.strip().rstrip("/")
+            if url.endswith(".git"):
+                url = url[:-4]
+            if "github.com/" in url:
+                return url.split("github.com/")[-1]
+            if "github.com:" in url:
+                return url.split("github.com:")[-1]
+            return None
+
+        nwo = _get_nwo()
+
+        parts = arg.strip().split(None, 1)
+        sub = parts[0].lower() if parts else "list"
+        subarg = parts[1].strip() if len(parts) > 1 else ""
+
+        if sub == "list":
+            if not nwo:
+                self.io.print_error("Cannot detect GitHub repo from remote.")
+                return True
+            ok, out = _gh(["api", f"repos/{nwo}/collaborators"])
+            if not ok:
+                self.io.print_error(f"Failed: {out}")
+                return True
+            try:
+                collabs = _json.loads(out)
+            except _json.JSONDecodeError:
+                self.io.print_error("Invalid response from GitHub.")
+                return True
+            print(f"\n{BOLD}Collaborators on {nwo}:{RESET}")
+            for c in collabs:
+                login = c.get("login", "?")
+                role = c.get("role_name", c.get("permissions", {}).get("admin") and "admin" or "push")
+                print(f"  {CYAN}{login:20}{RESET} {DIM}{role}{RESET}")
+            if not collabs:
+                print(f"  {DIM}(none){RESET}")
+
+        elif sub == "invite":
+            if not subarg:
+                self.io.print_error("Usage: /admin invite <github-username>")
+                return True
+            if not nwo:
+                self.io.print_error("Cannot detect GitHub repo from remote.")
+                return True
+            ok, out = _gh(["api", "-X", "PUT",
+                          f"repos/{nwo}/collaborators/{subarg}",
+                          "-f", "permission=push"])
+            if ok:
+                print(f"  {GREEN}Invitation sent to {subarg} (push access).{RESET}")
+            else:
+                self.io.print_error(f"Failed: {out}")
+
+        elif sub == "remove":
+            if not subarg:
+                self.io.print_error("Usage: /admin remove <github-username>")
+                return True
+            if not nwo:
+                self.io.print_error("Cannot detect GitHub repo from remote.")
+                return True
+            ok, out = _gh(["api", "-X", "DELETE",
+                          f"repos/{nwo}/collaborators/{subarg}"])
+            if ok:
+                print(f"  {GREEN}Removed {subarg} from {nwo}.{RESET}")
+            else:
+                self.io.print_error(f"Failed: {out}")
+
+        elif sub == "pending":
+            if not nwo:
+                self.io.print_error("Cannot detect GitHub repo from remote.")
+                return True
+            ok, out = _gh(["api", f"repos/{nwo}/invitations"])
+            if not ok:
+                self.io.print_error(f"Failed: {out}")
+                return True
+            try:
+                invites = _json.loads(out)
+            except _json.JSONDecodeError:
+                self.io.print_error("Invalid response from GitHub.")
+                return True
+            print(f"\n{BOLD}Pending invitations:{RESET}")
+            for inv in invites:
+                invitee = inv.get("invitee", {}).get("login", "?")
+                print(f"  {CYAN}{invitee:20}{RESET} "
+                      f"{DIM}id={inv.get('id')}{RESET}")
+            if not invites:
+                print(f"  {DIM}(none){RESET}")
+
+        elif sub == "token":
+            if not subarg:
+                self.io.print_error("Usage: /admin token <label>")
+                return True
+            label = subarg.replace(" ", "-")
+            token = secrets.token_hex(32)
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+            print(f"\n{BOLD}Generated telemetry token:{RESET}")
+            print(f"  {GREEN}Token:{RESET}  {token}")
+            print(f"  {DIM}Hash:   {token_hash}{RESET}")
+            print(f"  {DIM}Label:  {label}{RESET}")
+
+            # Attempt server registration
+            admin_token = self.engine.config.get("telemetry_token", "")
+            if admin_token:
+                try:
+                    import requests
+                    url = self.engine.config.get("telemetry_url", "")
+                    if not url:
+                        url = "https://dirt-star.com/Forge/token_admin.php"
+                    else:
+                        url = url.replace("telemetry_receiver.php",
+                                          "token_admin.php")
+                    resp = requests.post(url, json={
+                        "action": "register",
+                        "token_hash": token_hash,
+                        "label": label,
+                    }, headers={"X-Forge-Token": admin_token}, timeout=5)
+                    if resp.status_code == 200:
+                        print(f"  {GREEN}Registered on server.{RESET}")
+                    else:
+                        print(f"  {YELLOW}Server registration failed "
+                              f"({resp.status_code}). Add hash to "
+                              f"tokens.json manually.{RESET}")
+                except Exception:
+                    print(f"  {YELLOW}Could not reach server. "
+                          f"Add hash to tokens.json manually.{RESET}")
+            else:
+                print(f"\n  {DIM}No telemetry_token in config -- "
+                      f"add hash to server/data/tokens.json manually.{RESET}")
+            print(f"\n{DIM}Give the token (not the hash) to the tester.{RESET}")
+
+        else:
+            self.io.print_error(
+                "Usage: /admin [list | invite <user> | remove <user> "
+                "| pending | token <label>]")
+        return True
+
     # ── Command dispatch table ──
 
     _COMMANDS = {
@@ -1178,4 +1439,6 @@ class CommandHandler:
         "/synapse": _cmd_synapse,
         "/export": _cmd_export,
         "/benchmark": _cmd_benchmark,
+        "/update": _cmd_update,
+        "/admin": _cmd_admin,
     }

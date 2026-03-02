@@ -2711,6 +2711,8 @@ class ForgeLauncher:
             ("Test Suite", None, self._open_test_runner),
             ("Run All Tests", None, self._run_all_tests),
             ("Nightly Tests", None, self._open_nightly_settings),
+            ("Check for Updates", None, self._check_for_updates),
+            ("Admin Panel", None, self._open_admin_panel),
             None,
             ("About", None, self._show_about),
             ("Quit", None, self._on_close),
@@ -2866,6 +2868,17 @@ class ForgeLauncher:
         from forge.ui.test_runner import TestRunnerDialog
         runner = TestRunnerDialog(self._root)
         self._root.after(300, runner._run_all)
+
+    def _check_for_updates(self):
+        """Open the update checker dialog."""
+        from forge.ui.admin_panel import UpdateCheckDialog
+        UpdateCheckDialog(self._root)
+
+    def _open_admin_panel(self):
+        """Open the admin panel for collaborator and token management."""
+        from forge.ui.admin_panel import AdminPanelDialog
+        from forge.config import ForgeConfig
+        AdminPanelDialog(self._root, ForgeConfig())
 
 
 # ──────────────────────────────────────────────────────────────────
