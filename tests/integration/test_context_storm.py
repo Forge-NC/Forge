@@ -15,7 +15,7 @@ from tests.integration.ollama_stub import ScriptedTurn
 @pytest.mark.timeout(600)  # 10min ceiling for live mode
 class TestContextStorm:
 
-    def test_rapid_swaps_capped(self, harness, ollama_stub, verifier, is_live):
+    def test_rapid_swaps_capped(self, harness, ollama_stub, verifier, is_live, nightly_params):
         """Turns with small context and long responses force many swaps."""
         long_text = " ".join(["word"] * 200)
         ollama_stub.set_default_response(ScriptedTurn(
@@ -24,8 +24,13 @@ class TestContextStorm:
             prompt_eval_count=300,
         ))
 
-        engine = harness.create_engine(ctx_max_tokens=1200)
+        ctx_tokens = 1200
+        if nightly_params and nightly_params.get("ctx_tokens"):
+            ctx_tokens = nightly_params["ctx_tokens"]
+        engine = harness.create_engine(ctx_max_tokens=ctx_tokens)
         turn_count = 20 if is_live else 60
+        if nightly_params and nightly_params.get("turns"):
+            turn_count = nightly_params["turns"]
 
         for i in range(turn_count):
             harness.run_single_turn(
@@ -47,7 +52,7 @@ class TestContextStorm:
         verifier.check_all()
 
     def test_continuity_grade_stays_valid(
-            self, harness, ollama_stub, verifier, is_live):
+            self, harness, ollama_stub, verifier, is_live, nightly_params):
         """Grade should be a valid letter (A-F) throughout heavy swapping."""
         long_text = " ".join(["analysis"] * 150)
         ollama_stub.set_default_response(ScriptedTurn(
@@ -56,10 +61,15 @@ class TestContextStorm:
             prompt_eval_count=200,
         ))
 
-        engine = harness.create_engine(ctx_max_tokens=1200)
+        ctx_tokens = 1200
+        if nightly_params and nightly_params.get("ctx_tokens"):
+            ctx_tokens = nightly_params["ctx_tokens"]
+        engine = harness.create_engine(ctx_max_tokens=ctx_tokens)
         from forge.continuity import score_to_grade
 
         turn_count = 15 if is_live else 40
+        if nightly_params and nightly_params.get("turns"):
+            turn_count = nightly_params["turns"]
 
         for i in range(turn_count):
             harness.run_single_turn(f"Analyze component {i} in detail.")
@@ -77,7 +87,7 @@ class TestContextStorm:
 
         verifier.check_all()
 
-    def test_eviction_log_capped(self, harness, ollama_stub, verifier, is_live):
+    def test_eviction_log_capped(self, harness, ollama_stub, verifier, is_live, nightly_params):
         """Eviction log should not grow unbounded under heavy swapping."""
         long_text = " ".join(["detailed"] * 180)
         ollama_stub.set_default_response(ScriptedTurn(
@@ -86,8 +96,13 @@ class TestContextStorm:
             prompt_eval_count=250,
         ))
 
-        engine = harness.create_engine(ctx_max_tokens=1200)
+        ctx_tokens = 1200
+        if nightly_params and nightly_params.get("ctx_tokens"):
+            ctx_tokens = nightly_params["ctx_tokens"]
+        engine = harness.create_engine(ctx_max_tokens=ctx_tokens)
         turn_count = 15 if is_live else 50
+        if nightly_params and nightly_params.get("turns"):
+            turn_count = nightly_params["turns"]
 
         for i in range(turn_count):
             harness.run_single_turn(f"Write report section {i}.")

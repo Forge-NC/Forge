@@ -76,6 +76,7 @@ class AnimState(enum.Enum):
     SWAPPING = "swapping"
     ERROR = "error"
     THREAT = "threat"
+    PASS = "pass"
 
 
 @dataclass
@@ -140,6 +141,12 @@ STATE_CONFIGS = {
         hue_center=0.0, hue_range=0.04,
         base_brightness=0.70, intensity=1.5, fps=20,
         saturation=1.0, render_mode="flash",
+    ),
+    AnimState.PASS: StateConfig(
+        wave_count=1, speed=0.3, sigma=0.35,
+        hue_center=0.33, hue_range=0.05,
+        base_brightness=0.70, intensity=0.9, fps=10,
+        saturation=0.85, render_mode="radial",
     ),
 }
 
@@ -2589,6 +2596,17 @@ class ForgeLauncher:
         config = ForgeConfig()
         ForgeSettingsDialog(self._root, config)
 
+    def _open_nightly_settings(self):
+        """Open Settings dialog pre-selected to the Nightly tab."""
+        from forge.ui.settings_dialog import ForgeSettingsDialog
+        from forge.config import ForgeConfig
+        config = ForgeConfig()
+        dialog = ForgeSettingsDialog(self._root, config)
+        try:
+            dialog._tabs.set("Nightly")
+        except Exception:
+            pass
+
     def _show_about(self):
         from forge import __version__
         dlg = ctk.CTkToplevel(self._root)
@@ -2692,6 +2710,7 @@ class ForgeLauncher:
             ("Model Manager", None, self._open_model_manager),
             ("Test Suite", None, self._open_test_runner),
             ("Run All Tests", None, self._run_all_tests),
+            ("Nightly Tests", None, self._open_nightly_settings),
             None,
             ("About", None, self._show_about),
             ("Quit", None, self._on_close),

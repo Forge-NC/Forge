@@ -317,6 +317,9 @@ def main():
         "--scenarios", type=str, default=None,
         help="Scenario range, e.g. '1-5' or '3,7,11' (overrides presets)")
     parser.add_argument(
+        "--full-sweep", action="store_true",
+        help="Run ALL live + stub scenarios at max turns (delegates to nightly_smart.py)")
+    parser.add_argument(
         "--fail-fast", action="store_true",
         help="Stop on first failed iteration")
     parser.add_argument(
@@ -324,6 +327,14 @@ def main():
         help="Timeout per test in seconds (auto-detected by default)")
 
     args = parser.parse_args()
+
+    # Full-sweep delegates to nightly_smart.py
+    if args.full_sweep:
+        smart_script = REPO_ROOT / "scripts" / "nightly_smart.py"
+        sys.exit(subprocess.run(
+            [sys.executable, str(smart_script), "--full-sweep"],
+            cwd=str(REPO_ROOT),
+        ).returncode)
 
     # Resolve test file list
     if args.scenarios:

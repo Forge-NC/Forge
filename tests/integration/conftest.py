@@ -29,6 +29,14 @@ def pytest_addoption(parser):
         "--live-model", default="qwen2.5-coder:14b",
         help="Model to use in live mode (default: qwen2.5-coder:14b)",
     )
+    parser.addoption(
+        "--nightly-turns", default=None, type=int,
+        help="Override turn count for adaptive nightly runs",
+    )
+    parser.addoption(
+        "--nightly-ctx-tokens", default=None, type=int,
+        help="Override context token limit for adaptive nightly runs",
+    )
 
 
 def pytest_configure(config):
@@ -96,6 +104,19 @@ def harness(ollama_stub, tmp_path, monkeypatch, is_live, request):
 def engine(harness):
     """Create and return a ready-to-use ForgeEngine from the harness."""
     return harness.create_engine()
+
+
+@pytest.fixture
+def nightly_params(request):
+    """Nightly overrides for turn count and context tokens.
+
+    Returns None if neither --nightly-turns nor --nightly-ctx-tokens was given.
+    """
+    turns = request.config.getoption("--nightly-turns", default=None)
+    ctx = request.config.getoption("--nightly-ctx-tokens", default=None)
+    if turns is None and ctx is None:
+        return None
+    return {"turns": turns, "ctx_tokens": ctx}
 
 
 @pytest.fixture

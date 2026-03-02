@@ -14,11 +14,12 @@
  */
 
 // -- Configuration --
-$API_KEY = 'fg_tel_2026_e7eb55900b70bd84eaeb62f7cd0153e7';
 $DATA_DIR = __DIR__ . '/data';
 $RATE_LIMIT_DIR = __DIR__ . '/rate_limits';
 $MAX_ZIP_SIZE = 512 * 1024;  // 512KB
 $RATE_LIMIT_MAX = 10;        // per machine per hour
+
+require_once __DIR__ . '/auth.php';
 
 // -- CORS headers for preflight --
 header('Content-Type: application/json');
@@ -30,13 +31,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-// -- Check API key --
-$key = $_SERVER['HTTP_X_FORGE_KEY'] ?? '';
-if ($key !== $API_KEY) {
-    http_response_code(403);
-    echo json_encode(['error' => 'Invalid API key']);
-    exit;
-}
+// -- Authenticate (per-user token or legacy shared key) --
+$auth = require_auth();
 
 // -- Check file upload --
 if (!isset($_FILES['bundle']) || $_FILES['bundle']['error'] !== UPLOAD_ERR_OK) {

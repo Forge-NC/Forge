@@ -15,3 +15,11 @@ stress_results.json
 .mypy_cache/
 .pytest_cache/
 htmlcov/
+
+# Server runtime data (tokens, profiles, logs)
+server/data/tokens.json
+server/data/profiles/
+server/data/fleet_analytics.json
+server/data/alert_config.json
+server/data/alert_log.jsonl
+server/rate_limits/

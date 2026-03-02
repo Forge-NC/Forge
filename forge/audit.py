@@ -146,19 +146,38 @@ class AuditExporter:
             h = hashlib.sha256(content).hexdigest()
             file_hashes[name] = f"sha256:{h}"
 
-        machine_id = hashlib.sha256(
-            socket.gethostname().encode()).hexdigest()[:12]
+        from forge.machine_id import get_machine_id, get_machine_label
+        machine_id = get_machine_id()
+
+        # Hardware info for fleet capability matrix
+        try:
+            from forge.hardware import get_hardware_summary
+            hw = get_hardware_summary()
+            gpu = hw.get("gpu") or {}
+            hardware_info = {
+                "gpu_name": gpu.get("name", "unknown"),
+                "vram_total_mb": gpu.get("vram_total_mb", 0),
+                "driver_version": gpu.get("driver_version", ""),
+                "cuda_version": gpu.get("cuda_version", ""),
+                "cpu": hw.get("cpu", ""),
+                "ram_mb": hw.get("ram_mb", 0),
+                "os_version": platform.platform(),
+            }
+        except Exception:
+            hardware_info = {"gpu_name": "unknown"}
 
         manifest = {
             "forge_version": FORGE_VERSION,
             "schema_version": SCHEMA_VERSION,
             "export_timestamp": datetime.now().isoformat(),
             "machine_id": machine_id,
+            "machine_label": get_machine_label(),
             "platform": platform.platform(),
             "model": package.get("session", {}).get("model", ""),
             "config_hash": config_hash,
             "redacted": redact,
             "file_hashes": file_hashes,
+            "hardware": hardware_info,
         }
         manifest_bytes = json.dumps(
             manifest, indent=2, ensure_ascii=False).encode("utf-8")

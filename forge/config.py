@@ -86,6 +86,24 @@ DEFAULTS = {
     "telemetry_enabled": False,           # send redacted session data on exit
     "telemetry_url": "",                  # custom endpoint (leave blank for default)
     "telemetry_redact": True,             # strip prompts/responses (metadata only)
+    "telemetry_token": "",                # per-user auth token (leave blank for legacy shared key)
+    "telemetry_label": "",                # optional machine nickname, e.g. "DirtStar-RTX5070"
+
+    # Adaptive Nightly Testing
+    "nightly_manifest_url": "",                 # custom manifest endpoint (blank = default)
+    "nightly_max_duration_m": 60,               # max nightly run time in minutes
+    "nightly_auto_close": False,                # auto-close heavy processes before nightly
+    "nightly_auto_close_list": [],              # process names to auto-close
+    "nightly_resource_ram_threshold_mb": 500,   # flag processes using more RAM than this
+    "nightly_resource_vram_threshold_mb": 200,  # flag processes using more VRAM than this
+    "nightly_force_kill": False,                # allow force-kill after graceful timeout
+    "nightly_show_cortex": False,               # show Neural Cortex overlay during tests
+    "nightly_cortex_position": "top_right",     # overlay corner position
+    "nightly_cortex_size": 180,                 # brain render size in pixels
+    "nightly_auto_bisect": False,               # auto git-bisect on new failures
+    "nightly_auto_ceiling": False,              # auto binary-search for max stable turns
+    "adaptive_expand_limits": False,            # if false, server can only reduce scope
+    "nightly_schedule_time": "03:00",           # time for scheduled nightly runs (HH:MM)
 }
 
 # Path to the config file
@@ -527,3 +545,8 @@ class ForgeConfig:
     @property
     def path(self) -> Path:
         return self._path
+
+
+def load_config() -> ForgeConfig:
+    """Convenience alias — returns a ForgeConfig instance."""
+    return ForgeConfig()

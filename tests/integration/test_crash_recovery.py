@@ -19,7 +19,7 @@ from tests.integration.ollama_stub import ScriptedTurn
 class TestCrashRecovery:
 
     def test_state_files_valid_after_normal_shutdown(
-            self, harness, ollama_stub, verifier, is_live):
+            self, harness, ollama_stub, verifier, is_live, nightly_params):
         """After normal usage and save, all state files must be valid."""
         ollama_stub.set_default_response(ScriptedTurn(
             text="Changes applied.",
@@ -27,8 +27,13 @@ class TestCrashRecovery:
             prompt_eval_count=25,
         ))
 
-        engine = harness.create_engine(ctx_max_tokens=4000)
+        ctx_tokens = 4000
+        if nightly_params and nightly_params.get("ctx_tokens"):
+            ctx_tokens = nightly_params["ctx_tokens"]
+        engine = harness.create_engine(ctx_max_tokens=ctx_tokens)
         turn_count = 5 if is_live else 10
+        if nightly_params and nightly_params.get("turns"):
+            turn_count = nightly_params["turns"]
 
         for i in range(turn_count):
             harness.run_single_turn(f"Edit file {i}")
@@ -47,7 +52,7 @@ class TestCrashRecovery:
         verifier.check_state_files()
 
     def test_no_orphan_temp_files(
-            self, harness, ollama_stub, verifier, is_live):
+            self, harness, ollama_stub, verifier, is_live, nightly_params):
         """No .forge_tmp files should remain after operations."""
         ollama_stub.set_default_response(ScriptedTurn(
             text="Written.",
@@ -55,8 +60,13 @@ class TestCrashRecovery:
             prompt_eval_count=20,
         ))
 
-        engine = harness.create_engine(ctx_max_tokens=4000)
+        ctx_tokens = 4000
+        if nightly_params and nightly_params.get("ctx_tokens"):
+            ctx_tokens = nightly_params["ctx_tokens"]
+        engine = harness.create_engine(ctx_max_tokens=ctx_tokens)
         turn_count = 3 if is_live else 5
+        if nightly_params and nightly_params.get("turns"):
+            turn_count = nightly_params["turns"]
 
         for i in range(turn_count):
             harness.run_single_turn(f"Write some data {i}")
@@ -68,7 +78,7 @@ class TestCrashRecovery:
             f"Found orphaned temp files: {orphans}")
 
     def test_billing_json_always_valid(
-            self, harness, ollama_stub, is_live, tmp_path):
+            self, harness, ollama_stub, is_live, tmp_path, nightly_params):
         """billing.json must be valid JSON after every save."""
         ollama_stub.set_default_response(ScriptedTurn(
             text="OK.",
@@ -76,8 +86,13 @@ class TestCrashRecovery:
             prompt_eval_count=20,
         ))
 
-        engine = harness.create_engine(ctx_max_tokens=4000)
+        ctx_tokens = 4000
+        if nightly_params and nightly_params.get("ctx_tokens"):
+            ctx_tokens = nightly_params["ctx_tokens"]
+        engine = harness.create_engine(ctx_max_tokens=ctx_tokens)
         turn_count = 5 if is_live else 20
+        if nightly_params and nightly_params.get("turns"):
+            turn_count = nightly_params["turns"]
 
         for i in range(turn_count):
             harness.run_single_turn(f"Turn {i}")
@@ -95,12 +110,17 @@ class TestCrashRecovery:
                 assert isinstance(data, dict), f"Turn {i}: billing is not dict"
 
     def test_config_survives_restart(
-            self, harness, ollama_stub, is_live, tmp_path):
+            self, harness, ollama_stub, is_live, tmp_path, nightly_params):
         """Config file should be readable by a new engine instance."""
         ollama_stub.set_default_response(ScriptedTurn(text="OK."))
 
-        engine = harness.create_engine(ctx_max_tokens=4000)
+        ctx_tokens = 4000
+        if nightly_params and nightly_params.get("ctx_tokens"):
+            ctx_tokens = nightly_params["ctx_tokens"]
+        engine = harness.create_engine(ctx_max_tokens=ctx_tokens)
         turn_count = 3 if is_live else 5
+        if nightly_params and nightly_params.get("turns"):
+            turn_count = nightly_params["turns"]
         for i in range(turn_count):
             harness.run_single_turn(f"Turn {i}")
 
@@ -112,7 +132,7 @@ class TestCrashRecovery:
         assert "default_model" in data
 
     def test_session_save_load_roundtrip(
-            self, harness, ollama_stub, verifier, is_live):
+            self, harness, ollama_stub, verifier, is_live, nightly_params):
         """Context session should survive save/load cycle."""
         ollama_stub.set_default_response(ScriptedTurn(
             text="Reviewed the code.",
@@ -120,8 +140,13 @@ class TestCrashRecovery:
             prompt_eval_count=30,
         ))
 
-        engine = harness.create_engine(ctx_max_tokens=4000)
+        ctx_tokens = 4000
+        if nightly_params and nightly_params.get("ctx_tokens"):
+            ctx_tokens = nightly_params["ctx_tokens"]
+        engine = harness.create_engine(ctx_max_tokens=ctx_tokens)
         turn_count = 5 if is_live else 15
+        if nightly_params and nightly_params.get("turns"):
+            turn_count = nightly_params["turns"]
 
         for i in range(turn_count):
             harness.run_single_turn(f"Review function {i}")

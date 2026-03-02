@@ -117,7 +117,7 @@ class ForgeSettingsDialog:
             corner_radius=6)
         self._tabs.pack(fill="both", expand=True, padx=8, pady=(4, 0))
 
-        for name in ["Safety", "Models", "Context", "Agent", "Voice", "UI", "Telemetry"]:
+        for name in ["Safety", "Models", "Context", "Agent", "Voice", "UI", "Nightly", "Telemetry"]:
             self._tabs.add(name)
 
         self._build_safety_tab()
@@ -126,6 +126,7 @@ class ForgeSettingsDialog:
         self._build_agent_tab()
         self._build_voice_tab()
         self._build_ui_tab()
+        self._build_nightly_tab()
         self._build_telemetry_tab()
 
         # ── Button row ──
@@ -401,6 +402,186 @@ class ForgeSettingsDialog:
         self._add_switch(tab, "show_cache_on_start", "Show Cache on Start")
         self._add_entry(tab, "starting_balance", "Starting Balance ($)")
 
+    # ── Nightly tab ──────────────────────────────────────────────
+
+    def _build_nightly_tab(self):
+        tab = self._tabs.tab("Nightly")
+        tab.configure(fg_color=COLORS["bg_dark"])
+
+        # ── Schedule section ──
+        ctk.CTkLabel(tab, text="  Nightly Schedule",
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["cyan_dim"],
+                     anchor="w").pack(fill="x", padx=16, pady=(8, 2))
+        self._add_desc(tab, "Run automated stress tests on a daily schedule.")
+
+        self._add_entry(tab, "nightly_schedule_time", "Schedule Time")
+        self._add_desc(tab, "24-hour format (HH:MM)")
+
+        btn_row = ctk.CTkFrame(tab, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=4)
+        install_btn = ctk.CTkButton(
+            btn_row, text="Install Schedule", width=140,
+            fg_color=COLORS["cyan_dim"], hover_color=COLORS["cyan"],
+            text_color=COLORS["bg_dark"], font=ctk.CTkFont(*FONT_MONO_SM),
+            command=self._install_schedule)
+        install_btn.pack(side="left", padx=(0, 8))
+        remove_btn = ctk.CTkButton(
+            btn_row, text="Remove Schedule", width=140,
+            fg_color=COLORS["bg_card"], hover_color=COLORS["bg_panel"],
+            text_color=COLORS["gray"], font=ctk.CTkFont(*FONT_MONO_SM),
+            command=self._remove_schedule)
+        remove_btn.pack(side="left")
+
+        self._schedule_status = ctk.CTkLabel(
+            tab, text="  Checking...",
+            font=ctk.CTkFont(*FONT_MONO_XS),
+            text_color=COLORS["gray"], anchor="w")
+        self._schedule_status.pack(fill="x", padx=16, pady=(0, 4))
+        self._win.after(100, self._update_schedule_status)
+
+        self._add_desc(tab,
+            "Creates a Windows Task Scheduler entry or Linux cron job")
+
+        # Separator
+        ctk.CTkFrame(tab, fg_color=COLORS["border"], height=1
+                     ).pack(fill="x", padx=16, pady=(10, 6))
+
+        # ── Test Settings section ──
+        ctk.CTkLabel(tab, text="  Test Settings",
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["cyan_dim"],
+                     anchor="w").pack(fill="x", padx=16, pady=(8, 2))
+
+        self._add_slider(tab, "nightly_max_duration_m", "Max Duration (min)",
+                         5, 240, 47, fmt="{:.0f}")
+        self._add_switch(tab, "nightly_show_cortex", "Show Cortex Overlay")
+        self._add_desc(tab,
+            "Display animated Neural Cortex brain during nightly tests")
+        self._add_dropdown(tab, "nightly_cortex_position", "Cortex Position",
+                           ["top_right", "top_left", "bottom_right", "bottom_left"])
+        self._add_slider(tab, "nightly_cortex_size", "Cortex Size",
+                         100, 400, 30, fmt="{:.0f}")
+
+        # Separator
+        ctk.CTkFrame(tab, fg_color=COLORS["border"], height=1
+                     ).pack(fill="x", padx=16, pady=(10, 6))
+
+        # ── Resource Guard section ──
+        ctk.CTkLabel(tab, text="  Resource Guard",
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["cyan_dim"],
+                     anchor="w").pack(fill="x", padx=16, pady=(8, 2))
+        self._add_desc(tab,
+            "Detects heavy processes before tests to free GPU/RAM")
+
+        self._add_switch(tab, "nightly_auto_close", "Auto-close Processes")
+        self._add_desc(tab,
+            "Automatically close listed processes before nightly tests")
+
+        # Process list — special handling (list stored as list, displayed as CSV)
+        row = self._add_row(tab, "Process List")
+        current_list = self._config.get("nightly_auto_close_list", [])
+        initial_str = ", ".join(current_list) if isinstance(current_list, list) else str(current_list)
+        self._nightly_process_entry = ctk.CTkEntry(
+            row, font=ctk.CTkFont(*FONT_MONO_SM),
+            fg_color=COLORS["bg_card"], text_color=COLORS["white"],
+            border_color=COLORS["border"], border_width=1, corner_radius=4,
+            width=200, height=28)
+        self._nightly_process_entry.insert(0, initial_str)
+        self._nightly_process_entry.pack(side="right")
+        self._add_desc(tab,
+            "Comma-separated, e.g. chrome.exe, discord.exe, steam.exe")
+
+        self._add_entry(tab, "nightly_resource_ram_threshold_mb", "RAM Threshold (MB)")
+        self._add_entry(tab, "nightly_resource_vram_threshold_mb", "VRAM Threshold (MB)")
+        self._add_switch(tab, "nightly_force_kill", "Force Kill")
+        self._add_desc(tab,
+            "Force-kill processes after 10s graceful timeout (dangerous)")
+
+        # Separator
+        ctk.CTkFrame(tab, fg_color=COLORS["border"], height=1
+                     ).pack(fill="x", padx=16, pady=(10, 6))
+
+        # ── Advanced section ──
+        ctk.CTkLabel(tab, text="  Advanced",
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["cyan_dim"],
+                     anchor="w").pack(fill="x", padx=16, pady=(8, 2))
+
+        self._add_switch(tab, "nightly_auto_bisect", "Auto-bisect")
+        self._add_desc(tab,
+            "Automatically git-bisect when a previously passing test fails")
+        self._add_switch(tab, "nightly_auto_ceiling", "Auto Ceiling")
+        self._add_desc(tab,
+            "Binary-search for max stable turn count per scenario")
+        self._add_switch(tab, "adaptive_expand_limits", "Allow Server Expansion")
+        self._add_desc(tab,
+            "Let server manifest increase scope beyond local defaults "
+            "(reduce-only when OFF)")
+
+    # ── Nightly schedule helpers ──────────────────────────────────
+
+    def _install_schedule(self):
+        """Install nightly schedule via forge.scheduler."""
+        try:
+            from forge.scheduler import install_schedule
+            time_str = self._widgets.get("nightly_schedule_time", ("entry", None))
+            if time_str and time_str[0] == "entry":
+                time_val = time_str[1].get().strip() or "03:00"
+            else:
+                time_val = "03:00"
+            result = install_schedule(time_val)
+            if result.get("success"):
+                self._schedule_status.configure(
+                    text=f"  Scheduled daily at {time_val}",
+                    text_color=COLORS["green"])
+            else:
+                self._schedule_status.configure(
+                    text=f"  Error: {result.get('error', 'Unknown')}",
+                    text_color=COLORS.get("red", "#f85149"))
+        except Exception as e:
+            self._schedule_status.configure(
+                text=f"  Error: {e}",
+                text_color=COLORS.get("red", "#f85149"))
+
+    def _remove_schedule(self):
+        """Remove nightly schedule."""
+        try:
+            from forge.scheduler import remove_schedule
+            result = remove_schedule()
+            if result.get("success"):
+                self._schedule_status.configure(
+                    text="  Not scheduled", text_color=COLORS["gray"])
+            else:
+                self._schedule_status.configure(
+                    text=f"  Error: {result.get('error', 'Unknown')}",
+                    text_color=COLORS.get("red", "#f85149"))
+        except Exception as e:
+            self._schedule_status.configure(
+                text=f"  Error: {e}",
+                text_color=COLORS.get("red", "#f85149"))
+
+    def _update_schedule_status(self):
+        """Check current schedule status and update label."""
+        try:
+            from forge.scheduler import get_schedule_info
+            info = get_schedule_info()
+            if info.get("scheduled"):
+                time_str = info.get("time", "?")
+                next_run = info.get("next_run", "")
+                text = f"  Scheduled daily at {time_str}"
+                if next_run:
+                    text += f" (next: {next_run})"
+                self._schedule_status.configure(
+                    text=text, text_color=COLORS["green"])
+            else:
+                self._schedule_status.configure(
+                    text="  Not scheduled", text_color=COLORS["gray"])
+        except Exception:
+            self._schedule_status.configure(
+                text="  Status unknown", text_color=COLORS["gray"])
+
     # ── Telemetry tab ─────────────────────────────────────────────
 
     def _build_telemetry_tab(self):
@@ -662,6 +843,12 @@ class ForgeSettingsDialog:
                 continue
 
             self._config.set(key, value)
+
+        # Handle process list (stored as list, displayed as comma-separated string)
+        if hasattr(self, "_nightly_process_entry"):
+            raw = self._nightly_process_entry.get().strip()
+            items = [s.strip() for s in raw.split(",") if s.strip()]
+            self._config.set("nightly_auto_close_list", items)
 
         self._config.save()
 

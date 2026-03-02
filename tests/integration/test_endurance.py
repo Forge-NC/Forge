@@ -14,7 +14,7 @@ from tests.integration.ollama_stub import ScriptedTurn
 @pytest.mark.timeout(1800)  # 30min ceiling (live 50 turns can be slow)
 class TestEndurance:
 
-    def test_endurance_no_corruption(self, harness, ollama_stub, verifier, is_live):
+    def test_endurance_no_corruption(self, harness, ollama_stub, verifier, is_live, nightly_params):
         """Run many turns and verify state integrity throughout."""
         ollama_stub.set_default_response(ScriptedTurn(
             text="Understood. I have reviewed the code and everything looks correct.",
@@ -22,11 +22,16 @@ class TestEndurance:
             prompt_eval_count=50,
         ))
 
-        engine = harness.create_engine(ctx_max_tokens=4000)
+        ctx_tokens = 4000
+        if nightly_params and nightly_params.get("ctx_tokens"):
+            ctx_tokens = nightly_params["ctx_tokens"]
+        engine = harness.create_engine(ctx_max_tokens=ctx_tokens)
 
         # Live mode: 50 turns (real inference ~5-10s each)
         # Stub mode: 220 turns (scripted, <0.2s each)
         turn_count = 50 if is_live else 220
+        if nightly_params and nightly_params.get("turns"):
+            turn_count = nightly_params["turns"]
         check_interval = 10 if is_live else 50
 
         swap_count_checkpoints = []
@@ -52,7 +57,7 @@ class TestEndurance:
         verifier.check_all()
 
     def test_token_accounting_never_drifts(
-            self, harness, ollama_stub, verifier, is_live):
+            self, harness, ollama_stub, verifier, is_live, nightly_params):
         """Verify token sum == _total_tokens after every single turn."""
         ollama_stub.set_default_response(ScriptedTurn(
             text="Done. The change has been applied successfully.",
@@ -60,8 +65,13 @@ class TestEndurance:
             prompt_eval_count=40,
         ))
 
-        engine = harness.create_engine(ctx_max_tokens=2000)
+        ctx_tokens = 2000
+        if nightly_params and nightly_params.get("ctx_tokens"):
+            ctx_tokens = nightly_params["ctx_tokens"]
+        engine = harness.create_engine(ctx_max_tokens=ctx_tokens)
         turn_count = 25 if is_live else 100
+        if nightly_params and nightly_params.get("turns"):
+            turn_count = nightly_params["turns"]
 
         for i in range(turn_count):
             harness.run_single_turn(f"Quick task {i}")
@@ -73,7 +83,7 @@ class TestEndurance:
 
         verifier.check_all()
 
-    def test_billing_accumulates(self, harness, ollama_stub, verifier, is_live):
+    def test_billing_accumulates(self, harness, ollama_stub, verifier, is_live, nightly_params):
         """Verify billing tokens increase monotonically."""
         ollama_stub.set_default_response(ScriptedTurn(
             text="Processing complete.",
@@ -81,10 +91,15 @@ class TestEndurance:
             prompt_eval_count=30,
         ))
 
-        engine = harness.create_engine(ctx_max_tokens=4000)
+        ctx_tokens = 4000
+        if nightly_params and nightly_params.get("ctx_tokens"):
+            ctx_tokens = nightly_params["ctx_tokens"]
+        engine = harness.create_engine(ctx_max_tokens=ctx_tokens)
         prev_input = 0
         prev_output = 0
         turn_count = 25 if is_live else 100
+        if nightly_params and nightly_params.get("turns"):
+            turn_count = nightly_params["turns"]
 
         for i in range(turn_count):
             harness.run_single_turn(f"Do task {i}")

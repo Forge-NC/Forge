@@ -8,10 +8,8 @@ collection. Default mode is redacted (strips prompts/responses, keeps
 metadata only).
 """
 
-import hashlib
 import logging
 import os
-import socket
 import tempfile
 import threading
 from pathlib import Path
@@ -19,7 +17,7 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-# Shared API key — prevents drive-by spam, not cryptographic security.
+# Legacy shared API key — used when no per-user token is configured.
 _API_KEY = "fg_tel_2026_e7eb55900b70bd84eaeb62f7cd0153e7"
 
 # Default endpoint
@@ -31,8 +29,9 @@ _MAX_ZIP_BYTES = 512 * 1024  # 512KB safety cap
 
 
 def _get_machine_id() -> str:
-    """Stable per-machine identifier (same algorithm as audit.py)."""
-    return hashlib.sha256(socket.gethostname().encode()).hexdigest()[:12]
+    """Stable per-machine identifier — random UUID persisted locally."""
+    from forge.machine_id import get_machine_id
+    return get_machine_id()
 
 
 def upload_telemetry(
@@ -97,12 +96,24 @@ def upload_telemetry(
                 url = telemetry_url or _DEFAULT_URL
                 machine_id = _get_machine_id()
 
+                # Per-user token takes priority over legacy shared key
+                headers = {}
+                try:
+                    from forge.config import load_config
+                    token = load_config().get("telemetry_token", "")
+                except Exception:
+                    token = ""
+                if token:
+                    headers["X-Forge-Token"] = token
+                else:
+                    headers["X-Forge-Key"] = _API_KEY
+
                 resp = requests.post(
                     url,
                     files={"bundle": (
                         f"forge_{machine_id}.zip", zip_bytes,
                         "application/zip")},
-                    headers={"X-Forge-Key": _API_KEY},
+                    headers=headers,
                     data={"machine_id": machine_id},
                     timeout=_TIMEOUT_S,
                 )
