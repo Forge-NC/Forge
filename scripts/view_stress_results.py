@@ -177,7 +177,7 @@ def generate_html(entries: list[dict]) -> str:
 </head>
 <body>
 <h1>Forge Stress Test Dashboard</h1>
-<p class="subtitle">Generated {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | {total} iterations | Trendline: {TRENDLINE_FILE}</p>
+<p class="subtitle">Generated {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | {total} iterations | Trendline: ~/.forge/harness_trend.jsonl</p>
 
 <div class="stats-grid">
   <div class="stat-card">
