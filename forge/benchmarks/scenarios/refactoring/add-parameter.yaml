@@ -1,0 +1,46 @@
+id: add-parameter
+name: Add Parameter with Default Value
+description: >
+  Add a new parameter to a function with a sensible default,
+  preserving backward compatibility at all call sites.
+category: refactor
+difficulty: easy
+
+files:
+  formatter.py: |
+    def format_name(first, last):
+        """Format a full name."""
+        return f"{first} {last}"
+  app.py: |
+    from formatter import format_name
+
+    def greet():
+        name = format_name("Alice", "Smith")
+        print(f"Hello, {name}!")
+
+    def roster():
+        names = [
+            format_name("Bob", "Jones"),
+            format_name("Carol", "Lee"),
+        ]
+        for n in names:
+            print(f"  - {n}")
+
+prompt: >
+  Add a `middle` parameter to `format_name` with a default of "".
+  When provided and non-empty, include it between first and last.
+  Do not change any existing call sites.
+
+expected_file_scope:
+  - formatter.py
+
+validation:
+  expected_patterns:
+    formatter.py:
+      - 'def format_name\(first.*middle.*last'
+      - '""'
+  forbidden_patterns:
+    app.py:
+      - "middle"
+
+timeout_s: 60

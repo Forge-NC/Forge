@@ -1,0 +1,56 @@
+id: rename-function
+name: Rename Function + Update Call Sites
+description: >
+  Rename a function and ensure all call sites are updated.
+  Tests basic refactoring capability with cross-file awareness.
+category: refactor
+difficulty: easy
+
+files:
+  utils.py: |
+    def calculate_total(items):
+        """Sum all item prices."""
+        return sum(item['price'] for item in items)
+
+    def format_receipt(items):
+        """Format a receipt string."""
+        total = calculate_total(items)
+        lines = [f"  {i['name']}: ${i['price']:.2f}" for i in items]
+        lines.append(f"  Total: ${total:.2f}")
+        return "\n".join(lines)
+  main.py: |
+    from utils import calculate_total, format_receipt
+
+    def run():
+        items = [
+            {"name": "Widget", "price": 9.99},
+            {"name": "Gadget", "price": 14.50},
+        ]
+        total = calculate_total(items)
+        print(f"Order total: ${total:.2f}")
+        print(format_receipt(items))
+
+    if __name__ == "__main__":
+        run()
+
+prompt: >
+  Rename the function `calculate_total` to `compute_sum` in all files.
+  Update all call sites and imports.
+
+expected_file_scope:
+  - utils.py
+  - main.py
+
+validation:
+  expected_patterns:
+    utils.py:
+      - "def compute_sum"
+    main.py:
+      - "compute_sum"
+  forbidden_patterns:
+    utils.py:
+      - "def calculate_total"
+    main.py:
+      - "calculate_total"
+
+timeout_s: 60

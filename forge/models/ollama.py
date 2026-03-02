@@ -1,0 +1,295 @@
+"""Ollama LLM backend with tool-use support.
+
+Handles streaming responses, tool calls, and token counting
+from a local Ollama instance.
+"""
+
+import json
+import re
+import time
+import logging
+from typing import Generator, Optional
+
+import requests
+
+log = logging.getLogger(__name__)
+
+# Default model — Qwen2.5-Coder-32B at Q4_K_M fits 16GB VRAM
+DEFAULT_MODEL = "qwen2.5-coder:32b"
+OLLAMA_BASE = "http://localhost:11434"
+
+
+class OllamaBackend:
+    """Interface to a local Ollama instance."""
+
+    def __init__(self, model: str = DEFAULT_MODEL,
+                 base_url: str = OLLAMA_BASE,
+                 timeout: float = 120.0):
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+        self.num_ctx = None          # Set by engine after VRAM calc
+        self.kv_cache_type = None    # "fp16", "q8_0", or "q4_0"
+        self._session = requests.Session()
+
+    def is_available(self) -> bool:
+        """Check if Ollama is running and the model is loaded."""
+        try:
+            r = self._session.get(
+                f"{self.base_url}/api/tags", timeout=5)
+            if r.status_code != 200:
+                return False
+            models = r.json().get("models", [])
+            names = [m.get("name", "") for m in models]
+            # Check if our model (or a prefix match) is available
+            return any(self.model in n for n in names)
+        except Exception:
+            return False
+
+    def list_models(self) -> list[str]:
+        """List all available models."""
+        try:
+            r = self._session.get(
+                f"{self.base_url}/api/tags", timeout=5)
+            models = r.json().get("models", [])
+            return [m["name"] for m in models]
+        except Exception:
+            return []
+
+    def pull_model(self, model: str = None) -> Generator[str, None, None]:
+        """Pull a model, yielding progress lines."""
+        model = model or self.model
+        r = self._session.post(
+            f"{self.base_url}/api/pull",
+            json={"name": model, "stream": True},
+            stream=True, timeout=600,
+        )
+        for line in r.iter_lines():
+            if line:
+                data = json.loads(line)
+                status = data.get("status", "")
+                total = data.get("total", 0)
+                completed = data.get("completed", 0)
+                if total:
+                    pct = (completed / total) * 100
+                    yield f"{status}: {pct:.0f}%"
+                else:
+                    yield status
+
+    def count_tokens(self, text: str) -> int:
+        """Count tokens using Ollama's tokenize endpoint.
+
+        Falls back to approximation if endpoint unavailable.
+        """
+        try:
+            r = self._session.post(
+                f"{self.base_url}/api/embed",
+                json={"model": self.model, "input": text},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                # The embed response includes token count
+                tokens = r.json().get("prompt_eval_count", 0)
+                if tokens:
+                    return tokens
+        except Exception:
+            pass
+        # Fallback: ~4 chars per token for English/code
+        return max(1, len(text) // 4)
+
+    def embed(self, texts, embed_model: str = "nomic-embed-text",
+              keep_alive: str = "10m") -> list[list[float]]:
+        """Generate embeddings for one or more texts.
+
+        Args:
+            texts: A single string or list of strings to embed.
+            embed_model: Ollama model to use for embeddings.
+            keep_alive: How long to keep the model loaded.
+
+        Returns:
+            List of embedding vectors (list of list of float).
+            Empty list on failure.
+        """
+        if isinstance(texts, str):
+            texts = [texts]
+
+        BATCH_SIZE = 50
+        all_embeddings: list[list[float]] = []
+
+        try:
+            for i in range(0, len(texts), BATCH_SIZE):
+                batch = texts[i:i + BATCH_SIZE]
+                r = self._session.post(
+                    f"{self.base_url}/api/embed",
+                    json={
+                        "model": embed_model,
+                        "input": batch,
+                        "keep_alive": keep_alive,
+                    },
+                    timeout=self.timeout,
+                )
+                if r.status_code != 200:
+                    log.warning("Embed request failed: %s %s",
+                                r.status_code, r.text[:200])
+                    return []
+                embeddings = r.json().get("embeddings", [])
+                all_embeddings.extend(embeddings)
+        except Exception as e:
+            log.warning("Embedding failed: %s", e)
+            return []
+
+        return all_embeddings
+
+    def ensure_embed_model(self, embed_model: str = "nomic-embed-text",
+                           auto_pull: bool = False) -> bool:
+        """Check if an embedding model is available, optionally pulling it.
+
+        Args:
+            embed_model: Name of the embedding model to check for.
+            auto_pull: If True, pull the model when it is not found.
+
+        Returns:
+            True if the model is available (or was successfully pulled).
+        """
+        available = self.list_models()
+        if any(embed_model in name for name in available):
+            return True
+
+        if not auto_pull:
+            return False
+
+        # Pull the model
+        log.info("Pulling embedding model: %s", embed_model)
+        for progress in self.pull_model(embed_model):
+            print(progress)
+
+        # Verify it's now available
+        available = self.list_models()
+        return any(embed_model in name for name in available)
+
+    def get_context_length(self) -> int:
+        """Get the model's context length from Ollama."""
+        try:
+            r = self._session.post(
+                f"{self.base_url}/api/show",
+                json={"name": self.model},
+                timeout=10,
+            )
+            if r.status_code == 200:
+                params = r.json().get("model_info", {})
+                # Different model architectures store this differently
+                for key in params:
+                    if "context_length" in key.lower():
+                        return int(params[key])
+                # Fallback: check modelfile parameters
+                modelfile = r.json().get("modelfile", "")
+                m = re.search(r"num_ctx\s+(\d+)", modelfile)
+                if m:
+                    return int(m.group(1))
+        except Exception:
+            pass
+        return 32768  # Conservative default
+
+    def chat(self, messages: list[dict],
+             tools: list[dict] = None,
+             temperature: float = 0.1,
+             stream: bool = True) -> Generator[dict, None, None]:
+        """Send a chat request, yielding response chunks.
+
+        Each yielded dict has:
+          - "type": "token" | "tool_call" | "done" | "error"
+          - "content": str (for tokens)
+          - "tool_call": dict (for tool calls)
+          - "eval_count": int (for done — tokens generated)
+          - "prompt_eval_count": int (for done — tokens in prompt)
+        """
+        options = {
+            "temperature": temperature,
+            "num_predict": 4096,
+        }
+        # Set context window size if calculated from VRAM
+        if self.num_ctx:
+            options["num_ctx"] = self.num_ctx
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "stream": stream,
+            "options": options,
+        }
+        if tools:
+            payload["tools"] = tools
+
+        try:
+            r = self._session.post(
+                f"{self.base_url}/api/chat",
+                json=payload,
+                stream=stream,
+                timeout=self.timeout,
+            )
+            if r.status_code != 200:
+                yield {
+                    "type": "error",
+                    "content": f"Ollama returned {r.status_code}: {r.text[:200]}",
+                }
+                return
+
+            if not stream:
+                data = r.json()
+                msg = data.get("message", {})
+                if msg.get("tool_calls"):
+                    for tc in msg["tool_calls"]:
+                        yield {
+                            "type": "tool_call",
+                            "tool_call": tc,
+                        }
+                elif msg.get("content"):
+                    yield {"type": "token", "content": msg["content"]}
+                yield {
+                    "type": "done",
+                    "eval_count": data.get("eval_count", 0),
+                    "prompt_eval_count": data.get("prompt_eval_count", 0),
+                }
+                return
+
+            # Streaming mode
+            full_content = ""
+            tool_calls = []
+            for line in r.iter_lines():
+                if not line:
+                    continue
+                data = json.loads(line)
+                msg = data.get("message", {})
+
+                if msg.get("tool_calls"):
+                    tool_calls.extend(msg["tool_calls"])
+
+                content = msg.get("content", "")
+                if content:
+                    full_content += content
+                    yield {"type": "token", "content": content}
+
+                if data.get("done"):
+                    for tc in tool_calls:
+                        yield {"type": "tool_call", "tool_call": tc}
+                    yield {
+                        "type": "done",
+                        "eval_count": data.get("eval_count", 0),
+                        "prompt_eval_count": data.get("prompt_eval_count", 0),
+                        "total_duration_ns": data.get("total_duration", 0),
+                    }
+                    return
+
+        except requests.exceptions.Timeout:
+            yield {
+                "type": "error",
+                "content": f"Ollama request timed out after {self.timeout}s",
+            }
+        except requests.exceptions.ConnectionError:
+            yield {
+                "type": "error",
+                "content": "Cannot connect to Ollama. Is it running? "
+                           f"Expected at {self.base_url}",
+            }
+        except Exception as e:
+            yield {"type": "error", "content": f"Ollama error: {e}"}

@@ -1,0 +1,42 @@
+id: extract-method
+name: Extract Repeated Code into Method
+description: >
+  Extract duplicated validation logic into a reusable method.
+  Tests ability to identify and extract common patterns.
+category: refactor
+difficulty: easy
+
+files:
+  validator.py: |
+    def validate_user(data):
+        errors = []
+        if not data.get("name"):
+            errors.append("name is required")
+        if not isinstance(data.get("name", ""), str):
+            errors.append("name must be a string")
+        if len(data.get("name", "")) > 100:
+            errors.append("name must be <= 100 chars")
+        if not data.get("email"):
+            errors.append("email is required")
+        if not isinstance(data.get("email", ""), str):
+            errors.append("email must be a string")
+        if len(data.get("email", "")) > 100:
+            errors.append("email must be <= 100 chars")
+        return errors
+
+prompt: >
+  Extract the repeated field validation pattern (required check,
+  type check, length check) into a helper function called
+  `_validate_field`. Use it in `validate_user` to reduce duplication.
+
+expected_file_scope:
+  - validator.py
+
+validation:
+  expected_patterns:
+    validator.py:
+      - "def _validate_field"
+      - "_validate_field"
+      - "def validate_user"
+
+timeout_s: 60

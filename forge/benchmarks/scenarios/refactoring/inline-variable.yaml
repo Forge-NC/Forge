@@ -1,0 +1,39 @@
+id: inline-variable
+name: Inline Single-Use Variable
+description: >
+  Inline variables that are used only once, simplifying the code
+  without changing behavior.
+category: refactor
+difficulty: easy
+
+files:
+  processor.py: |
+    def process_order(order):
+        customer_name = order["customer"]
+        item_count = len(order["items"])
+        total_price = sum(i["price"] for i in order["items"])
+        discount = total_price * 0.1
+        final_price = total_price - discount
+        summary = f"{customer_name}: {item_count} items, ${final_price:.2f}"
+        return summary
+
+prompt: >
+  Inline the single-use variables `customer_name`, `item_count`,
+  and `summary` in `process_order`. Keep `total_price`, `discount`,
+  and `final_price` as they are used in calculations.
+
+expected_file_scope:
+  - processor.py
+
+validation:
+  expected_patterns:
+    processor.py:
+      - "def process_order"
+      - "return f\""
+  forbidden_patterns:
+    processor.py:
+      - "customer_name ="
+      - "item_count ="
+      - "summary ="
+
+timeout_s: 60

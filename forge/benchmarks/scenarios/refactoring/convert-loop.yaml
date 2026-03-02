@@ -1,0 +1,47 @@
+id: convert-loop
+name: Convert For-Loop to List Comprehension
+description: >
+  Convert simple for-loops with append patterns to list comprehensions.
+  Tests Pythonic refactoring capability.
+category: refactor
+difficulty: easy
+
+files:
+  transform.py: |
+    def get_active_names(users):
+        """Get names of active users."""
+        result = []
+        for user in users:
+            if user.get("active"):
+                result.append(user["name"])
+        return result
+
+    def get_prices(items, currency="USD"):
+        """Get formatted prices."""
+        prices = []
+        for item in items:
+            price = item["price"]
+            if price > 0:
+                prices.append(f"{currency} {price:.2f}")
+        return prices
+
+prompt: >
+  Convert the for-loop-append patterns in both `get_active_names`
+  and `get_prices` to list comprehensions.
+
+expected_file_scope:
+  - transform.py
+
+validation:
+  expected_patterns:
+    transform.py:
+      - "\\[.*for user in users.*\\]"
+      - "\\[.*for item in items.*\\]"
+  forbidden_patterns:
+    transform.py:
+      - "result = \\[\\]"
+      - "result\\.append"
+      - "prices = \\[\\]"
+      - "prices\\.append"
+
+timeout_s: 60

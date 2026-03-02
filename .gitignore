@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.eggs/
+dist/
+build/
+*.ico
+*.pyd
+*.so
+.forge/
+report/
+data.txt
+stress_results.json
+.mypy_cache/
+.pytest_cache/
+htmlcov/
