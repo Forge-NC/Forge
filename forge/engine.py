@@ -799,10 +799,109 @@ class ForgeEngine:
         except Exception as e:
             log.debug("Checkpoint backup failed for %s: %s", file_path, e)
 
+    def _check_for_updates_on_boot(self):
+        """Check for updates on startup and prompt user."""
+        import subprocess as _sp
+        import re as _re
+        forge_root = str(Path(__file__).resolve().parent.parent)
+        flags = {}
+        if os.name == "nt":
+            flags["creationflags"] = _sp.CREATE_NO_WINDOW
+
+        try:
+            _sp.run(["git", "fetch", "origin"], cwd=forge_root,
+                     capture_output=True, timeout=10, **flags)
+            result = _sp.run(
+                ["git", "rev-list", "--count", "HEAD..origin/master"],
+                cwd=forge_root, capture_output=True, text=True,
+                timeout=5, **flags)
+            if result.returncode != 0:
+                return
+            count = int(result.stdout.strip())
+            if count == 0:
+                return
+
+            # Get remote version
+            ver_result = _sp.run(
+                ["git", "show", "origin/master:pyproject.toml"],
+                cwd=forge_root, capture_output=True, text=True,
+                timeout=5, **flags)
+            remote_ver = ""
+            if ver_result.returncode == 0:
+                m = _re.search(r'version\s*=\s*"([^"]+)"', ver_result.stdout)
+                if m:
+                    remote_ver = m.group(1)
+
+            # Get changelog
+            log_result = _sp.run(
+                ["git", "log", "--oneline", "HEAD..origin/master"],
+                cwd=forge_root, capture_output=True, text=True,
+                timeout=5, **flags)
+            changes = []
+            if log_result.returncode == 0:
+                for line in log_result.stdout.strip().split("\n")[:5]:
+                    parts = line.strip().split(" ", 1)
+                    if len(parts) > 1:
+                        changes.append(parts[1])
+
+            ver_str = f" v{remote_ver}" if remote_ver else ""
+            print(f"\n{YELLOW}{BOLD}Update available:{RESET}"
+                  f" {count} new commit{'s' if count != 1 else ''}"
+                  f"{' -> ' + ver_str if ver_str else ''}")
+            if changes:
+                for ch in changes:
+                    print(f"  {DIM}{ch}{RESET}")
+                if count > 5:
+                    print(f"  {DIM}... and {count - 5} more{RESET}")
+
+            print(f"\n{CYAN}Update now? [y/N]{RESET} ", end="", flush=True)
+            try:
+                answer = input().strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                answer = ""
+
+            if answer in ("y", "yes"):
+                self.io.print_info("Pulling updates...")
+                pull = _sp.run(
+                    ["git", "pull", "--ff-only", "origin", "master"],
+                    cwd=forge_root, capture_output=True, text=True,
+                    timeout=30, **flags)
+                if pull.returncode != 0:
+                    self.io.print_error(f"Pull failed: {pull.stderr[:200]}")
+                    return
+
+                # Check if deps changed
+                diff = _sp.run(
+                    ["git", "diff", "--name-only", f"HEAD~{count}", "HEAD"],
+                    cwd=forge_root, capture_output=True, text=True,
+                    timeout=5, **flags)
+                changed = diff.stdout.strip().split("\n") if diff.stdout.strip() else []
+                if "pyproject.toml" in changed:
+                    self.io.print_info("Dependencies changed, reinstalling...")
+                    venv_py = Path(forge_root) / ".venv" / "Scripts" / "python.exe"
+                    if not venv_py.exists():
+                        venv_py = Path(forge_root) / ".venv" / "bin" / "python"
+                    if venv_py.exists():
+                        _sp.run(
+                            [str(venv_py), "-m", "pip", "install", "-e",
+                             forge_root, "--quiet"],
+                            capture_output=True, timeout=120, **flags)
+
+                print(f"\n  {GREEN}Updated to{ver_str}!{RESET}")
+                print(f"  {YELLOW}Restart Forge to use the new code.{RESET}\n")
+            else:
+                print()  # clean newline after prompt
+
+        except Exception:
+            pass  # Silent — no git, no network, etc.
+
     def run(self):
         """Main interactive loop."""
         self.io.enable_ansi()
         self.io.print_banner()
+
+        # Check for updates
+        self._check_for_updates_on_boot()
 
         # Model setup — check availability, offer to download
         if not self._ensure_model():

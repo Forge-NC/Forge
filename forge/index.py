@@ -176,6 +176,9 @@ class CodebaseIndex:
     ) -> dict:
         """Recursively index all code files under *dir_path*.
 
+        Collects all chunks first, embeds in bulk batches, then assigns
+        vectors back. This avoids loading/unloading the embed model per file.
+
         Parameters
         ----------
         extensions : set, optional
@@ -198,29 +201,126 @@ class CodebaseIndex:
             "files_unchanged": 0,
         }
 
+        # Phase 1: Collect all chunks that need embedding
+        pending: list[tuple[str, list[CodeChunk]]] = []  # (abs_path, chunks)
         for path in self._iter_code_files(root, exts):
+            abs_path = str(path.resolve())
             try:
-                n = self.index_file(str(path))
+                file_hash = self._hash_file(path)
+                if file_hash is None:
+                    stats["files_skipped"] += 1
+                    continue
+
+                # Skip unchanged
+                if self._file_hashes.get(abs_path) == file_hash:
+                    stats["files_unchanged"] += 1
+                    if callback:
+                        try:
+                            callback(str(path), 0)
+                        except Exception:
+                            pass
+                    continue
+
+                # Remove stale data if re-indexing
+                if abs_path in self._file_hashes:
+                    self.remove_file(abs_path)
+
+                # Read content
+                content = path.read_text(encoding="utf-8", errors="replace")
+                if not content.strip():
+                    stats["files_skipped"] += 1
+                    continue
+
+                chunks = self._chunk_file(content, abs_path, file_hash)
+                if not chunks:
+                    stats["files_skipped"] += 1
+                    continue
+
+                pending.append((abs_path, chunks))
+
             except Exception as exc:
-                log.warning("Error indexing %s: %s", path, exc)
+                log.warning("Error reading %s: %s", path, exc)
                 stats["files_skipped"] += 1
-                continue
 
-            if n == 0 and str(path.resolve()) in self._file_hashes:
-                stats["files_unchanged"] += 1
-            elif n == 0:
-                stats["files_skipped"] += 1
+        if not pending:
+            try:
+                self.save()
+            except Exception as exc:
+                log.error("Failed to save index: %s", exc)
+            return stats
+
+        # Phase 2: Flatten all chunk texts for bulk embedding
+        all_texts: list[str] = []
+        chunk_ranges: list[tuple[int, int]] = []  # (start, end) indices
+        for abs_path, chunks in pending:
+            start = len(all_texts)
+            all_texts.extend(c.content for c in chunks)
+            chunk_ranges.append((start, len(all_texts)))
+
+        # Phase 3: Embed everything in one call (embed() handles batching)
+        log.info("Embedding %d chunks from %d files...",
+                 len(all_texts), len(pending))
+        try:
+            raw_embeddings = self._embed_fn(all_texts)
+        except Exception as exc:
+            log.error("Bulk embedding failed: %s", exc)
+            stats["files_skipped"] += len(pending)
+            return stats
+
+        if not raw_embeddings or len(raw_embeddings) != len(all_texts):
+            log.warning(
+                "Embedding count mismatch: expected %d, got %d",
+                len(all_texts),
+                len(raw_embeddings) if raw_embeddings else 0)
+            stats["files_skipped"] += len(pending)
+            try:
+                self.save()
+            except Exception:
+                pass
+            return stats
+
+        all_vecs = np.array(raw_embeddings, dtype=np.float32)
+        if all_vecs.ndim == 1:
+            all_vecs = all_vecs.reshape(1, -1)
+        if all_vecs.ndim != 2 or all_vecs.shape[0] != len(all_texts):
+            log.warning("Unexpected embedding shape %s for %d texts",
+                        all_vecs.shape, len(all_texts))
+            stats["files_skipped"] += len(pending)
+            return stats
+
+        # Normalise so cosine similarity == dot product
+        norms = np.linalg.norm(all_vecs, axis=1, keepdims=True)
+        norms = np.where(norms == 0, 1.0, norms)
+        all_vecs = all_vecs / norms
+
+        # Phase 4: Assign embeddings back to each file
+        for idx, (abs_path, chunks) in enumerate(pending):
+            start, end = chunk_ranges[idx]
+            file_vecs = all_vecs[start:end]
+
+            if self._vectors is None:
+                self._vectors = file_vecs
             else:
-                stats["files_indexed"] += 1
-                stats["chunks_created"] += n
+                self._vectors = np.vstack([self._vectors, file_vecs])
 
-            if callback is not None:
+            for chunk in chunks:
+                self._metadata.append(asdict(chunk))
+
+            file_hash = chunks[0].file_hash
+            self._file_hashes[abs_path] = file_hash
+            self._last_indexed = time.time()
+
+            n = len(chunks)
+            stats["files_indexed"] += 1
+            stats["chunks_created"] += n
+
+            if callback:
                 try:
-                    callback(str(path), n)
+                    callback(abs_path, n)
                 except Exception:
                     pass
 
-        # Persist after full indexing run
+        # Phase 5: Persist
         try:
             self.save()
         except Exception as exc:

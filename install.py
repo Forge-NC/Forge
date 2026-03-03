@@ -353,6 +353,92 @@ def _set_config_values(config_path, values):
 
 
 # ---------------------------------------------------------------------------
+# Phase 5b -- Git auth check (for /update to work)
+# ---------------------------------------------------------------------------
+
+def _check_git_auth(project_dir, interactive):
+    """Verify git can reach origin so /update works later."""
+    try:
+        # Check remote URL type
+        r = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=str(project_dir), capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0:
+            return  # no remote -- local-only install
+        remote_url = r.stdout.strip()
+        is_ssh = remote_url.startswith("git@") or "ssh://" in remote_url
+
+        # Test if fetch works
+        extra = {}
+        if os.name == "nt":
+            extra["creationflags"] = 0x08000000
+        fetch = subprocess.run(
+            ["git", "fetch", "--dry-run", "origin"],
+            cwd=str(project_dir), capture_output=True, text=True,
+            timeout=15, **extra,
+        )
+        if fetch.returncode == 0:
+            print("  [OK] Git auth working (updates will work)")
+            return
+
+        # Auth failed -- help the user
+        print("  [!!] Git can't reach the remote repository")
+        print(f"       Remote: {remote_url}")
+
+        if not interactive:
+            print("  [!!] Set up git credentials so /update works")
+            return
+
+        if is_ssh:
+            print("\n  Your repo uses SSH. To set up SSH authentication:")
+            print("  1. Generate an SSH key (if you don't have one):")
+            print('     ssh-keygen -t ed25519 -C "your_email@example.com"')
+            print("  2. Add the public key to GitHub:")
+            print("     - Copy the output of: cat ~/.ssh/id_ed25519.pub")
+            print("     - Go to github.com -> Settings -> SSH Keys -> New SSH Key")
+            print("     - Paste and save")
+            print("  3. Test: ssh -T git@github.com")
+        else:
+            print("\n  Your repo uses HTTPS. Easiest options to save credentials:")
+            # Check if gh CLI is available
+            gh_ok = False
+            try:
+                subprocess.run(["gh", "--version"], capture_output=True, timeout=3)
+                gh_ok = True
+            except FileNotFoundError:
+                pass
+
+            if gh_ok:
+                print("\n  Option A (recommended) -- GitHub CLI (already installed):")
+                print("     gh auth login")
+                print("     (Follow the prompts to authenticate via browser)")
+            else:
+                print("\n  Option A (recommended) -- GitHub CLI:")
+                print("     Install: https://cli.github.com")
+                print("     Then run: gh auth login")
+
+            print("\n  Option B -- Personal Access Token:")
+            print("     1. Go to github.com -> Settings -> Developer Settings")
+            print("        -> Personal Access Tokens -> Tokens (classic)")
+            print("     2. Generate a token with 'repo' scope")
+            print("     3. Save credentials so git remembers:")
+            if os.name == "nt":
+                print("        git config --global credential.helper manager")
+            elif sys.platform == "darwin":
+                print("        git config --global credential.helper osxkeychain")
+            else:
+                print("        git config --global credential.helper store")
+            print("     4. Run 'git fetch origin' -- enter your username")
+            print("        and paste the token as the password")
+
+        print("\n  After setting up auth, /update will work inside Forge.")
+
+    except Exception:
+        pass  # non-critical
+
+
+# ---------------------------------------------------------------------------
 # Phase 6 -- Desktop shortcut
 # ---------------------------------------------------------------------------
 
@@ -523,6 +609,9 @@ def main():
     # Phase 5
     print("\n  [5/7] Configuration...")
     telemetry_ok = _setup_config(args, interactive)
+
+    # Phase 5b: Git auth check (needed for /update to work)
+    _check_git_auth(project_dir, interactive)
 
     # Phase 6
     print("\n  [6/7] Creating desktop shortcut...")

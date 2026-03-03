@@ -178,9 +178,20 @@ class ForgeSettingsDialog:
 
     # ── Tab builders ──────────────────────────────────────────────
 
-    def _build_safety_tab(self):
-        tab = self._tabs.tab("Safety")
+    def _scrollable_tab(self, name: str) -> "ctk.CTkScrollableFrame":
+        """Wrap a tab's content area in a scrollable frame."""
+        tab = self._tabs.tab(name)
         tab.configure(fg_color=COLORS["bg_dark"])
+        scroll = ctk.CTkScrollableFrame(
+            tab, fg_color=COLORS["bg_dark"],
+            scrollbar_button_color=COLORS["bg_panel"],
+            scrollbar_button_hover_color=COLORS["cyan_dim"],
+            corner_radius=0)
+        scroll.pack(fill="both", expand=True)
+        return scroll
+
+    def _build_safety_tab(self):
+        tab = self._scrollable_tab("Safety")
 
         # Safety level segmented button
         row = self._add_row(tab, "Safety Level")
@@ -253,8 +264,7 @@ class ForgeSettingsDialog:
         self._widgets["sandbox_roots"] = ("pathlist", self._sandbox_paths)
 
     def _build_models_tab(self):
-        tab = self._tabs.tab("Models")
-        tab.configure(fg_color=COLORS["bg_dark"])
+        tab = self._scrollable_tab("Models")
 
         current_model = str(self._config.get("default_model", ""))
         current_small = str(self._config.get("small_model", ""))
@@ -303,8 +313,7 @@ class ForgeSettingsDialog:
         self._fetch_models()
 
     def _build_context_tab(self):
-        tab = self._tabs.tab("Context")
-        tab.configure(fg_color=COLORS["bg_dark"])
+        tab = self._scrollable_tab("Context")
 
         self._add_slider(tab, "context_safety_margin", "Safety Margin",
                          0.50, 1.00, 50, fmt="{:.0%}")
@@ -343,8 +352,7 @@ class ForgeSettingsDialog:
             "rebuild + subtask recalls)")
 
     def _build_agent_tab(self):
-        tab = self._tabs.tab("Agent")
-        tab.configure(fg_color=COLORS["bg_dark"])
+        tab = self._scrollable_tab("Agent")
 
         self._add_entry(tab, "max_agent_iterations", "Max Iterations")
         self._add_desc(tab, "Maximum tool-use loops before the agent stops")
@@ -366,8 +374,7 @@ class ForgeSettingsDialog:
         self._add_switch(tab, "cache_enabled", "File Cache")
 
     def _build_voice_tab(self):
-        tab = self._tabs.tab("Voice")
-        tab.configure(fg_color=COLORS["bg_dark"])
+        tab = self._scrollable_tab("Voice")
 
         self._add_dropdown(tab, "voice_model", "Whisper Model",
                            ["tiny", "base", "small", "medium"])
@@ -382,8 +389,7 @@ class ForgeSettingsDialog:
         self._add_desc(tab, "Seconds of silence before voice recording stops")
 
     def _build_ui_tab(self):
-        tab = self._tabs.tab("UI")
-        tab.configure(fg_color=COLORS["bg_dark"])
+        tab = self._scrollable_tab("UI")
 
         theme_menu = self._add_dropdown(tab, "theme", "Theme", list_themes())
         theme_menu.configure(command=self._on_theme_preview)
@@ -405,8 +411,7 @@ class ForgeSettingsDialog:
     # ── Nightly tab ──────────────────────────────────────────────
 
     def _build_nightly_tab(self):
-        tab = self._tabs.tab("Nightly")
-        tab.configure(fg_color=COLORS["bg_dark"])
+        tab = self._scrollable_tab("Nightly")
 
         # ── Schedule section ──
         ctk.CTkLabel(tab, text="  Nightly Schedule",
@@ -585,8 +590,7 @@ class ForgeSettingsDialog:
     # ── Telemetry tab ─────────────────────────────────────────────
 
     def _build_telemetry_tab(self):
-        tab = self._tabs.tab("Telemetry")
-        tab.configure(fg_color=COLORS["bg_dark"])
+        tab = self._scrollable_tab("Telemetry")
 
         ctk.CTkLabel(tab, text="  Anonymous Usage Data",
                      font=ctk.CTkFont(*FONT_MONO_BOLD),

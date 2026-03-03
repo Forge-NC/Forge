@@ -776,8 +776,8 @@ class ForgeLauncher:
         # reflects the user's chosen theme (and effects activate correctly)
         from forge.config import ForgeConfig
         from forge.ui.themes import set_theme
-        _cfg = ForgeConfig()
-        _saved_theme = _cfg.get("theme", "midnight")
+        self._config = ForgeConfig()
+        _saved_theme = self._config.get("theme", "midnight")
         set_theme(_saved_theme)
 
         ctk.set_appearance_mode("dark")
@@ -2026,6 +2026,9 @@ class ForgeLauncher:
         btn_row.pack(fill="x", padx=40, pady=(0, 16))
 
         def on_skip():
+            # Mark as prompted so dialog doesn't nag on every boot
+            self._config.set("telemetry_prompted", True)
+            self._config.save()
             self._telemetry_setup_done = True
             dialog.destroy()
 
@@ -2064,6 +2067,16 @@ class ForgeLauncher:
         dialog.protocol("WM_DELETE_WINDOW", on_skip)
 
     def _boot_sequence(self):
+        try:
+            self._boot_sequence_inner()
+        except Exception as e:
+            self._add_status(f"[!!] Boot error: {e}")
+            # Still swap to dashboard so user isn't permanently stuck
+            self._boot_complete = True
+            if self._root and self._running:
+                self._root.after(1000, self._swap_to_dashboard)
+
+    def _boot_sequence_inner(self):
         # Set Ollama env vars (needed when launched via pythonw without .bat)
         os.environ.setdefault("OLLAMA_FLASH_ATTENTION", "1")
         os.environ.setdefault("OLLAMA_KV_CACHE_TYPE", "q8_0")
@@ -2082,10 +2095,11 @@ class ForgeLauncher:
             # Reload persona after setup
             persona = get_persona()
 
-        # First-run telemetry setup (if no token configured)
+        # First-run telemetry setup (only once — skip if already prompted)
         _telem_token = self._config.get("telemetry_token", "")
         _telem_on = self._config.get("telemetry_enabled", False)
-        if not _telem_token and not _telem_on:
+        _telem_prompted = self._config.get("telemetry_prompted", False)
+        if not _telem_token and not _telem_on and not _telem_prompted:
             self._root.after(0, self._show_telemetry_setup)
             import time as _time2
             for _ in range(300):  # up to 30s
@@ -2199,27 +2213,58 @@ class ForgeLauncher:
 
         # Auto-update check (silent on failure)
         self._update_behind = 0
+        self._update_version = ""
+        self._update_changelog = []
         try:
             import subprocess as _sp
+            _forge_root = str(Path(__file__).parent.parent.parent)
             _flags = {}
             if os.name == "nt":
                 _flags["creationflags"] = _sp.CREATE_NO_WINDOW
             _sp.run(
                 ["git", "fetch", "origin"],
-                cwd=str(Path(__file__).parent.parent.parent),
+                cwd=_forge_root,
                 capture_output=True, timeout=10, **_flags,
             )
             result = _sp.run(
                 ["git", "rev-list", "--count", "HEAD..origin/master"],
-                cwd=str(Path(__file__).parent.parent.parent),
+                cwd=_forge_root,
                 capture_output=True, text=True, timeout=5, **_flags,
             )
             if result.returncode == 0:
                 count = int(result.stdout.strip())
                 self._update_behind = count
                 if count > 0:
+                    # Get remote version from pyproject.toml
+                    ver_result = _sp.run(
+                        ["git", "show", "origin/master:pyproject.toml"],
+                        cwd=_forge_root,
+                        capture_output=True, text=True, timeout=5, **_flags,
+                    )
+                    if ver_result.returncode == 0:
+                        import re as _re
+                        m = _re.search(
+                            r'version\s*=\s*"([^"]+)"', ver_result.stdout)
+                        if m:
+                            self._update_version = m.group(1)
+                    # Get changelog (recent commits)
+                    log_result = _sp.run(
+                        ["git", "log", "--oneline",
+                         f"HEAD..origin/master"],
+                        cwd=_forge_root,
+                        capture_output=True, text=True, timeout=5, **_flags,
+                    )
+                    if log_result.returncode == 0:
+                        self._update_changelog = [
+                            l.strip() for l in
+                            log_result.stdout.strip().split("\n")[:8]
+                            if l.strip()
+                        ]
+                    ver_str = (f" (v{self._update_version})"
+                               if self._update_version else "")
                     self._add_status(
-                        f"[!!] Update available: {count} new commit{'s' if count != 1 else ''}")
+                        f"[!!] Update available{ver_str}: "
+                        f"{count} new commit{'s' if count != 1 else ''}")
                 else:
                     self._add_status("[OK] Forge is up to date")
         except Exception:
@@ -2249,6 +2294,9 @@ class ForgeLauncher:
         if n <= 0:
             return
 
+        ver = getattr(self, "_update_version", "")
+        changelog = getattr(self, "_update_changelog", [])
+
         card = ctk.CTkFrame(
             self._dash_frame, fg_color=COLORS["bg_card"],
             corner_radius=8, border_width=1, border_color=COLORS["yellow"],
@@ -2256,35 +2304,144 @@ class ForgeLauncher:
         card.pack(fill="x", padx=12, pady=(8, 4))
         self._update_card = card
 
-        inner = ctk.CTkFrame(card, fg_color="transparent")
-        inner.pack(fill="x", padx=12, pady=8)
+        # Header row
+        header = ctk.CTkFrame(card, fg_color="transparent")
+        header.pack(fill="x", padx=12, pady=(8, 0))
 
+        title = f"Update to v{ver}" if ver else "Update Available"
+        subtitle = f"{n} new commit{'s' if n != 1 else ''}"
         ctk.CTkLabel(
-            inner,
-            text=f"Update Available  --  {n} new commit{'s' if n != 1 else ''}",
+            header,
+            text=f"{title}  --  {subtitle}",
             font=ctk.CTkFont(*FONT_MONO_BOLD),
             text_color=COLORS["yellow"], anchor="w",
         ).pack(side="left")
 
+        # Changelog preview
+        if changelog:
+            cl_frame = ctk.CTkFrame(card, fg_color="transparent")
+            cl_frame.pack(fill="x", padx=16, pady=(4, 0))
+            for line in changelog[:5]:
+                # Strip commit hash prefix for cleaner display
+                parts = line.split(" ", 1)
+                msg = parts[1] if len(parts) > 1 else line
+                ctk.CTkLabel(
+                    cl_frame,
+                    text=f"  {msg}",
+                    font=ctk.CTkFont(*FONT_MONO_SM),
+                    text_color=COLORS["gray"], anchor="w",
+                ).pack(fill="x")
+            if len(changelog) > 5:
+                ctk.CTkLabel(
+                    cl_frame,
+                    text=f"  ... and {n - 5} more",
+                    font=ctk.CTkFont(*FONT_MONO_SM),
+                    text_color=COLORS["text_dim"], anchor="w",
+                ).pack(fill="x")
+
+        # Button row
+        btn_row = ctk.CTkFrame(card, fg_color="transparent")
+        btn_row.pack(fill="x", padx=12, pady=(6, 8))
+
         ctk.CTkButton(
-            inner, text="Dismiss", width=130,
+            btn_row, text="Skip", width=130,
             fg_color=COLORS["bg_panel"],
             hover_color=COLORS["bg_card"],
             text_color=COLORS["gray"],
             font=ctk.CTkFont(*FONT_MONO_SM),
-            height=28,
-            command=lambda: self._update_card.pack_forget(),
+            height=32, command=lambda: self._update_card.pack_forget(),
         ).pack(side="right", padx=(4, 0))
 
         ctk.CTkButton(
-            inner, text="Update Now", width=130,
-            fg_color=COLORS["cyan_dim"],
+            btn_row,
+            text=f"Update to v{ver}" if ver else "Update Now",
+            width=160, fg_color=COLORS["cyan_dim"],
             hover_color=COLORS["cyan"],
             text_color=COLORS["bg_dark"],
             font=ctk.CTkFont(*FONT_MONO_SM),
-            height=28,
-            command=self._check_for_updates,
+            height=32, command=self._apply_update_from_card,
         ).pack(side="right", padx=(4, 0))
+
+    def _apply_update_from_card(self):
+        """Pull updates and reinstall deps directly from the dashboard card."""
+        import threading as _th
+
+        card = getattr(self, "_update_card", None)
+        if not card:
+            return
+
+        # Replace card content with progress
+        for w in card.winfo_children():
+            w.destroy()
+
+        status_lbl = ctk.CTkLabel(
+            card, text="  Pulling updates...",
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            text_color=COLORS["yellow"], anchor="w",
+        )
+        status_lbl.pack(fill="x", padx=12, pady=8)
+
+        def _do_update():
+            forge_root = str(Path(__file__).parent.parent.parent)
+            flags = {}
+            if os.name == "nt":
+                flags["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+            # Pull
+            try:
+                pull = subprocess.run(
+                    ["git", "pull", "--ff-only", "origin", "master"],
+                    cwd=forge_root, capture_output=True, text=True,
+                    timeout=30, **flags,
+                )
+                if pull.returncode != 0:
+                    self._root.after(0, lambda: self._update_card_result(
+                        status_lbl, False, f"Pull failed: {pull.stderr[:200]}"))
+                    return
+            except Exception as e:
+                self._root.after(0, lambda: self._update_card_result(
+                    status_lbl, False, f"Pull error: {e}"))
+                return
+
+            # Check if pyproject.toml changed (need pip reinstall)
+            reinstalled = False
+            try:
+                diff = subprocess.run(
+                    ["git", "diff", "--name-only",
+                     f"HEAD~{self._update_behind}", "HEAD"],
+                    cwd=forge_root, capture_output=True, text=True,
+                    timeout=5, **flags,
+                )
+                changed = diff.stdout.strip().split("\n") if diff.stdout.strip() else []
+                if "pyproject.toml" in changed:
+                    self._root.after(0, lambda: status_lbl.configure(
+                        text="  Reinstalling dependencies..."))
+                    venv_py = Path(forge_root) / ".venv" / "Scripts" / "python.exe"
+                    if not venv_py.exists():
+                        venv_py = Path(forge_root) / ".venv" / "bin" / "python"
+                    if venv_py.exists():
+                        subprocess.run(
+                            [str(venv_py), "-m", "pip", "install", "-e",
+                             forge_root, "--quiet"],
+                            capture_output=True, timeout=120, **flags,
+                        )
+                        reinstalled = True
+            except Exception:
+                pass
+
+            ver = getattr(self, "_update_version", "")
+            ver_msg = f" to v{ver}" if ver else ""
+            extra = " + dependencies reinstalled" if reinstalled else ""
+            msg = f"Updated{ver_msg}{extra}. Restart Forge for full effect."
+            self._root.after(0, lambda: self._update_card_result(
+                status_lbl, True, msg))
+
+        _th.Thread(target=_do_update, daemon=True).start()
+
+    def _update_card_result(self, label, success, message):
+        """Show update result in the card."""
+        color = COLORS["green"] if success else COLORS["red"]
+        label.configure(text=f"  {message}", text_color=color)
 
     # ── Terminal launch ──
 

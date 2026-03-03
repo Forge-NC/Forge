@@ -114,8 +114,8 @@ class OllamaBackend:
 
         Uses keep_alive=0 by default so the embed model unloads immediately
         after use, freeing VRAM for the main LLM. For batch operations (>5
-        texts), temporarily unloads the main LLM first to guarantee enough
-        VRAM for the embedding model.
+        texts), temporarily unloads the main LLM first and keeps the embed
+        model loaded across sub-batches for speed.
 
         Args:
             texts: A single string or list of strings to embed.
@@ -134,13 +134,24 @@ class OllamaBackend:
         batch_mode = len(texts) > 5
         if batch_mode:
             self._unload_model(self.model)
+            import time as _time
+            _time.sleep(0.5)
 
         BATCH_SIZE = 50
         all_embeddings: list[list[float]] = []
+        total_batches = (len(texts) + BATCH_SIZE - 1) // BATCH_SIZE
 
         try:
-            for i in range(0, len(texts), BATCH_SIZE):
+            for batch_idx, i in enumerate(range(0, len(texts), BATCH_SIZE)):
                 batch = texts[i:i + BATCH_SIZE]
+                is_last_batch = (batch_idx == total_batches - 1)
+
+                # In batch mode, keep embed model loaded between sub-batches
+                # and only unload on the last one
+                if batch_mode and not is_last_batch:
+                    batch_keep_alive = "5m"
+                else:
+                    batch_keep_alive = keep_alive
 
                 # Try new API first (/api/embed with "input" field)
                 r = self._session.post(
@@ -148,9 +159,9 @@ class OllamaBackend:
                     json={
                         "model": embed_model,
                         "input": batch,
-                        "keep_alive": keep_alive,
+                        "keep_alive": batch_keep_alive,
                     },
-                    timeout=self.timeout,
+                    timeout=max(self.timeout, 300),
                 )
 
                 if r.status_code == 404:
@@ -173,20 +184,22 @@ class OllamaBackend:
                             all_embeddings.append(emb)
                     continue
 
-                if r.status_code == 500 and not batch_mode:
+                if r.status_code == 500:
                     # VRAM OOM — unload main model and retry once
-                    log.info("Embed 500 error, unloading main model and retrying")
+                    log.info("Embed 500 error on batch %d/%d, "
+                             "unloading main model and retrying",
+                             batch_idx + 1, total_batches)
                     self._unload_model(self.model)
-                    import time as _time
-                    _time.sleep(1)
+                    import time as _time2
+                    _time2.sleep(1)
                     r = self._session.post(
                         f"{self.base_url}/api/embed",
                         json={
                             "model": embed_model,
                             "input": batch,
-                            "keep_alive": keep_alive,
+                            "keep_alive": batch_keep_alive,
                         },
-                        timeout=self.timeout,
+                        timeout=max(self.timeout, 300),
                     )
 
                 if r.status_code != 200:
@@ -203,6 +216,11 @@ class OllamaBackend:
                     if single:
                         embeddings = [single]
                 all_embeddings.extend(embeddings)
+
+                if batch_mode and total_batches > 1:
+                    log.info("Embedded batch %d/%d (%d chunks)",
+                             batch_idx + 1, total_batches, len(batch))
+
         except Exception as e:
             log.warning("Embedding failed: %s", e)
             return []
