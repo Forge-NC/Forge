@@ -13,6 +13,12 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+// Skip tracking for owner — set by analytics.php on owner login
+if (isset($_COOKIE['forge_dnt']) && $_COOKIE['forge_dnt'] === 'owner') {
+    http_response_code(204);
+    exit;
+}
+
 // CORS — restrict to same origin
 $allowed_origin = 'https://dirt-star.com';
 $request_origin = $_SERVER['HTTP_ORIGIN'] ?? '';

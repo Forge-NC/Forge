@@ -81,6 +81,11 @@ if (isset($_GET['view']) && $_GET['view'] === 'fleet') {
     $view_mode = 'my_fleet';
 }
 
+// Set long-lived DNT cookie so owner visits aren't recorded by track.php
+if ($is_owner && (!isset($_COOKIE['forge_dnt']) || $_COOKIE['forge_dnt'] !== 'owner')) {
+    setcookie('forge_dnt', 'owner', time() + 365 * 86400, '/', 'dirt-star.com', true, true);
+}
+
 // Privacy: token-scoped users can only see their own machines + fleet averages
 $is_token_user = ($auth['method'] === 'token');
 
@@ -143,7 +148,7 @@ function cell_color(float $pct): string {
 }
 
 function tier_color(string $tier): string {
-    $colors = ['community' => '#3fb950', 'pro' => '#58a6ff', 'power' => '#bc8cff'];
+    $colors = ['community' => '#3fb950', 'pro' => '#58a6ff', 'power' => '#bc8cff', 'origin' => '#f0b942'];
     return $colors[$tier] ?? '#8b949e';
 }
 
@@ -804,7 +809,7 @@ if ($is_token_user && $view_mode === 'fleet') {
         if ($cd['activated'] && !$is_revoked) $active_masters++;
 
         $seats = $pp['seat_count'] ?? 1;
-        $total_seats_sold += $seats;
+        if ($seats >= 0) $total_seats_sold += $seats; // skip unlimited (-1)
 
         $puppets = $puppet_registry[$acct] ?? [];
         $active_puppet_count = count(array_filter($puppets,
@@ -969,7 +974,7 @@ if ($is_token_user && $view_mode === 'fleet') {
             <tr style="<?= $is_revoked ? 'opacity:0.45;' : '' ?>">
                 <td style="font-weight:500"><?= htmlspecialchars($pp['customer_label'] ?? '(unlabeled)') ?></td>
                 <td><span style="color:<?= $tc ?>;font-weight:600"><?= ucfirst($tier) ?></span></td>
-                <td><?= $active_pups ?>/<?= max(0, $seats - 1) ?></td>
+                <td><?= $active_pups ?>/<?= $seats < 0 ? '&infin;' : max(0, $seats - 1) ?></td>
                 <td><?= count($puppets) ?></td>
                 <td>
                     <?php if ($is_revoked): ?>
@@ -1035,10 +1040,11 @@ if ($is_token_user && $view_mode === 'fleet') {
     $mst_pp = $master_info['passport'] ?? [];
     $mst_tier = $mst_pp['tier'] ?? 'community';
     $mst_seats = $mst_pp['seat_count'] ?? 1;
-    $puppet_limit = max(0, $mst_seats - 1);
+    $is_unlimited = ($mst_seats < 0);
+    $puppet_limit = $is_unlimited ? -1 : max(0, $mst_seats - 1);
     $active_pups = count(array_filter($master_puppets,
         function($p) { return ($p['status'] ?? '') === 'active'; }));
-    $seat_pct = $puppet_limit > 0 ? round(($active_pups / $puppet_limit) * 100) : 0;
+    $seat_pct = $is_unlimited ? 100 : ($puppet_limit > 0 ? round(($active_pups / $puppet_limit) * 100) : 0);
     $revoked_pups = count(array_filter($master_puppets,
         function($p) { return ($p['status'] ?? '') === 'revoked'; }));
     $circumference = 2 * 3.14159 * 32;
@@ -1065,9 +1071,9 @@ if ($is_token_user && $view_mode === 'fleet') {
                     stroke-dasharray="<?= $circumference ?>"
                     stroke-dashoffset="<?= $dash_offset ?>"/>
             </svg>
-            <span class="ring-text"><?= $seat_pct ?>%</span>
+            <span class="ring-text"><?= $is_unlimited ? '&infin;' : $seat_pct . '%' ?></span>
         </div>
-        <span class="stat-hint"><?= $active_pups ?> of <?= $puppet_limit ?> puppet slots used</span>
+        <span class="stat-hint"><?= $active_pups ?> of <?= $is_unlimited ? '&infin;' : $puppet_limit ?> puppet slots used</span>
     </div>
     <div class="card stat-card" title="Active puppets vs total registered puppets">
         <span class="stat-label">Active Puppets</span>
