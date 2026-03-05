@@ -35,6 +35,8 @@ server/data/
 server/rate_limits/
 server/check_*.txt
 server/upload_*.txt
+server/upload_*.log
+server/winscp_*.log
 
 # Scratch/junk files
 report.md
