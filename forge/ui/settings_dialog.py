@@ -117,7 +117,7 @@ class ForgeSettingsDialog:
             corner_radius=6)
         self._tabs.pack(fill="both", expand=True, padx=8, pady=(4, 0))
 
-        for name in ["Safety", "Models", "Context", "Agent", "Voice", "UI", "Nightly", "Telemetry"]:
+        for name in ["Safety", "Models", "Context", "Agent", "Voice", "UI", "Forge", "License", "Nightly", "Telemetry"]:
             self._tabs.add(name)
 
         self._build_safety_tab()
@@ -126,6 +126,8 @@ class ForgeSettingsDialog:
         self._build_agent_tab()
         self._build_voice_tab()
         self._build_ui_tab()
+        self._build_forge_tab()
+        self._build_license_tab()
         self._build_nightly_tab()
         self._build_telemetry_tab()
 
@@ -263,6 +265,49 @@ class ForgeSettingsDialog:
 
         self._widgets["sandbox_roots"] = ("pathlist", self._sandbox_paths)
 
+        # ── Output & Data Security ──
+        ctk.CTkFrame(tab, fg_color=COLORS["border"], height=1
+                     ).pack(fill="x", padx=16, pady=(10, 6))
+        ctk.CTkLabel(tab, text="Output & Data Security",
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["cyan"]
+                     ).pack(anchor="w", padx=16, pady=(4, 2))
+
+        self._add_switch(tab, "output_scanning", "Scan LLM Output")
+        self._add_desc(tab,
+            "Detect secrets and threats in model responses "
+            "(respects safety level)")
+        self._add_switch(tab, "rag_scanning", "Scan RAG Retrievals")
+        self._add_desc(tab,
+            "Check recalled code for threats before context injection "
+            "(respects safety level)")
+        self._add_switch(tab, "rate_limiting", "Tool Rate Limiting")
+        self._add_desc(tab,
+            "Circuit breaker for runaway tool call loops "
+            "(limits scale with safety level)")
+        self._add_slider(tab, "data_retention_days", "Data Retention",
+                         0, 365, 365, fmt="{:.0f} days")
+        self._add_desc(tab,
+            "Auto-prune old forensics/exports on boot (0 = keep forever)")
+
+        # ── Threat Intelligence ──
+        ctk.CTkFrame(tab, fg_color=COLORS["border"], height=1
+                     ).pack(fill="x", padx=16, pady=(10, 6))
+        ctk.CTkLabel(tab, text="Threat Intelligence",
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["cyan"]
+                     ).pack(anchor="w", padx=16, pady=(4, 2))
+
+        self._add_switch(tab, "threat_signatures_enabled",
+                         "External Signatures")
+        self._add_desc(tab,
+            "Load updateable threat patterns (extends hardcoded patterns)")
+        self._add_switch(tab, "threat_auto_update",
+                         "Auto-Update Signatures")
+        self._add_desc(tab,
+            "Check for new signatures on startup "
+            "(interval scales with safety level)")
+
     def _build_models_tab(self):
         tab = self._scrollable_tab("Models")
 
@@ -351,6 +396,22 @@ class ForgeSettingsDialog:
             "Score below which aggressive recovery triggers (full "
             "rebuild + subtask recalls)")
 
+        # ── Adaptive Model Intelligence ──
+        ctk.CTkFrame(tab, fg_color=COLORS["border"], height=1).pack(
+            fill="x", padx=16, pady=(10, 6))
+        ctk.CTkLabel(tab, text="  Model Intelligence",
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["cyan_dim"],
+                     anchor="w").pack(fill="x", padx=16, pady=(4, 2))
+        self._add_switch(tab, "ami_enabled", "Adaptive Model Intelligence")
+        self._add_desc(tab,
+            "Self-healing orchestration: detect failures, force "
+            "compliance, auto-recover")
+        self._add_switch(tab, "ami_constrained_fallback",
+                         "Constrained Decoding Fallback")
+        self._add_desc(tab,
+            "Force tool-call JSON format when native tool calling fails")
+
     def _build_agent_tab(self):
         tab = self._scrollable_tab("Agent")
 
@@ -376,6 +437,11 @@ class ForgeSettingsDialog:
     def _build_voice_tab(self):
         tab = self._scrollable_tab("Voice")
 
+        self._add_dropdown(tab, "tts_engine", "TTS Engine",
+                           ["edge", "local"])
+        self._add_desc(tab,
+            "edge = Microsoft neural voices (high quality, requires internet). "
+            "local = System voices via pyttsx3 (fully offline, lower quality).")
         self._add_dropdown(tab, "voice_model", "Whisper Model",
                            ["tiny", "base", "small", "medium"])
         self._add_desc(tab, "Larger models are more accurate but slower")
@@ -641,6 +707,247 @@ class ForgeSettingsDialog:
         self._add_desc(tab,
             "Machine ID is a one-way hash. "
             "Your hostname cannot be recovered from it.")
+
+    # ── Forge tab (AutoForge + Shipwright) ──
+
+    def _build_forge_tab(self):
+        tab = self._scrollable_tab("Forge")
+
+        # Section: AutoForge
+        ctk.CTkLabel(tab, text="AutoForge",
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["cyan"]
+                     ).pack(anchor="w", padx=16, pady=(8, 2))
+
+        self._add_switch(tab, "auto_commit", "Auto-Commit")
+        self._add_desc(tab,
+            "Automatically commit file edits at each turn boundary. "
+            "Operates on the current project's git repo, not Forge itself.")
+
+        # Separator
+        ctk.CTkFrame(tab, fg_color=COLORS["border"], height=1
+                     ).pack(fill="x", padx=16, pady=(10, 6))
+
+        # Section: Shipwright
+        ctk.CTkLabel(tab, text="Shipwright",
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["cyan"]
+                     ).pack(anchor="w", padx=16, pady=(4, 2))
+
+        self._add_switch(tab, "shipwright_llm_classify",
+                         "LLM Commit Classification")
+        self._add_desc(tab,
+            "Use the AI model to classify ambiguous commit messages "
+            "into categories (feature, fix, refactor, etc) for smarter "
+            "version bumping.")
+
+    # ── License tab (BPoS / Passport) ──
+
+    def _build_license_tab(self):
+        tab = self._scrollable_tab("License")
+
+        # Section header
+        ctk.CTkLabel(tab, text="License Tier",
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["cyan"]
+                     ).pack(anchor="w", padx=16, pady=(8, 2))
+
+        # Tier display
+        tier_row = ctk.CTkFrame(tab, fg_color="transparent")
+        tier_row.pack(fill="x", padx=16, pady=4)
+        self._lic_tier_label = ctk.CTkLabel(
+            tier_row, text="Community (Free)",
+            font=ctk.CTkFont(*FONT_MONO_BOLD),
+            text_color=COLORS["green"])
+        self._lic_tier_label.pack(side="left")
+
+        # Activation count
+        self._lic_act_label = ctk.CTkLabel(
+            tab, text="  Activations: 1/1",
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            text_color=COLORS["gray"])
+        self._lic_act_label.pack(anchor="w", padx=16, pady=2)
+
+        # Genome maturity bar
+        mat_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        mat_frame.pack(fill="x", padx=16, pady=4)
+        ctk.CTkLabel(mat_frame, text="Genome Maturity",
+                     font=ctk.CTkFont(*FONT_MONO_SM),
+                     text_color=COLORS["gray"],
+                     width=140, anchor="w").pack(side="left")
+        self._lic_maturity_bar = ctk.CTkProgressBar(
+            mat_frame, height=10, corner_radius=3,
+            fg_color=COLORS["bg_dark"],
+            progress_color=COLORS["cyan"])
+        self._lic_maturity_bar.pack(
+            side="left", fill="x", expand=True, padx=(6, 0))
+        self._lic_maturity_bar.set(0.0)
+        self._lic_maturity_pct = ctk.CTkLabel(
+            mat_frame, text="0%",
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            text_color=COLORS["white"], width=40)
+        self._lic_maturity_pct.pack(side="right")
+
+        # Action buttons
+        btn_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=16, pady=(8, 4))
+        ctk.CTkButton(
+            btn_frame, text="Activate Passport...", width=160,
+            fg_color=COLORS["cyan_dim"],
+            hover_color=COLORS["cyan"],
+            text_color=COLORS["bg_dark"],
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            command=self._activate_passport).pack(side="left", padx=(0, 4))
+        ctk.CTkButton(
+            btn_frame, text="Deactivate", width=100,
+            fg_color=COLORS["bg_card"],
+            hover_color=COLORS["red"],
+            text_color=COLORS["white"],
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            command=self._deactivate_passport).pack(side="left")
+
+        # Separator
+        ctk.CTkFrame(tab, fg_color=COLORS["border"], height=1
+                     ).pack(fill="x", padx=16, pady=(10, 6))
+
+        # Tier comparison table
+        ctk.CTkLabel(tab, text="Tier Comparison",
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["cyan"]
+                     ).pack(anchor="w", padx=16, pady=(4, 4))
+        self._build_tier_table(tab)
+
+        # Populate current state
+        self._refresh_license_display()
+
+    def _build_tier_table(self, parent):
+        """Build a 4-column tier comparison table."""
+        from forge.passport import get_tiers
+
+        tiers = get_tiers()
+        features = [
+            ("genome_persistence", "Genome Persistence"),
+            ("seats", "Seats"),
+            ("auto_commit", "AutoForge"),
+            ("shipwright", "Shipwright"),
+            ("enterprise_mode", "Enterprise Mode"),
+            ("fleet_analytics", "Fleet Analytics"),
+        ]
+
+        # Header row
+        hdr = ctk.CTkFrame(parent, fg_color="transparent")
+        hdr.pack(fill="x", padx=16, pady=(0, 2))
+        ctk.CTkLabel(hdr, text="Feature", width=140, anchor="w",
+                     font=ctk.CTkFont(*FONT_MONO_XS),
+                     text_color=COLORS["gray"]).pack(side="left")
+        for tier_key in ("community", "pro", "power"):
+            cfg = tiers.get(tier_key, {})
+            label = cfg.get("label", tier_key.title())
+            ctk.CTkLabel(hdr, text=label, width=90, anchor="center",
+                         font=ctk.CTkFont(*FONT_MONO_XS),
+                         text_color=COLORS["white"]).pack(side="left")
+
+        # Feature rows
+        for feat_key, feat_label in features:
+            row = ctk.CTkFrame(parent, fg_color="transparent")
+            row.pack(fill="x", padx=16, pady=1)
+            ctk.CTkLabel(row, text=feat_label, width=140, anchor="w",
+                         font=ctk.CTkFont(*FONT_MONO_XS),
+                         text_color=COLORS["text_dim"]).pack(side="left")
+            for tier_key in ("community", "pro", "power"):
+                cfg = tiers.get(tier_key, {})
+                val = cfg.get(feat_key, False)
+                if isinstance(val, bool):
+                    display = "yes" if val else "--"
+                    color = COLORS["green"] if val else COLORS["border"]
+                else:
+                    display = str(val)
+                    color = COLORS["white"]
+                ctk.CTkLabel(row, text=display, width=90, anchor="center",
+                             font=ctk.CTkFont(*FONT_MONO_XS),
+                             text_color=color).pack(side="left")
+
+    def _refresh_license_display(self):
+        """Populate license tab from BPoS state."""
+        try:
+            from forge.passport import BPoS
+            from forge.machine_id import get_machine_id
+            config_dir = Path.home() / ".forge"
+            bpos = BPoS(data_dir=config_dir, machine_id=get_machine_id())
+
+            tier = bpos.tier
+            tc = bpos.tier_config
+            tier_colors = {
+                "community": COLORS["green"],
+                "pro": COLORS["cyan"],
+                "power": COLORS["magenta"],
+            }
+            color = tier_colors.get(tier, COLORS["white"])
+            price = tc.get("price_display", tc.get("price", "Free"))
+            self._lic_tier_label.configure(
+                text=f"{tc.get('label', tier)} ({price})", text_color=color)
+
+            passport = bpos._passport
+            acts = len(passport.activations) if passport else 1
+            seats = tc.get("seats", 1)
+            self._lic_act_label.configure(
+                text=f"  Seats: {acts}/{seats}")
+
+            maturity = bpos.get_genome_maturity()
+            self._lic_maturity_bar.set(maturity)
+            self._lic_maturity_pct.configure(
+                text=f"{int(maturity * 100)}%")
+        except Exception as e:
+            log.debug("License display: %s", e)
+
+    def _activate_passport(self):
+        """Open file dialog to activate a passport JSON."""
+        import tkinter.filedialog as fd
+        import json as _json
+        path = fd.askopenfilename(
+            parent=self._win,
+            title="Select Passport File",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            from forge.passport import BPoS
+            from forge.machine_id import get_machine_id
+            config_dir = Path.home() / ".forge"
+            bpos = BPoS(data_dir=config_dir, machine_id=get_machine_id())
+            data = _json.loads(Path(path).read_text())
+            ok, msg = bpos.activate(data)
+            self._refresh_license_display()
+            if ok:
+                self._show_msg("Passport activated", COLORS["green"])
+            else:
+                self._show_msg(f"Failed: {msg}", COLORS["red"])
+        except Exception as e:
+            self._show_msg(f"Error: {e}", COLORS["red"])
+
+    def _deactivate_passport(self):
+        """Deactivate the current passport."""
+        try:
+            from forge.passport import BPoS
+            from forge.machine_id import get_machine_id
+            config_dir = Path.home() / ".forge"
+            bpos = BPoS(data_dir=config_dir, machine_id=get_machine_id())
+            ok, msg = bpos.deactivate()
+            self._refresh_license_display()
+            if ok:
+                self._show_msg("Passport deactivated", COLORS["green"])
+            else:
+                self._show_msg(f"Failed: {msg}", COLORS["red"])
+        except Exception as e:
+            self._show_msg(f"Error: {e}", COLORS["red"])
+
+    def _show_msg(self, text: str, color: str):
+        """Brief flash message near the bottom of the window."""
+        lbl = ctk.CTkLabel(self._win, text=text,
+                           font=ctk.CTkFont(*FONT_MONO_SM),
+                           text_color=color)
+        lbl.place(relx=0.5, rely=0.95, anchor="center")
+        self._win.after(3000, lbl.destroy)
 
     # ── Widget helpers ────────────────────────────────────────────
 

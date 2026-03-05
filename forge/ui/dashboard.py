@@ -61,7 +61,9 @@ _F = get_fonts()
 FONT_MONO = _F["mono"]
 FONT_MONO_BOLD = _F["mono_bold"]
 FONT_MONO_SM = _F["mono_sm"]
+FONT_MONO_XS = _F["mono_xs"]
 FONT_TITLE = _F["title"]
+FONT_TITLE_SM = _F["title_sm"]
 
 # ──────────────────────────────────────────────────────────────────
 # Animation State Machine
@@ -388,7 +390,8 @@ def _build_anim_engine_from_image(brain_path: Path):
 _LAYOUT_FILE = Path.home() / ".forge" / "dashboard_layout.json"
 
 CARD_IDS = ["launch", "voice", "chat", "context", "continuity",
-            "reliability", "performance", "session", "memory"]
+            "reliability", "performance", "session", "memory",
+            "autoforge", "shipwright", "license"]
 
 
 @dataclass
@@ -941,15 +944,26 @@ class ForgeLauncher:
         self._card_mgr = CardManager(self._dash_frame, self._effects)
 
         # Build all cards — _make_card returns (frame, body)
-        self._build_launch_card()
-        self._build_voice_card()
-        self._build_chat_area()
-        self._build_context_card()
-        self._build_continuity_card()
-        self._build_reliability_card()
-        self._build_performance_card()
-        self._build_session_card()
-        self._build_memory_card()
+        # Each builder is guarded so one failure can't block the rest.
+        for _builder in [
+            self._build_launch_card,
+            self._build_voice_card,
+            self._build_chat_area,
+            self._build_context_card,
+            self._build_continuity_card,
+            self._build_reliability_card,
+            self._build_performance_card,
+            self._build_session_card,
+            self._build_memory_card,
+            self._build_autoforge_card,
+            self._build_shipwright_card,
+            self._build_license_card,
+        ]:
+            try:
+                _builder()
+            except Exception:
+                log.error("Card build failed: %s", _builder.__name__,
+                          exc_info=True)
 
         # Update notification card (only if behind)
         if getattr(self, "_update_behind", 0) > 0:
@@ -977,6 +991,19 @@ class ForgeLauncher:
 
         # Apply saved layout (reorder, collapse, hide)
         self._card_mgr.apply_initial_state()
+
+        # Force scroll region update — CTkScrollableFrame's canvas must
+        # know the full content height or the last cards get clipped.
+        def _fix_scroll():
+            try:
+                self._dash_scroll.update_idletasks()
+                canvas = self._dash_scroll._parent_canvas
+                canvas.configure(scrollregion=canvas.bbox("all"))
+            except Exception:
+                pass
+        _fix_scroll()
+        # Schedule a second pass after the event loop settles
+        self._root.after(300, _fix_scroll)
 
         # Show restore button if any cards hidden
         self._update_restore_btn()
@@ -1306,7 +1333,9 @@ class ForgeLauncher:
             tts = None
             try:
                 from forge.audio.tts import TextToSpeech
-                tts = TextToSpeech()
+                from forge.config import load_config
+                cfg = load_config()
+                tts = TextToSpeech(engine=cfg.get("tts_engine", "edge"))
             except Exception:
                 pass
 
@@ -1553,6 +1582,60 @@ class ForgeLauncher:
         ]:
             self._add_stat_row(body, key, label, default,
                                val_color=COLORS["cyan_dim"])
+
+    def _build_autoforge_card(self):
+        card, body = self._make_card(
+            self._dash_frame, "autoforge", "AutoForge")
+        for key, label, default in [
+            ("af_status", "Status", "disabled"),
+            ("af_pending", "Pending", "0"),
+            ("af_commits", "Commits", "0"),
+        ]:
+            self._add_stat_row(body, key, label, default)
+        # Recent commits mini-list
+        self._af_recent = ctk.CTkLabel(
+            body, text="", font=ctk.CTkFont(*FONT_MONO_XS),
+            text_color=COLORS["text_dim"], anchor="w", justify="left",
+            wraplength=280)
+        self._af_recent.pack(fill="x", padx=10, pady=(2, 4))
+
+    def _build_shipwright_card(self):
+        card, body = self._make_card(
+            self._dash_frame, "shipwright", "Shipwright")
+        for key, label, default in [
+            ("sw_version", "Version", "0.0.0"),
+            ("sw_unreleased", "Unreleased", "0 commits"),
+            ("sw_bump", "Suggested", "--"),
+            ("sw_last", "Last Release", "--"),
+        ]:
+            self._add_stat_row(body, key, label, default)
+
+    def _build_license_card(self):
+        card, body = self._make_card(
+            self._dash_frame, "license", "License")
+        # Tier badge
+        tier_row = ctk.CTkFrame(body, fg_color="transparent", height=24)
+        tier_row.pack(fill="x", padx=10, pady=(2, 1))
+        tier_row.pack_propagate(False)
+        self._lic_card_tier = ctk.CTkLabel(
+            tier_row, text="Community",
+            font=ctk.CTkFont(*FONT_MONO_BOLD),
+            text_color=COLORS["green"])
+        self._lic_card_tier.pack(side="left")
+        # Maturity bar
+        self._lic_card_bar = ctk.CTkProgressBar(
+            tier_row, height=8, corner_radius=3,
+            fg_color=COLORS["bg_dark"],
+            progress_color=COLORS["cyan"])
+        self._lic_card_bar.pack(
+            side="right", fill="x", expand=True, padx=(10, 0))
+        self._lic_card_bar.set(0.0)
+        for key, label, default in [
+            ("lic_maturity", "Maturity", "0%"),
+            ("lic_acts", "Activations", "1/1"),
+            ("lic_genome", "Genome", "resets"),
+        ]:
+            self._add_stat_row(body, key, label, default)
 
     def _make_card(self, parent, card_id: str, title: str):
         """Create a dashboard card with drag handle, collapse/hide buttons.
@@ -2529,6 +2612,11 @@ class ForgeLauncher:
                 old_stderr = sys.stderr
                 sys.stdout = gui_io._stdout_redirect
                 sys.stderr = gui_io._stdout_redirect
+                # Re-point logging handlers to the new stderr so log
+                # messages don't crash with "NoneType has no .write"
+                for handler in logging.root.handlers:
+                    if isinstance(handler, logging.StreamHandler):
+                        handler.stream = gui_io._stdout_redirect
                 try:
                     from forge.engine import ForgeEngine
                     engine = ForgeEngine(
@@ -2547,6 +2635,10 @@ class ForgeLauncher:
                 finally:
                     sys.stdout = old_stdout
                     sys.stderr = old_stderr
+                    # Restore logging handlers to original stderr
+                    for handler in logging.root.handlers:
+                        if isinstance(handler, logging.StreamHandler):
+                            handler.stream = old_stderr or sys.__stderr__
                     gui_io.shutdown()
 
             threading.Thread(
@@ -2867,6 +2959,82 @@ class ForgeLauncher:
                 self._stat_labels["rel_trend"].configure(
                     text=td, text_color=tc)
 
+        # ── AutoForge card ──
+        af = data.get("autoforge", {})
+        if af:
+            if "af_status" in self._stat_labels:
+                enabled = af.get("enabled", False)
+                self._stat_labels["af_status"].configure(
+                    text="enabled" if enabled else "disabled",
+                    text_color=COLORS["green"] if enabled
+                    else COLORS["gray"])
+            if "af_pending" in self._stat_labels:
+                pending = af.get("pending", 0)
+                self._stat_labels["af_pending"].configure(
+                    text=str(pending),
+                    text_color=COLORS["yellow"] if pending > 0
+                    else COLORS["white"])
+            if "af_commits" in self._stat_labels:
+                self._stat_labels["af_commits"].configure(
+                    text=str(af.get("session_commits", 0)))
+            if hasattr(self, "_af_recent") and self._af_recent:
+                commits = af.get("recent_commits", [])
+                if commits:
+                    lines = [f"[{c['sha']}] {c['msg']}"
+                             for c in commits[-3:]]
+                    self._af_recent.configure(text="\n".join(lines))
+
+        # ── Shipwright card ──
+        sw = data.get("shipwright", {})
+        if sw:
+            if "sw_version" in self._stat_labels:
+                self._stat_labels["sw_version"].configure(
+                    text=sw.get("version", "0.0.0"))
+            if "sw_unreleased" in self._stat_labels:
+                count = sw.get("unreleased_count", 0)
+                self._stat_labels["sw_unreleased"].configure(
+                    text=f"{count} commits",
+                    text_color=COLORS["cyan"] if count > 0
+                    else COLORS["white"])
+            if "sw_bump" in self._stat_labels:
+                bump = sw.get("suggested_bump", "none")
+                bc = {"major": COLORS["red"], "minor": COLORS["cyan"],
+                      "patch": COLORS["green"]}.get(bump, COLORS["gray"])
+                self._stat_labels["sw_bump"].configure(
+                    text=bump, text_color=bc)
+            if "sw_last" in self._stat_labels:
+                self._stat_labels["sw_last"].configure(
+                    text=sw.get("last_release_date", "--"))
+
+        # ── License card ──
+        lic = data.get("license", {})
+        if lic:
+            tier = lic.get("tier", "community")
+            tc = {"community": COLORS["green"],
+                  "pro": COLORS["cyan"],
+                  "power": COLORS["magenta"]}.get(tier, COLORS["white"])
+            if hasattr(self, "_lic_card_tier") and self._lic_card_tier:
+                self._lic_card_tier.configure(
+                    text=lic.get("tier_label", "Community"),
+                    text_color=tc)
+            if hasattr(self, "_lic_card_bar") and self._lic_card_bar:
+                mat = lic.get("maturity_pct", 0) / 100.0
+                self._lic_card_bar.set(mat)
+            if "lic_maturity" in self._stat_labels:
+                self._stat_labels["lic_maturity"].configure(
+                    text=f"{lic.get('maturity_pct', 0)}%")
+            if "lic_acts" in self._stat_labels:
+                acts = lic.get("activations", 1)
+                max_acts = lic.get("max_activations", 1)
+                self._stat_labels["lic_acts"].configure(
+                    text=f"{acts}/{max_acts}")
+            if "lic_genome" in self._stat_labels:
+                persist = lic.get("genome_persistence", False)
+                self._stat_labels["lic_genome"].configure(
+                    text="persists" if persist else "resets",
+                    text_color=COLORS["green"] if persist
+                    else COLORS["yellow"])
+
         model = data.get("model", "")
         if model and self._footer_label:
             self._footer_label.configure(
@@ -3080,6 +3248,7 @@ class ForgeLauncher:
         items = [
             ("Settings", "Ctrl+,", self._open_settings),
             ("Model Manager", None, self._open_model_manager),
+            ("Fleet Manager", None, self._open_puppet_manager),
             ("Test Suite", None, self._open_test_runner),
             ("Run All Tests", None, self._run_all_tests),
             ("Nightly Tests", None, self._open_nightly_settings),
@@ -3229,6 +3398,13 @@ class ForgeLauncher:
         from forge.config import ForgeConfig
         config = ForgeConfig()
         ModelManagerDialog(self._root, config)
+
+    def _open_puppet_manager(self):
+        """Open the Fleet Manager dialog."""
+        from forge.ui.puppet_manager import PuppetManagerDialog
+        from forge.config import ForgeConfig
+        config = ForgeConfig()
+        PuppetManagerDialog(self._root, config)
 
     def _open_test_runner(self):
         """Open the Test Suite Runner dialog."""

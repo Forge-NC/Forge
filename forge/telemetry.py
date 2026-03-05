@@ -108,13 +108,31 @@ def upload_telemetry(
                 else:
                     headers["X-Forge-Key"] = _API_KEY
 
+                # Include fleet metadata if available
+                post_data = {"machine_id": machine_id}
+                try:
+                    from forge.config import load_config
+                    cfg = load_config()
+                    fleet_role = cfg.get("fleet_role", "standalone")
+                    master_id = cfg.get("master_id",
+                                        cfg.get("captain_id", ""))
+                    account_id = cfg.get("account_id", "")
+                    seat_id = cfg.get("seat_id", "")
+                    if fleet_role != "standalone":
+                        post_data["fleet_role"] = fleet_role
+                        post_data["master_id"] = master_id
+                        post_data["account_id"] = account_id
+                        post_data["seat_id"] = seat_id
+                except Exception:
+                    pass
+
                 resp = requests.post(
                     url,
                     files={"bundle": (
                         f"forge_{machine_id}.zip", zip_bytes,
                         "application/zip")},
                     headers=headers,
-                    data={"machine_id": machine_id},
+                    data=post_data,
                     timeout=_TIMEOUT_S,
                 )
                 if resp.status_code == 200:

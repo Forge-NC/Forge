@@ -200,6 +200,21 @@ class ReliabilityTracker:
 
         return {"direction": direction, "scores": scores}
 
+    def get_score_history(self) -> list:
+        """Return per-session composite scores for sparkline display."""
+        return [self._compute_composite([s]) for s in self._sessions[-20:]]
+
+    def to_audit_dict(self) -> dict:
+        """Serializable snapshot for audit export — consistent with other subsystems."""
+        return {
+            "schema_version": 1,
+            "score": self.get_reliability_score(),
+            "trend": self.get_trend(),
+            "metrics": self.get_underlying_metrics(),
+            "score_history": self.get_score_history(),
+            "sessions_count": len(self._sessions),
+        }
+
     def get_current_session_health(self, *, forensics, continuity,
                                     plan_verifier, billing,
                                     session_start: float,
@@ -370,9 +385,7 @@ class ReliabilityTracker:
                 os.write(fd, content.encode("utf-8"))
                 os.close(fd)
                 closed = True
-                if self._persist_path.exists():
-                    self._persist_path.unlink()
-                os.rename(tmp_path, str(self._persist_path))
+                os.replace(tmp_path, str(self._persist_path))
             except Exception:
                 if not closed:
                     os.close(fd)

@@ -160,8 +160,13 @@ class ModelRouter:
         self._route_log: list[dict] = []
 
     def route(self, user_input: str, context_entries: int = 0,
-              active_files: int = 0) -> str:
+              active_files: int = 0, model_quality: float = 1.0) -> str:
         """Decide which model to use for this input.
+
+        Args:
+            model_quality: AMI average quality (0-1). When low, prefer
+                           small model for simple/moderate tasks since the
+                           big model is struggling.
 
         Returns the model name to use.
         """
@@ -170,7 +175,13 @@ class ModelRouter:
 
         est = estimate_complexity(user_input, context_entries, active_files)
 
-        if est["level"] == "simple":
+        # Quality-aware routing: if big model quality is degraded,
+        # prefer small model for non-complex tasks
+        if model_quality < 0.5 and est["level"] != "complex":
+            model = self.small_model
+            self.small_routes += 1
+            est["reason"] += ", big model quality degraded"
+        elif est["level"] == "simple":
             model = self.small_model
             self.small_routes += 1
         else:

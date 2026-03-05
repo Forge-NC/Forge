@@ -1,0 +1,60 @@
+id: shared-constants
+name: Extract Shared Constants
+description: >
+  Extract duplicated magic numbers into a shared constants file.
+  Tests deduplication awareness across files.
+category: refactor
+difficulty: easy
+
+files:
+  server.py: |
+    def start_server():
+        """Start the web server."""
+        host = "0.0.0.0"
+        port = 8080
+        max_connections = 100
+        print(f"Starting on {host}:{port} (max {max_connections})")
+  client.py: |
+    def connect():
+        """Connect to the server."""
+        host = "localhost"
+        port = 8080
+        timeout = 30
+        print(f"Connecting to {host}:{port} (timeout {timeout}s)")
+  health.py: |
+    def check_health():
+        """Check server health."""
+        port = 8080
+        endpoint = f"http://localhost:{port}/health"
+        print(f"Checking {endpoint}")
+
+prompt: >
+  The port number 8080 is duplicated in all three files.
+  Create a `constants.py` file with `DEFAULT_PORT = 8080`
+  and update all three files to import and use it.
+
+expected_file_scope:
+  - constants.py
+  - server.py
+  - client.py
+  - health.py
+
+validation:
+  expected_patterns:
+    constants.py:
+      - "DEFAULT_PORT.*=.*8080"
+    server.py:
+      - "from constants import|import constants"
+    client.py:
+      - "from constants import|import constants"
+    health.py:
+      - "from constants import|import constants"
+  forbidden_patterns:
+    server.py:
+      - 'port\s*=\s*8080'
+    client.py:
+      - 'port\s*=\s*8080'
+    health.py:
+      - 'port\s*=\s*8080'
+
+timeout_s: 60

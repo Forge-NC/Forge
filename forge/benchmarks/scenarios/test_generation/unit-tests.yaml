@@ -1,0 +1,44 @@
+id: unit-tests
+name: Generate Unit Tests
+description: >
+  Write pytest unit tests for a simple utility module.
+  Tests code comprehension and test writing ability.
+category: test
+difficulty: easy
+
+files:
+  math_utils.py: |
+    def clamp(value, min_val, max_val):
+        """Clamp value between min and max."""
+        return max(min_val, min(value, max_val))
+
+    def lerp(a, b, t):
+        """Linear interpolation between a and b."""
+        return a + (b - a) * t
+
+    def is_prime(n):
+        """Check if n is prime."""
+        if n < 2:
+            return False
+        for i in range(2, int(n ** 0.5) + 1):
+            if n % i == 0:
+                return False
+        return True
+
+prompt: >
+  Write a pytest test file `test_math_utils.py` with tests for
+  all three functions: clamp, lerp, and is_prime. Include edge cases.
+
+expected_file_scope:
+  - test_math_utils.py
+
+validation:
+  expected_patterns:
+    test_math_utils.py:
+      - "def test_.*clamp|test.*clamp"
+      - "def test_.*lerp|test.*lerp"
+      - "def test_.*prime|test.*prime"
+      - "import.*math_utils|from.*math_utils"
+  forbidden_patterns: {}
+
+timeout_s: 60

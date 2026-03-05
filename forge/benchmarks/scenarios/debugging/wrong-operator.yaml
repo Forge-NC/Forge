@@ -1,0 +1,43 @@
+id: wrong-operator
+name: Fix Wrong Comparison Operator
+description: >
+  Fix a logical error where the wrong comparison operator is used,
+  causing incorrect filtering behavior.
+category: debug
+difficulty: easy
+
+files:
+  filters.py: |
+    def filter_adults(people):
+        """Return people who are 18 or older."""
+        return [p for p in people if p["age"] > 18]
+
+    def filter_in_stock(products):
+        """Return products with quantity greater than zero."""
+        return [p for p in products if p["quantity"] > 1]
+
+    def filter_passing_grades(students):
+        """Return students with grade >= 60."""
+        return [s for s in students if s["grade"] > 60]
+
+prompt: >
+  All three filter functions have off-by-one comparison errors.
+  `filter_adults` should include age 18 (use >=).
+  `filter_in_stock` should include quantity 1 (use >= 1 or > 0).
+  `filter_passing_grades` should include grade 60 (use >=).
+  Fix all three.
+
+expected_file_scope:
+  - filters.py
+
+validation:
+  expected_patterns:
+    filters.py:
+      - '>=\s*18'
+      - '>=\s*60'
+  forbidden_patterns:
+    filters.py:
+      - '>\s*18\b'
+      - '>\s*60\b'
+
+timeout_s: 60

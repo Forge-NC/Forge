@@ -161,51 +161,27 @@ def check_path_sandbox(file_path: str, allowed_roots: list[str]) -> Optional[str
             f"Allowed: {', '.join(allowed_roots)}")
 
 
-def prompt_user_confirm(action_desc: str, timeout: float = 3.0) -> bool:
-    """Show a brief confirmation prompt that auto-accepts after timeout.
-
-    Used at CONFIRM_WRITES level for file modifications.
-    Returns True to proceed, False to skip.
-    """
-    from forge.ui.terminal import YELLOW, DIM, RESET, BOLD
-
-    sys.stdout.write(
-        f"{YELLOW}{BOLD}[CONFIRM]{RESET} {action_desc} "
-        f"{DIM}(auto-accept in {timeout:.0f}s, 'n' to skip){RESET} ")
-    sys.stdout.flush()
-
-    # Platform-specific timeout input
-    if sys.platform == "win32":
-        import msvcrt
-        import time
-        end = time.time() + timeout
-        while time.time() < end:
-            if msvcrt.kbhit():
-                ch = msvcrt.getwch()
-                print()  # newline after input
-                return ch.lower() != "n"
-            time.sleep(0.05)
-        print()  # newline after timeout
-        return True  # auto-accept
-    else:
-        import select
-        rlist, _, _ = select.select([sys.stdin], [], [], timeout)
-        if rlist:
-            ch = sys.stdin.readline().strip()
-            return ch.lower() != "n"
-        print()
-        return True
-
-
 class SafetyGuard:
-    """Central safety manager. Configured once, checks tool calls."""
+    """Central safety manager. Configured once, checks tool calls.
+
+    All interactive prompts go through the IO abstraction — never calls
+    input() directly.  Works with Console, GUI, and Headless IO backends.
+    """
 
     def __init__(self, level: int = SMART_GUARD,
                  sandbox_enabled: bool = False,
-                 sandbox_roots: list[str] = None):
+                 sandbox_roots: list[str] = None,
+                 io=None):
         self.level = max(0, min(3, level))
         self.sandbox_enabled = sandbox_enabled
         self.sandbox_roots = sandbox_roots or []
+        self._io = io  # TerminalIO instance — set by engine
+
+    def _prompt_yes_no(self, message, default=True, timeout=0):
+        """Prompt yes/no through IO layer. Falls back to default if no IO."""
+        if self._io:
+            return self._io.prompt_yes_no(message, default, timeout)
+        return default
 
     @property
     def level_name(self) -> str:
@@ -230,33 +206,21 @@ class SafetyGuard:
             return True, ""
 
         if self.level == LOCKED_DOWN:
-            from forge.ui.terminal import YELLOW, RESET, BOLD, DIM
-            sys.stdout.write(
-                f"\n{YELLOW}{BOLD}[APPROVE?]{RESET} run_shell: "
-                f"{DIM}{command[:120]}{RESET}\n"
-                f"  {YELLOW}y/n (default: y):{RESET} ")
-            sys.stdout.flush()
-            try:
-                answer = input().strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                return False, "User cancelled"
-            if answer == "n":
+            allowed = self._prompt_yes_no(
+                f"run_shell: {command[:120]}", default=True)
+            if not allowed:
                 return False, "User denied"
             return True, ""
 
         # SMART_GUARD or CONFIRM_WRITES — use blocklist
         reason = check_shell_command(command)
         if reason:
-            from forge.ui.terminal import RED, YELLOW, RESET, BOLD, DIM
-            print(f"\n{RED}{BOLD}[BLOCKED]{RESET} {RED}{reason}{RESET}")
-            print(f"  {DIM}Command: {command[:200]}{RESET}")
-            print(f"  {YELLOW}Override? y/n (default: n):{RESET} ", end="")
-            sys.stdout.flush()
-            try:
-                answer = input().strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                return False, reason
-            if answer == "y":
+            if self._io:
+                self._io.print_error(f"[BLOCKED] {reason}")
+                self._io.print_raw(f"  Command: {command[:200]}\n")
+            allowed = self._prompt_yes_no(
+                f"Override blocked command?", default=False)
+            if allowed:
                 return True, "User override"
             return False, reason
 
@@ -276,26 +240,19 @@ class SafetyGuard:
         if self.level <= SMART_GUARD:
             return True, ""
 
+        fname = Path(file_path).name
+
         if self.level == CONFIRM_WRITES:
-            fname = Path(file_path).name
-            allowed = prompt_user_confirm(f"{action} → {fname}")
+            allowed = self._prompt_yes_no(
+                f"{action} -> {fname}", default=True, timeout=3.0)
             if not allowed:
                 return False, "User skipped"
             return True, ""
 
         if self.level == LOCKED_DOWN:
-            from forge.ui.terminal import YELLOW, RESET, BOLD, DIM
-            fname = Path(file_path).name
-            sys.stdout.write(
-                f"\n{YELLOW}{BOLD}[APPROVE?]{RESET} {action}_file: "
-                f"{DIM}{fname}{RESET}\n"
-                f"  {YELLOW}y/n (default: y):{RESET} ")
-            sys.stdout.flush()
-            try:
-                answer = input().strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                return False, "User cancelled"
-            if answer == "n":
+            allowed = self._prompt_yes_no(
+                f"{action}_file: {fname}", default=True)
+            if not allowed:
                 return False, "User denied"
             return True, ""
 
@@ -312,18 +269,10 @@ class SafetyGuard:
                 return False, reason
 
         if self.level == LOCKED_DOWN:
-            from forge.ui.terminal import YELLOW, RESET, BOLD, DIM
             fname = Path(file_path).name
-            sys.stdout.write(
-                f"\n{YELLOW}{BOLD}[APPROVE?]{RESET} read_file: "
-                f"{DIM}{fname}{RESET}\n"
-                f"  {YELLOW}y/n (default: y):{RESET} ")
-            sys.stdout.flush()
-            try:
-                answer = input().strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                return False, "User cancelled"
-            if answer == "n":
+            allowed = self._prompt_yes_no(
+                f"read_file: {fname}", default=True)
+            if not allowed:
                 return False, "User denied"
             return True, ""
 

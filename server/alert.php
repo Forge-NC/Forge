@@ -28,6 +28,12 @@
  * Invocation: php alert.php (cron, after analyzer)
  */
 
+// CLI only — block web access
+if (php_sapi_name() !== 'cli') {
+    http_response_code(403);
+    exit;
+}
+
 $DATA_DIR = __DIR__ . '/data';
 $PROFILES_DIR = $DATA_DIR . '/profiles';
 $FLEET_FILE = $DATA_DIR . '/fleet_analytics.json';

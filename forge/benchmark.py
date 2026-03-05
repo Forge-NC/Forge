@@ -82,6 +82,12 @@ class BenchmarkResult:
     prompt: str = ""
     error: str = ""
     validation_details: dict = field(default_factory=dict)
+    # Phase 2 — live execution fields
+    quality_score: float = 0.0
+    response_text: str = ""
+    tokens_in: int = 0
+    tokens_out: int = 0
+    backend_type: str = ""
 
 
 @dataclass
@@ -343,6 +349,253 @@ class BenchmarkRunner:
         """Hash relevant config for benchmark comparability."""
         key = f"{model}|{context_size}|{safety_level}|{router_enabled}|{dedup_enabled}|{verify_mode}"
         return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+    # ── Live execution bridge (Phase 2) ──
+
+    def run_scenario_live(self, scenario: BenchmarkScenario,
+                          backend, system_prompt: str = "",
+                          config_hash: str = "",
+                          ) -> BenchmarkResult:
+        """Run a scenario against a live LLM backend.
+
+        This is the execution bridge: sends the scenario prompt to any
+        LLM backend implementing the chat() generator interface, captures
+        the response, extracts file modifications, and validates results.
+
+        Args:
+            scenario: The benchmark scenario to run.
+            backend: Any object with chat(messages, ...) -> Generator[dict].
+            system_prompt: System prompt to use (optional).
+            config_hash: Config fingerprint for reproducibility tracking.
+        """
+        from forge.models.base import collect_response
+
+        start = time.time()
+        work_dir = tempfile.mkdtemp(prefix="forge_bench_live_")
+        model_name = getattr(backend, 'model', 'unknown')
+
+        try:
+            # Write scenario files to isolated directory
+            for file_path, content in scenario.files.items():
+                full_path = Path(work_dir) / file_path
+                full_path.parent.mkdir(parents=True, exist_ok=True)
+                full_path.write_text(content, encoding="utf-8")
+
+            # Build messages
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            else:
+                messages.append({"role": "system", "content": (
+                    "You are a coding assistant. When asked to modify code, "
+                    "output the complete modified file content in a code block "
+                    "with the file path as the info string. Example:\n"
+                    "```path/to/file.py\n<modified content>\n```"
+                )})
+
+            # Include file contents in the prompt
+            file_listing = ""
+            for fp, content in scenario.files.items():
+                file_listing += f"\n--- {fp} ---\n{content}\n"
+            messages.append({
+                "role": "user",
+                "content": f"{scenario.prompt}\n\nCurrent files:{file_listing}",
+            })
+
+            # Call the LLM backend
+            result = collect_response(backend, messages, temperature=0.1)
+
+            if result["error"]:
+                duration = time.time() - start
+                return BenchmarkResult(
+                    scenario_id=scenario.id,
+                    scenario_name=scenario.name,
+                    timestamp=start,
+                    duration_s=round(duration, 3),
+                    passed=False,
+                    behavior_preserved=False,
+                    correct_output=False,
+                    file_scope_accuracy=0.0,
+                    iteration_count=1,
+                    model=model_name,
+                    config_hash=config_hash,
+                    prompt=scenario.prompt,
+                    error=result["error"],
+                    tokens_in=result["tokens_in"],
+                    tokens_out=result["tokens_out"],
+                    backend_type=type(backend).__name__,
+                )
+
+            response_text = result["text"]
+
+            # Extract file modifications from code blocks
+            files_modified = self._extract_code_blocks(
+                response_text, work_dir)
+
+            # Score response quality
+            quality_score = self._score_benchmark_response(
+                response_text, scenario, files_modified)
+
+            # Run validation
+            post_ok, post_details = self._run_validation(
+                scenario.validation, work_dir)
+
+            # Check expected patterns after modifications
+            correct_output = post_ok
+            behavior_preserved = post_ok
+
+            # Compute file scope
+            file_scope = self._compute_file_scope(
+                files_modified, scenario.expected_file_scope)
+
+            duration = time.time() - start
+            passed = behavior_preserved and correct_output and file_scope > 0
+
+            return BenchmarkResult(
+                scenario_id=scenario.id,
+                scenario_name=scenario.name,
+                timestamp=start,
+                duration_s=round(duration, 3),
+                passed=passed,
+                behavior_preserved=behavior_preserved,
+                correct_output=correct_output,
+                file_scope_accuracy=file_scope,
+                iteration_count=1,
+                files_modified=files_modified,
+                files_expected=list(scenario.expected_file_scope),
+                model=model_name,
+                config_hash=config_hash,
+                prompt=scenario.prompt,
+                validation_details=post_details,
+                quality_score=round(quality_score, 3),
+                response_text=response_text[:5000],
+                tokens_in=result["tokens_in"],
+                tokens_out=result["tokens_out"],
+                backend_type=type(backend).__name__,
+            )
+        except Exception as e:
+            duration = time.time() - start
+            return BenchmarkResult(
+                scenario_id=scenario.id,
+                scenario_name=scenario.name,
+                timestamp=start,
+                duration_s=round(duration, 3),
+                passed=False,
+                behavior_preserved=False,
+                correct_output=False,
+                file_scope_accuracy=0.0,
+                iteration_count=0,
+                model=model_name,
+                config_hash=config_hash,
+                prompt=scenario.prompt,
+                error=str(e),
+                backend_type=type(backend).__name__,
+            )
+        finally:
+            try:
+                shutil.rmtree(work_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+    def run_suite_live(self, suite_name: str, backend,
+                       system_prompt: str = "",
+                       config_hash: str = "",
+                       ) -> BenchmarkSuiteResult:
+        """Run all scenarios in a suite against a live LLM backend."""
+        start = time.time()
+        scenarios = self.list_scenarios(suite_name)
+        results = []
+        model_name = getattr(backend, 'model', 'unknown')
+
+        for scenario in scenarios:
+            result = self.run_scenario_live(
+                scenario, backend, system_prompt, config_hash)
+            results.append(result)
+
+        duration = time.time() - start
+        passed = [r for r in results if r.passed]
+
+        return BenchmarkSuiteResult(
+            suite_name=suite_name,
+            timestamp=start,
+            duration_s=round(duration, 3),
+            results=[asdict(r) for r in results],
+            model=model_name,
+            config_hash=config_hash,
+            pass_rate=len(passed) / max(1, len(results)),
+            avg_duration_s=round(
+                sum(r.duration_s for r in results) / max(1, len(results)), 3),
+            avg_iterations=round(
+                sum(r.iteration_count for r in results) / max(1, len(results)), 1),
+            avg_file_scope_accuracy=round(
+                sum(r.file_scope_accuracy for r in results) / max(1, len(results)), 3),
+        )
+
+    @staticmethod
+    def _extract_code_blocks(response: str, work_dir: str) -> list[str]:
+        """Extract code blocks with file paths from LLM response.
+
+        Looks for patterns like:
+          ```path/to/file.py
+          <content>
+          ```
+        """
+        modified = []
+        # Match code blocks with file path info strings
+        pattern = re.compile(
+            r"```(\S+\.(?:py|js|ts|java|c|cpp|h|rs|go|rb|yml|yaml|json|toml|txt|md|html|css))\s*\n"
+            r"(.*?)\n```",
+            re.DOTALL,
+        )
+        for m in pattern.finditer(response):
+            file_path = m.group(1)
+            content = m.group(2)
+            full_path = Path(work_dir) / file_path
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            full_path.write_text(content, encoding="utf-8")
+            modified.append(file_path)
+        return modified
+
+    @staticmethod
+    def _score_benchmark_response(response: str,
+                                  scenario: BenchmarkScenario,
+                                  files_modified: list) -> float:
+        """Score response quality for benchmark purposes.
+
+        0.0 = terrible, 1.0 = perfect.
+        Uses lightweight heuristics (no LLM calls).
+        """
+        score = 0.0
+
+        # Did it produce code? (0.3 weight)
+        if "```" in response:
+            score += 0.3
+        elif any(kw in response.lower() for kw in ("def ", "class ", "import ")):
+            score += 0.15
+
+        # Did it modify the expected files? (0.3 weight)
+        if scenario.expected_file_scope:
+            exp = set(scenario.expected_file_scope)
+            mod = set(files_modified)
+            if exp and mod:
+                overlap = len(exp & mod) / len(exp)
+                score += 0.3 * overlap
+
+        # Is the response substantive? (0.2 weight)
+        words = len(response.split())
+        if words > 50:
+            score += 0.1
+        if words > 200:
+            score += 0.1
+
+        # No refusal language? (0.2 weight)
+        refusal_terms = ["i cannot", "i can't", "i'm unable", "not possible",
+                         "i don't have access"]
+        has_refusal = any(t in response.lower() for t in refusal_terms)
+        if not has_refusal:
+            score += 0.2
+
+        return min(1.0, score)
 
     # ── Internal helpers ──
 

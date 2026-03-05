@@ -536,6 +536,9 @@ def prompt_user(cwd: str) -> str:
         _save_history()
         text = _drain_paste_buffer(text)
         return text.strip()
+    except RuntimeError:
+        # sys.stdin lost (e.g. GUI launch, subprocess, closed console)
+        return "/quit"
     except EOFError:
         # Ctrl+Z on Windows sends EOF — don't exit, just ignore
         import sys as _sys
@@ -632,6 +635,15 @@ def print_help():
             ("/continuity history", "Show last 10 continuity snapshots"),
             ("/continuity set <N>", "Set recovery threshold (0-100)"),
             ("/continuity on|off", "Enable/disable continuity monitoring"),
+        ]),
+        ("Bug Reporter", [
+            ("/report <desc>", "File a manual bug report to GitHub"),
+        ]),
+        ("Model Intelligence", [
+            ("/ami", "Show AMI status, capabilities, and quality"),
+            ("/ami probe", "Re-detect model capabilities"),
+            ("/ami reset", "Clear learned failure patterns"),
+            ("/ami stats", "Detailed retry/recovery analytics"),
         ]),
         ("Audit & Benchmarks", [
             ("/export", "Export audit bundle (zip with manifest + hashes)"),

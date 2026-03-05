@@ -42,6 +42,7 @@ import importlib.util
 import inspect
 import logging
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -68,11 +69,14 @@ class _RestrictedEngineProxy:
     or accessing internal state directly.
     """
 
-    # Attributes plugins may legitimately read
+    # Attributes/methods plugins may legitimately access.
+    # queue_prompt is callable — plugins may inject prompts into the
+    # engine's next input slot (e.g. from a background monitor thread).
     _ALLOWED = frozenset({
         "tool_registry",    # to register custom tools
         "config",           # read config values
         "cache",            # check file cache
+        "queue_prompt",     # inject a prompt (callable)
     })
 
     def __init__(self, engine):
@@ -128,6 +132,7 @@ class PluginManager:
         self._plugin_dir: Path = plugin_dir
         self._discovered: list[type[ForgePlugin]] = []
         self._loaded: list[ForgePlugin] = []
+        self._lock = threading.RLock()
         self._engine: Any = None
 
     # ------------------------------------------------------------------
@@ -248,12 +253,15 @@ class PluginManager:
                         exc_info=True,
                     )
 
-            self._loaded.append(plugin)
+            with self._lock:
+                self._loaded.append(plugin)
             log.info("Loaded plugin: %s v%s", plugin.name, plugin.version)
 
     def unload_all(self) -> None:
         """Unload every loaded plugin (calls ``on_unload`` on each)."""
-        for plugin in reversed(self._loaded):
+        with self._lock:
+            plugins = list(self._loaded)
+        for plugin in reversed(plugins):
             try:
                 plugin.on_unload()
             except Exception:
@@ -265,13 +273,15 @@ class PluginManager:
             plugin._loaded = False
             plugin._engine = None
 
-        count = len(self._loaded)
-        self._loaded.clear()
+        with self._lock:
+            count = len(self._loaded)
+            self._loaded.clear()
         log.info("Unloaded %d plugin(s).", count)
 
     def get_loaded(self) -> list[ForgePlugin]:
         """Return a list of currently loaded plugin instances."""
-        return list(self._loaded)
+        with self._lock:
+            return list(self._loaded)
 
     # ------------------------------------------------------------------
     # Hook dispatchers
@@ -283,9 +293,10 @@ class PluginManager:
 
     def _sorted_by_priority(self, hook_name: str) -> list[ForgePlugin]:
         """Return loaded plugins sorted by their priority for *hook_name*."""
-        applicable = [
-            p for p in self._loaded if _overrides_hook(p, hook_name)
-        ]
+        with self._lock:
+            applicable = [
+                p for p in self._loaded if _overrides_hook(p, hook_name)
+            ]
         applicable.sort(key=lambda p: _hook_priority(p, hook_name))
         return applicable
 
@@ -303,7 +314,11 @@ class PluginManager:
                 "Auto-disabling plugin '%s' after %d errors.",
                 plugin.name, count,
             )
-            self._loaded.remove(plugin)
+            with self._lock:
+                try:
+                    self._loaded.remove(plugin)
+                except ValueError:
+                    pass  # Already removed by another thread
 
     # -- pipeline hooks (value flows through each plugin) ---------------
 

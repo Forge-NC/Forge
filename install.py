@@ -265,6 +265,31 @@ def _offer_model_pull():
 # Phase 5 -- Configuration / telemetry
 # ---------------------------------------------------------------------------
 
+def _setup_voice_engine(config_path, interactive):
+    """Ask user which TTS engine they prefer."""
+    if not interactive:
+        return
+
+    print("\n  Forge supports two voice engines for text-to-speech:")
+    print("    1) Edge Neural TTS  — High-quality Microsoft neural voices")
+    print("                          Requires internet connection")
+    print("    2) Local System TTS — Offline system voices (SAPI5/espeak)")
+    print("                          Works fully offline, lower quality")
+    try:
+        choice = input("\n  Which voice engine? [1=Edge (default) / 2=Local]: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        choice = ""
+
+    if choice == "2":
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        _set_config_values(config_path, {"tts_engine": "local"})
+        print("  [OK] TTS engine: Local (fully offline)")
+    else:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        _set_config_values(config_path, {"tts_engine": "edge"})
+        print("  [OK] TTS engine: Edge Neural (cloud)")
+
+
 def _setup_config(args, interactive):
     """Phase 5: Configure telemetry from args or interactive prompt."""
     config_dir = Path.home() / ".forge"
@@ -304,10 +329,14 @@ def _setup_config(args, interactive):
             "telemetry_redact": True,
         })
         print("  [OK] Telemetry enabled (redacted mode)")
-        return True
+        telemetry_ok = True
     else:
         print("  [OK] Telemetry disabled")
-        return False
+        telemetry_ok = False
+
+    # Voice engine preference
+    _setup_voice_engine(config_path, interactive)
+    return telemetry_ok
 
 
 def _generate_label():

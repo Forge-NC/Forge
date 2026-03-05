@@ -30,7 +30,10 @@ Each threat gets:
   - Analyze & Repair option (preview removal, continue safely)
 """
 
+import hmac
+import json
 import re
+import secrets
 import time
 import uuid
 import hashlib
@@ -175,6 +178,34 @@ INJECTION_PATTERNS = [
      r"eval\s*\(\s*(?:atob|Buffer\.from|base64|decode|decompress)\s*\(",
      ThreatLevel.WARNING, "obfuscated_payload",
      "Eval of decoded/decompressed content"),
+
+    # ── Secret / PII leak detection ──
+
+    ("aws_access_key",
+     r"(?:^|[^A-Za-z0-9])AKIA[0-9A-Z]{16}(?:[^A-Za-z0-9]|$)",
+     ThreatLevel.WARNING, "secret_leak",
+     "AWS access key ID detected"),
+
+    ("github_token",
+     r"(?:ghp|gho|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}",
+     ThreatLevel.WARNING, "secret_leak",
+     "GitHub token detected"),
+
+    ("openai_api_key",
+     r"sk-[A-Za-z0-9]{20,}",
+     ThreatLevel.WARNING, "secret_leak",
+     "OpenAI/generic API key detected"),
+
+    ("ssh_private_key",
+     r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----",
+     ThreatLevel.CRITICAL, "secret_leak",
+     "SSH private key detected"),
+
+    ("generic_secret_assignment",
+     r"(?:secret|password|token|api_key|apikey|auth_token|access_token)"
+     r"\s*[:=]\s*['\"][A-Za-z0-9+/=_\-]{16,}['\"]",
+     ThreatLevel.SUSPICIOUS, "secret_leak",
+     "Possible hardcoded secret assignment"),
 ]
 
 # Compile all patterns
@@ -219,18 +250,23 @@ class Crucible:
     """
 
     def __init__(self, enabled: bool = True, embedder: Callable = None,
-                 on_threat: Callable = None, sound_manager=None):
+                 on_threat: Callable = None, sound_manager=None,
+                 threat_intel=None, io=None):
         """
         Args:
             enabled: Master switch. When False, all checks return clean.
             embedder: Optional callable(text) -> list[float] for semantic detection.
             on_threat: Optional callback(Threat) for UI notifications.
             sound_manager: Optional SoundManager for alert sounds.
+            threat_intel: Optional ThreatIntelManager for external signatures.
+            io: Optional TerminalIO for interactive prompts.
         """
         self.enabled = enabled
         self._embedder = embedder
         self._on_threat = on_threat
         self._sound = sound_manager
+        self._threat_intel = threat_intel
+        self._io = io
         self._lock = threading.RLock()
 
         # Honeypot canary — random per session
@@ -255,6 +291,9 @@ class Crucible:
 
         # Provenance tracking — which file read caused which tool call
         self._provenance: list[dict] = []  # [{file, tool, args, time, causal}]
+        # HMAC-SHA512 chain for cryptographic non-repudiation
+        self._provenance_key = secrets.token_bytes(64)  # Session-scoped HMAC key
+        self._provenance_chain_hash = b"\x00" * 64       # Genesis block
 
         # Behavioral fingerprinting — learn normal tool patterns
         self._pattern_counts: dict[str, int] = {}  # "read->edit" -> count
@@ -269,7 +308,7 @@ class Crucible:
         Stable API contract for the audit exporter.
         """
         from dataclasses import asdict
-        return {
+        result = {
             "schema_version": 1,
             "enabled": self.enabled,
             "total_scans": self.total_scans,
@@ -293,6 +332,9 @@ class Crucible:
                 for t in self._threat_log
             ],
         }
+        if self._threat_intel:
+            result["threat_intel"] = self._threat_intel.to_audit_dict()
+        return result
 
     # ── Public API ──
 
@@ -597,7 +639,8 @@ class Crucible:
             f"{'%s%sLEAKED%s' % (RED, BOLD, RESET) if self._canary_leaked else '%sINTACT%s' % (GREEN, RESET)}",
             "",
             f"  {BOLD}Detection Layers:{RESET}",
-            f"  {GREEN}1.{RESET} Static patterns  — {len(_COMPILED_PATTERNS)} rules",
+            f"  {GREEN}1.{RESET} Static patterns  — {len(_COMPILED_PATTERNS)} hardcoded"
+            f"{' + %d external' % len(self._threat_intel.get_compiled_patterns()) if self._threat_intel else ''}",
             f"  {'%s2.%s' % (GREEN, RESET) if self._embedder else '%s2.%s' % (DIM, RESET)}"
             f" Semantic anomaly — "
             f"{'active' if self._embedder else 'needs embedding model'}",
@@ -624,13 +667,20 @@ class Crucible:
 
     # ── Internal detection layers ──
 
+    def _get_all_patterns(self) -> list:
+        """Return hardcoded + external compiled patterns."""
+        patterns = list(_COMPILED_PATTERNS)
+        if self._threat_intel:
+            patterns.extend(self._threat_intel.get_compiled_patterns())
+        return patterns
+
     def _scan_static(self, file_path: str, content: str) -> list[Threat]:
         """Layer 1: Static pattern matching against known injection patterns."""
         threats = []
         file_lines = content.splitlines()
         ext = Path(file_path).suffix.lower()
 
-        for name, pattern, level, category, desc in _COMPILED_PATTERNS:
+        for name, pattern, level, category, desc in self._get_all_patterns():
             # Skip prose-only patterns in pure code files (reduce false positives)
             # But don't skip if the pattern is CRITICAL — those matter everywhere
             if (level < ThreatLevel.CRITICAL
@@ -689,6 +739,9 @@ class Crucible:
                     pattern_name=name,
                 )
                 threats.append(threat)
+                # Record hit for threat intel analytics
+                if self._threat_intel:
+                    self._threat_intel.record_hit(name)
 
         # Deduplicate overlapping threats (keep highest severity)
         return self._dedupe_threats(threats)
@@ -960,42 +1013,37 @@ class Crucible:
                 pass
             return result
 
-        while True:
-            sys.stdout.write(
-                f"  {YELLOW}{BOLD}Choice [S/R/I/A]:{RESET} ")
-            sys.stdout.flush()
-            try:
-                choice = input().strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                return _dismiss_and_return("skip")
+        # No IO available — auto-skip in headless mode
+        if not self._io:
+            return _dismiss_and_return("skip")
 
-            if choice in ("s", "skip"):
+        while True:
+            choice = self._io.prompt_choice(
+                "Choice",
+                [("s", "Skip"), ("r", "Remove"), ("i", "Ignore"), ("a", "Analyze")],
+                default="s")
+
+            if choice == "s":
                 self.threats_blocked += 1
                 return _dismiss_and_return("skip")
 
-            if choice in ("r", "remove"):
+            if choice == "r":
                 # Show repair preview
                 analysis = self.analyze_threat(threat, full_content)
                 print(self.format_repair_preview(analysis))
 
-                sys.stdout.write(
-                    f"  {YELLOW}{BOLD}Confirm removal [Y/N]:{RESET} ")
-                sys.stdout.flush()
-                try:
-                    confirm = input().strip().lower()
-                except (EOFError, KeyboardInterrupt):
-                    return _dismiss_and_return("skip")
-
-                if confirm in ("y", "yes"):
+                confirmed = self._io.prompt_yes_no(
+                    "Confirm removal?", default=False)
+                if confirmed:
                     self.threats_blocked += 1
                     return _dismiss_and_return("remove")
                 # Back to main choice
                 continue
 
-            if choice in ("i", "ignore"):
+            if choice == "i":
                 return _dismiss_and_return("ignore")
 
-            if choice in ("a", "analyze"):
+            if choice == "a":
                 analysis = self.analyze_threat(threat, full_content)
                 from forge.ui.terminal import (
                     DIM, CYAN, WHITE, RED, GREEN
@@ -1014,16 +1062,14 @@ class Crucible:
                 # Re-show options
                 continue
 
-            print(f"  {YELLOW}Invalid choice. Use S, R, I, or A.{RESET}")
-
     # ── Provenance tracking ──
 
     def record_provenance(self, tool_name: str, tool_args: dict):
-        """Record a tool call with its causal context.
+        """Record a tool call with HMAC-SHA512 chain link.
 
-        Tracks which file was last read before this tool call, creating
-        a provenance chain: file_read -> tool_call. Used for forensics
-        and behavioral analysis.
+        Each entry is cryptographically chained to the previous one via
+        HMAC-SHA512, creating a tamper-evident provenance log. If any
+        entry is modified, the chain breaks at that point.
         """
         now = time.monotonic()
         entry = {
@@ -1037,6 +1083,16 @@ class Crucible:
             ),
         }
         with self._lock:
+            # HMAC chain: sign(key, prev_hash + canonical_entry)
+            canonical = json.dumps(entry, sort_keys=True, default=str).encode()
+            chain_input = self._provenance_chain_hash + canonical
+            entry_hmac = hmac.new(
+                self._provenance_key, chain_input, hashlib.sha512
+            ).digest()
+            entry["hmac"] = entry_hmac.hex()
+            entry["prev_hash"] = self._provenance_chain_hash.hex()
+            self._provenance_chain_hash = entry_hmac
+
             self._provenance.append(entry)
             # Cap provenance log
             if len(self._provenance) > _MAX_PROVENANCE:
@@ -1110,6 +1166,28 @@ class Crucible:
         """Return the last N provenance entries for display/forensics."""
         return self._provenance[-last_n:]
 
+    def verify_provenance_chain(self) -> tuple:
+        """Walk the chain and verify all HMAC-SHA512 links.
+
+        Returns (valid: bool, break_index: int).
+        break_index = -1 if fully valid, else index of first broken link.
+        """
+        prev_hash = b"\x00" * 64  # Genesis block
+        for i, entry in enumerate(self._provenance):
+            # Reconstruct canonical entry (exclude chain metadata)
+            entry_copy = {
+                k: v for k, v in entry.items()
+                if k not in ("hmac", "prev_hash")
+            }
+            canonical = json.dumps(entry_copy, sort_keys=True, default=str).encode()
+            expected = hmac.new(
+                self._provenance_key, prev_hash + canonical, hashlib.sha512
+            ).digest()
+            if entry.get("hmac") != expected.hex():
+                return False, i
+            prev_hash = expected
+        return True, -1
+
     def get_fingerprint_summary(self) -> dict:
         """Return behavioral fingerprint stats."""
         top_patterns = sorted(
@@ -1155,8 +1233,11 @@ class Crucible:
         lines.append(f"  {'-' * 70}")
 
         for entry in chain:
-            from datetime import datetime
-            ts = datetime.fromtimestamp(entry["time"]).strftime("%H:%M:%S")
+            from datetime import datetime, timedelta
+            # entry["time"] uses time.monotonic() — convert to wall-clock
+            # by offsetting from current monotonic vs current wall-clock
+            wall_time = time.time() - (time.monotonic() - entry["time"])
+            ts = datetime.fromtimestamp(wall_time).strftime("%H:%M:%S")
             tool = entry["tool"]
             caused_by = Path(entry["caused_by_file"]).name if entry["caused_by_file"] else "-"
             delta = (f"{entry['time_since_read']:.1f}s"

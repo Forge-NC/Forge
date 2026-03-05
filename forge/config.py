@@ -57,8 +57,10 @@ DEFAULTS = {
 
     # Voice
     "voice_model": "tiny",            # faster-whisper model size
+    "voice_language": "en",           # whisper language code (en, es, fr, de, ja, zh, etc.)
     "voice_vox_threshold": 0.02,      # RMS threshold for VOX mode
     "voice_silence_timeout": 1.5,     # seconds of silence to end VOX
+    "tts_engine": "edge",             # "edge" (cloud neural voices) or "local" (offline pyttsx3)
 
     # UI
     "theme": "midnight",              # UI color theme (see /theme for options)
@@ -89,6 +91,33 @@ DEFAULTS = {
     "telemetry_token": "",                # per-user auth token (leave blank for legacy shared key)
     "telemetry_label": "",                # optional machine nickname, e.g. "DirtStar-RTX5070"
 
+    # Bug Reporter (auto-files GitHub Issues on crashes/ghost errors)
+    "bug_reporter_enabled": False,             # master switch (owner-only by default)
+    "bug_reporter_max_session": 3,             # max issues filed per session
+    "bug_reporter_max_daily": 10,              # max issues filed per day
+    "bug_reporter_cooldown_hours": 24,         # per-fingerprint cooldown
+    "bug_reporter_ghost_detection": True,      # detect silent failures
+    "bug_reporter_labels": "bug,auto-reported",# GitHub issue labels
+
+    # Security Hardening (all gated by safety_level — L0=off, scales up to L3)
+    "output_scanning": True,              # scan LLM output for secrets/threats
+    "rag_scanning": True,                 # scan RAG retrievals before injection
+    "data_retention_days": 30,            # auto-prune forensics/exports older than N days (0=disabled)
+    "rate_limiting": True,                # circuit breaker for runaway tool calls
+    "rate_limit_per_minute": 30,          # max tool calls per sliding minute window
+
+    # Threat Intelligence
+    "threat_signatures_enabled": True,    # load external signature database
+    "threat_signatures_url": "https://dirt-star.com/Forge/signatures.json",  # URL for signature updates
+    "threat_auto_update": True,           # auto-check for signature updates on startup
+
+    # Adaptive Model Intelligence
+    "ami_enabled": True,                  # self-healing model orchestration
+    "ami_max_retries": 3,                 # max recovery attempts per turn
+    "ami_quality_threshold": 0.7,         # below this score triggers retry
+    "ami_auto_probe": True,               # auto-detect model capabilities on first use
+    "ami_constrained_fallback": True,     # use JSON schema to force tool-call format
+
     # Adaptive Nightly Testing
     "nightly_manifest_url": "",                 # custom manifest endpoint (blank = default)
     "nightly_max_duration_m": 60,               # max nightly run time in minutes
@@ -104,6 +133,21 @@ DEFAULTS = {
     "nightly_auto_ceiling": False,              # auto binary-search for max stable turns
     "adaptive_expand_limits": False,            # if false, server can only reduce scope
     "nightly_schedule_time": "03:00",           # time for scheduled nightly runs (HH:MM)
+
+    # Shipwright (AI release management)
+    "shipwright_llm_classify": False,           # use LLM for ambiguous commit classification
+
+    # AutoForge (smart auto-commit)
+    "auto_commit": False,                       # auto-commit file edits each turn
+
+    # License / BPoS (Behavioral Proof of Stake)
+    "license_tier": "community",                # community, pro, power
+
+    # Multi-backend LLM provider
+    "backend_provider": "ollama",               # ollama, openai, anthropic
+    "openai_api_key": "",                       # or set OPENAI_API_KEY env var
+    "anthropic_api_key": "",                    # or set ANTHROPIC_API_KEY env var
+    "openai_base_url": "",                      # custom OpenAI-compatible endpoint
 }
 
 # Path to the config file
@@ -188,6 +232,38 @@ starting_balance: 50.0
 # ── Enterprise ──
 # When true: strict plan verification, forensics always on, safety >= 2
 enterprise_mode: false
+
+# ── Bug Reporter ──
+# Auto-files GitHub Issues when Forge crashes or detects silent failures.
+# Requires `gh` CLI authenticated. Owner/developer tool — disabled by default.
+# bug_reporter_enabled: false
+# bug_reporter_max_session: 3       # max issues per session
+# bug_reporter_max_daily: 10        # max issues per day
+# bug_reporter_cooldown_hours: 24   # same-bug cooldown
+# bug_reporter_ghost_detection: true # detect silent failures (embed, tool, context)
+# bug_reporter_labels: "bug,auto-reported"
+
+# ── Security Hardening ──
+# All features are gated by safety_level: L0 (unleashed) = off, scales up to L3.
+# output_scanning: true          # scan LLM output for secrets/threats
+# rag_scanning: true             # scan RAG retrievals before context injection
+# data_retention_days: 30        # auto-prune old forensics/exports (0 = keep forever)
+# rate_limiting: true            # circuit breaker for runaway tool call loops
+# rate_limit_per_minute: 30      # max tool calls per sliding 60s window
+
+# ── Threat Intelligence ──
+# Upgradeable threat signature database (like antivirus definitions).
+# threat_signatures_enabled: true     # load external signature database
+# threat_signatures_url: ""           # URL for signature updates (empty = bundled only)
+# threat_auto_update: true            # auto-check for updates (interval scales with safety level)
+
+# ── Adaptive Model Intelligence ──
+# Self-healing model orchestration: detects failures, forces compliance, auto-recovers.
+# ami_enabled: true                   # enable AMI quality checks and recovery
+# ami_max_retries: 3                  # max recovery attempts per turn
+# ami_quality_threshold: 0.7          # below this score triggers retry
+# ami_auto_probe: true                # auto-detect model capabilities on first use
+# ami_constrained_fallback: true      # use JSON schema to force tool-call format
 
 # ── Telemetry (opt-in) ──
 # When enabled, sends a redacted audit summary to the Forge team on session exit.
@@ -435,6 +511,65 @@ _VALIDATORS = {
     "telemetry_enabled": lambda v: isinstance(v, bool),
     "telemetry_url": lambda v: isinstance(v, str),
     "telemetry_redact": lambda v: isinstance(v, bool),
+    "bug_reporter_enabled": lambda v: isinstance(v, bool),
+    "bug_reporter_max_session": lambda v: isinstance(v, int) and 1 <= v <= 50,
+    "bug_reporter_max_daily": lambda v: isinstance(v, int) and 1 <= v <= 100,
+    "bug_reporter_cooldown_hours": lambda v: isinstance(v, (int, float)) and v >= 0,
+    "bug_reporter_ghost_detection": lambda v: isinstance(v, bool),
+    "bug_reporter_labels": lambda v: isinstance(v, str),
+    "output_scanning": lambda v: isinstance(v, bool),
+    "rag_scanning": lambda v: isinstance(v, bool),
+    "data_retention_days": lambda v: isinstance(v, int) and v >= 0,
+    "rate_limiting": lambda v: isinstance(v, bool),
+    "rate_limit_per_minute": lambda v: isinstance(v, int) and 5 <= v <= 200,
+    "threat_signatures_enabled": lambda v: isinstance(v, bool),
+    "threat_signatures_url": lambda v: isinstance(v, str),
+    "threat_auto_update": lambda v: isinstance(v, bool),
+    "ami_enabled": lambda v: isinstance(v, bool),
+    "ami_max_retries": lambda v: isinstance(v, int) and 0 <= v <= 10,
+    "ami_quality_threshold": lambda v: isinstance(v, (int, float)) and 0.0 <= v <= 1.0,
+    "ami_auto_probe": lambda v: isinstance(v, bool),
+    "ami_constrained_fallback": lambda v: isinstance(v, bool),
+    "tts_engine": lambda v: isinstance(v, str) and v in ("edge", "local"),
+    "voice_language": lambda v: isinstance(v, str) and len(v) >= 2,
+    "voice_model": lambda v: isinstance(v, str) and v in ("tiny", "base", "small", "medium", "large"),
+    "voice_vox_threshold": lambda v: isinstance(v, (int, float)) and 0 < v < 1.0,
+    "voice_silence_timeout": lambda v: isinstance(v, (int, float)) and v > 0,
+    "default_model": lambda v: isinstance(v, str) and len(v) > 0,
+    "small_model": lambda v: isinstance(v, str),
+    "embedding_model": lambda v: isinstance(v, str) and len(v) > 0,
+    "ollama_url": lambda v: isinstance(v, str) and v.startswith("http"),
+    "theme": lambda v: isinstance(v, str),
+    "persona": lambda v: isinstance(v, str) and v in ("professional", "casual", "mentor", "hacker"),
+    "terminal_mode": lambda v: isinstance(v, str) and v in ("console", "gui"),
+    "ansi_effects_enabled": lambda v: isinstance(v, bool),
+    "gui_terminal_effects": lambda v: isinstance(v, bool),
+    "show_hardware_on_start": lambda v: isinstance(v, bool),
+    "show_billing_on_start": lambda v: isinstance(v, bool),
+    "show_cache_on_start": lambda v: isinstance(v, bool),
+    "telemetry_token": lambda v: isinstance(v, str),
+    "telemetry_label": lambda v: isinstance(v, str),
+    "nightly_manifest_url": lambda v: isinstance(v, str),
+    "nightly_max_duration_m": lambda v: isinstance(v, int) and v > 0,
+    "nightly_auto_close": lambda v: isinstance(v, bool),
+    "nightly_auto_close_list": lambda v: isinstance(v, list),
+    "nightly_resource_ram_threshold_mb": lambda v: isinstance(v, int) and v > 0,
+    "nightly_resource_vram_threshold_mb": lambda v: isinstance(v, int) and v > 0,
+    "nightly_force_kill": lambda v: isinstance(v, bool),
+    "nightly_show_cortex": lambda v: isinstance(v, bool),
+    "nightly_cortex_position": lambda v: isinstance(v, str) and v in ("top_right", "top_left", "bottom_right", "bottom_left"),
+    "nightly_cortex_size": lambda v: isinstance(v, int) and 50 <= v <= 500,
+    "nightly_auto_bisect": lambda v: isinstance(v, bool),
+    "nightly_auto_ceiling": lambda v: isinstance(v, bool),
+    "adaptive_expand_limits": lambda v: isinstance(v, bool),
+    "nightly_schedule_time": lambda v: isinstance(v, str) and len(v) == 5,
+    "shipwright_llm_classify": lambda v: isinstance(v, bool),
+    "auto_commit": lambda v: isinstance(v, bool),
+    "license_tier": lambda v: isinstance(v, str) and v in ("community", "pro", "power", "origin"),
+    "backend_provider": lambda v: isinstance(v, str) and v in ("ollama", "openai", "anthropic"),
+    "openai_api_key": lambda v: isinstance(v, str),
+    "anthropic_api_key": lambda v: isinstance(v, str),
+    "openai_base_url": lambda v: isinstance(v, str),
 }
 
 

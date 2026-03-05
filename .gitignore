@@ -16,10 +16,26 @@ stress_results.json
 .pytest_cache/
 htmlcov/
 
-# Server runtime data (tokens, profiles, logs)
-server/data/tokens.json
-server/data/profiles/
-server/data/fleet_analytics.json
-server/data/alert_config.json
-server/data/alert_log.jsonl
+# ── Secrets — never commit these ──
+forge_origin.key          # Ed25519 private key (lives in ~/.forge/, not here)
+forge_origin.pub          # Public key is embedded in passport.py
+*.passport.json           # Issued passport files
+.env
+.env.*
+*.pem
+*.p12
+*.pfx
+*.key
+secrets.yaml
+secrets.json
+
+# Server runtime data — never commit any of this
+# origin_key.json holds the Ed25519 private key and must never be in git
+server/data/
 server/rate_limits/
+server/check_*.txt
+server/upload_*.txt
+
+# Scratch/junk files
+report.md
+report_section_*.txt

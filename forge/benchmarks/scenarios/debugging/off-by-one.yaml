@@ -1,0 +1,42 @@
+id: off-by-one
+name: Fix Off-by-One Error
+description: >
+  Fix an off-by-one error in a loop that processes array elements.
+  Tests basic debugging and boundary condition awareness.
+category: debug
+difficulty: easy
+
+files:
+  processor.py: |
+    def process_items(items):
+        """Process all items and return results."""
+        results = []
+        for i in range(1, len(items)):
+            results.append(items[i] * 2)
+        return results
+
+    def get_stats(values):
+        """Get min, max, and count of processed values."""
+        processed = process_items(values)
+        return {
+            "count": len(processed),
+            "min": min(processed) if processed else 0,
+            "max": max(processed) if processed else 0,
+        }
+
+prompt: >
+  The function `process_items` has an off-by-one bug — it skips
+  the first element. Fix it so all items are processed.
+
+expected_file_scope:
+  - processor.py
+
+validation:
+  expected_patterns:
+    processor.py:
+      - "range\\(.*len\\(items\\)\\)"
+  forbidden_patterns:
+    processor.py:
+      - "range\\(1,"
+
+timeout_s: 60

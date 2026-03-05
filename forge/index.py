@@ -37,8 +37,9 @@ SKIP_DIRS = {
     ".idea", ".vscode", ".claude", "vendor", "packages",
 }
 
-CHUNK_SIZE = 200     # Lines per chunk
-CHUNK_OVERLAP = 50   # Overlap between chunks
+CHUNK_SIZE = 80      # Lines per chunk (sized for nomic-embed-text's 2048-token ctx)
+CHUNK_OVERLAP = 20   # Overlap between chunks
+EMBED_MAX_CHARS = 2000  # Truncate chunk text before embedding (~500 tokens, safe for 2048-ctx models)
 
 # ---------------------------------------------------------------------------
 # Data class
@@ -249,12 +250,15 @@ class CodebaseIndex:
                 log.error("Failed to save index: %s", exc)
             return stats
 
-        # Phase 2: Flatten all chunk texts for bulk embedding
+        # Phase 2: Flatten all chunk texts for bulk embedding.
+        # Truncate to EMBED_MAX_CHARS so we stay within the embed
+        # model's context window (nomic-embed-text: 2048 tokens).
         all_texts: list[str] = []
         chunk_ranges: list[tuple[int, int]] = []  # (start, end) indices
         for abs_path, chunks in pending:
             start = len(all_texts)
-            all_texts.extend(c.content for c in chunks)
+            all_texts.extend(
+                c.content[:EMBED_MAX_CHARS] for c in chunks)
             chunk_ranges.append((start, len(all_texts)))
 
         # Phase 3: Embed everything in one call (embed() handles batching)
@@ -264,20 +268,38 @@ class CodebaseIndex:
             raw_embeddings = self._embed_fn(all_texts)
         except Exception as exc:
             log.error("Bulk embedding failed: %s", exc)
+            from forge.bug_reporter import capture_ghost
+            capture_ghost("embed", f"Bulk embedding failed: {exc}")
             stats["files_skipped"] += len(pending)
             return stats
 
-        if not raw_embeddings or len(raw_embeddings) != len(all_texts):
-            log.warning(
-                "Embedding count mismatch: expected %d, got %d",
-                len(all_texts),
-                len(raw_embeddings) if raw_embeddings else 0)
+        if not raw_embeddings:
+            log.warning("Embedding returned no results for %d texts",
+                        len(all_texts))
             stats["files_skipped"] += len(pending)
             try:
                 self.save()
             except Exception:
                 pass
             return stats
+
+        # Filter out empty/failed embeddings (keep only valid ones)
+        if len(raw_embeddings) != len(all_texts):
+            log.warning(
+                "Embedding count mismatch: expected %d, got %d",
+                len(all_texts), len(raw_embeddings))
+            stats["files_skipped"] += len(pending)
+            try:
+                self.save()
+            except Exception:
+                pass
+            return stats
+
+        # Replace empty embeddings with zero vectors (preserves index alignment)
+        embed_dim = len(raw_embeddings[0]) if raw_embeddings[0] else 768
+        for i, emb in enumerate(raw_embeddings):
+            if not emb:
+                raw_embeddings[i] = [0.0] * embed_dim
 
         all_vecs = np.array(raw_embeddings, dtype=np.float32)
         if all_vecs.ndim == 1:
@@ -342,10 +364,14 @@ class CodebaseIndex:
             raw = self._embed_fn([query])
         except Exception as exc:
             log.error("Query embedding failed: %s", exc)
+            from forge.bug_reporter import capture_ghost
+            capture_ghost("embed", f"Query embedding failed: {exc}")
             return []
 
         if not raw or not raw[0]:
             log.warning("Empty query embedding result")
+            from forge.bug_reporter import capture_ghost as _cg
+            _cg("embed", "Empty query embedding result")
             return []
 
         q_vec = np.array(raw[0], dtype=np.float32)
@@ -505,7 +531,7 @@ class CodebaseIndex:
     def _chunk_file(
         self, content: str, file_path: str, file_hash: str
     ) -> list[CodeChunk]:
-        """Split *content* into overlapping chunks of ~CHUNK_SIZE lines."""
+        """Split *content* into chunks, preferring function boundaries for Python."""
         ext = Path(file_path).suffix.lstrip(".")
         lines = content.splitlines(keepends=True)
         total = len(lines)
@@ -531,6 +557,13 @@ class CodebaseIndex:
             ))
             return chunks
 
+        # Try function-boundary chunking for Python files
+        if ext == "py":
+            fb_chunks = self._chunk_by_functions(lines, file_path, file_hash, ext)
+            if fb_chunks:
+                return fb_chunks
+
+        # Fallback: fixed-size overlapping chunks
         start = 0
         while start < total:
             end = min(start + CHUNK_SIZE, total)
@@ -552,6 +585,103 @@ class CodebaseIndex:
             if end >= total:
                 break
             start = end - CHUNK_OVERLAP
+
+        return chunks
+
+    @staticmethod
+    def _chunk_by_functions(
+        lines: list[str], file_path: str, file_hash: str, ext: str
+    ) -> list[CodeChunk]:
+        """Split Python files at def/class boundaries (any indentation level).
+
+        Returns empty list if no function boundaries found (triggers fallback).
+        Each chunk contains one function/class plus its decorators.
+        Chunks larger than 2*CHUNK_SIZE are split further with overlap.
+        """
+        import re
+        boundary_re = re.compile(r'^\s*(?:def |class |async def )\w')
+        decorator_re = re.compile(r'^\s*@')
+
+        # Find boundary lines
+        boundaries = []
+        for i, line in enumerate(lines):
+            if boundary_re.match(line):
+                boundaries.append(i)
+
+        if len(boundaries) < 2:
+            return []  # Not enough boundaries, use fallback
+
+        chunks: list[CodeChunk] = []
+
+        # Include module-level code before first function as a chunk
+        if boundaries[0] > 0:
+            # Walk back for decorators
+            start = 0
+            end = boundaries[0]
+            chunk_text = (
+                f"# File: {file_path} (lines 1-{end})\n"
+                + "".join(lines[start:end])
+            )
+            chunks.append(CodeChunk(
+                file_path=file_path,
+                start_line=1,
+                end_line=end,
+                content=chunk_text,
+                language=ext,
+                file_hash=file_hash,
+            ))
+
+        for idx, b_start in enumerate(boundaries):
+            # Walk back for decorators (match @decorator at same or lesser indent)
+            actual_start = b_start
+            while actual_start > 0 and decorator_re.match(lines[actual_start - 1]):
+                actual_start -= 1
+
+            # End is next boundary or EOF
+            if idx + 1 < len(boundaries):
+                b_end = boundaries[idx + 1]
+            else:
+                b_end = len(lines)
+
+            chunk_lines = lines[actual_start:b_end]
+
+            # If chunk is too large, split with overlap
+            if len(chunk_lines) > CHUNK_SIZE * 2:
+                sub_start = 0
+                while sub_start < len(chunk_lines):
+                    sub_end = min(sub_start + CHUNK_SIZE, len(chunk_lines))
+                    sl = actual_start + sub_start + 1
+                    el = actual_start + sub_end
+                    chunk_text = (
+                        f"# File: {file_path} (lines {sl}-{el})\n"
+                        + "".join(chunk_lines[sub_start:sub_end])
+                    )
+                    chunks.append(CodeChunk(
+                        file_path=file_path,
+                        start_line=sl,
+                        end_line=el,
+                        content=chunk_text,
+                        language=ext,
+                        file_hash=file_hash,
+                    ))
+                    if sub_end >= len(chunk_lines):
+                        break
+                    sub_start = sub_end - CHUNK_OVERLAP
+            else:
+                sl = actual_start + 1
+                el = b_end
+                chunk_text = (
+                    f"# File: {file_path} (lines {sl}-{el})\n"
+                    + "".join(chunk_lines)
+                )
+                chunks.append(CodeChunk(
+                    file_path=file_path,
+                    start_line=sl,
+                    end_line=el,
+                    content=chunk_text,
+                    language=ext,
+                    file_hash=file_hash,
+                ))
 
         return chunks
 

@@ -184,9 +184,26 @@ class CommandHandler:
     def _cmd_model(self, arg: str) -> bool:
         e = self.engine
         if not arg:
-            self.io.print_info(f"Current model: {e.llm.model}")
+            provider = e.config.get("backend_provider", "ollama")
+            self.io.print_info(f"Current model: {e.llm.model} (provider: {provider})")
             ctx_len = e.llm.get_context_length()
             self.io.print_info(f"Context length: {ctx_len:,}")
+            return True
+        # Support provider:model syntax (e.g., "openai:gpt-4o", "anthropic:claude-sonnet-4-6")
+        if ":" in arg and arg.split(":")[0] in ("openai", "anthropic", "ollama"):
+            provider, model_name = arg.split(":", 1)
+            e.config.set("backend_provider", provider)
+            e.llm = e._create_backend(model_name)
+            ctx_len = e.llm.get_context_length()
+            e.ctx.max_tokens = int(ctx_len * 0.8)
+            self.io.print_info(
+                f"Switched to: {model_name} (provider: {provider}, "
+                f"context: {ctx_len:,})")
+            return True
+        # Standard model switch within current provider
+        available = e.llm.list_models()
+        if available and arg not in available:
+            self.io.print_error(f"Model '{arg}' not found. Use /models to see available models.")
             return True
         e.llm.model = arg
         ctx_len = e.llm.get_context_length()
@@ -282,7 +299,11 @@ class CommandHandler:
 
     def _cmd_topup(self, arg: str) -> bool:
         e = self.engine
-        amount = float(arg) if arg else 50.0
+        try:
+            amount = float(arg) if arg else 50.0
+        except ValueError:
+            self.io.print_error("Usage: /topup <amount> (e.g., /topup 100)")
+            return True
         e.billing.topup(amount)
         self.io.print_info(f"Added ${amount:.2f} to sandbox balance. "
                    f"New balance: ${e.billing.balance:.2f}")
@@ -427,12 +448,129 @@ class CommandHandler:
         return True
 
     def _cmd_provenance(self, arg: str) -> bool:
+        from forge.ui.terminal import GREEN, RED, RESET, DIM
         e = self.engine
         chain = e.crucible.get_provenance_chain()
         if not chain:
             self.io.print_info("No provenance data recorded this session.")
             return True
         print(e.crucible.format_provenance_display())
+        # Chain integrity verification (HMAC-SHA512)
+        valid, break_idx = e.crucible.verify_provenance_chain()
+        total = len(e.crucible.get_provenance_chain(last_n=99999))
+        if valid:
+            print(f"\n  {GREEN}Chain integrity: VERIFIED "
+                  f"({total} links, HMAC-SHA512){RESET}")
+        else:
+            print(f"\n  {RED}Chain integrity: BROKEN at link "
+                  f"{break_idx} of {total}{RESET}")
+        return True
+
+    def _cmd_threats(self, arg: str) -> bool:
+        from forge.ui.terminal import (
+            BOLD, RESET, DIM, GREEN, YELLOW, RED, CYAN, WHITE
+        )
+        e = self.engine
+        ti = e.threat_intel
+
+        if not arg:
+            # Status overview
+            from forge.crucible import _COMPILED_PATTERNS
+            hardcoded = len(_COMPILED_PATTERNS)
+            external = len(ti.get_compiled_patterns())
+            status = ti.get_status()
+
+            print(f"\n{BOLD}Threat Intelligence{RESET}")
+            sc = GREEN if status["enabled"] else RED
+            print(f"  Status:      {sc}{BOLD}{'ACTIVE' if status['enabled'] else 'DISABLED'}{RESET}")
+            print(f"  Patterns:    {hardcoded} hardcoded + {external} external ({hardcoded + external} total)")
+            print(f"  Keywords:    {status['keyword_lists']} lists ({status['keyword_terms']} terms)")
+            print(f"  Behavioral:  {status['behavioral_rules']} rules")
+            print(f"  Version:     {status['signature_version']}")
+            if status["last_update"]:
+                print(f"  Last update: {status['last_update']}")
+            url = status["url"]
+            if url:
+                print(f"  Source:      {url}")
+            else:
+                print(f"  Source:      {DIM}bundled only (no URL configured){RESET}")
+            src = status["sources"]
+            print(f"  Breakdown:   {src['bundled']} bundled, {src['fetched']} fetched, {src['custom']} custom")
+            print(f"\n  {DIM}Commands: /threats update | list [category] | search <query> | stats{RESET}")
+            return True
+
+        sub = arg.strip().lower()
+
+        if sub == "update":
+            url = e.config.get("threat_signatures_url", "")
+            if not url:
+                self.io.print_warning("No signature URL configured. Set threat_signatures_url in config.")
+                return True
+            print(f"  Fetching signatures from {url}...")
+            result = ti.update(force=True)
+            if result["success"]:
+                print(f"  {GREEN}{result['message']}{RESET}")
+            else:
+                print(f"  {RED}{result['message']}{RESET}")
+            return True
+
+        if sub == "stats":
+            stats = ti.get_detection_stats()
+            print(f"\n{BOLD}Detection Statistics (this session):{RESET}")
+            print(f"  Total hits: {stats['total_hits']}")
+            if stats["top_patterns"]:
+                print(f"\n  {BOLD}Top patterns:{RESET}")
+                for name, count in stats["top_patterns"][:10]:
+                    print(f"    {name:40} {YELLOW}{count}{RESET}")
+            if stats["by_category"]:
+                print(f"\n  {BOLD}By category:{RESET}")
+                for cat, count in stats["by_category"].items():
+                    print(f"    {cat:25} {count}")
+            if not stats["top_patterns"]:
+                print(f"  {DIM}No detections yet.{RESET}")
+            return True
+
+        if sub.startswith("list"):
+            parts = sub.split(None, 1)
+            category = parts[1] if len(parts) > 1 else None
+            if category:
+                results = ti.list_by_category(category)
+                if not results:
+                    self.io.print_info(f"No patterns in category '{category}'")
+                    return True
+                print(f"\n{BOLD}{category}{RESET} ({len(results)} patterns):")
+            else:
+                results = ti.search_patterns("")  # All patterns
+                if not results:
+                    self.io.print_info("No external patterns loaded.")
+                    return True
+                print(f"\n{BOLD}All external patterns{RESET} ({len(results)}):")
+            for p in results:
+                lc = RED if p["level"] == 3 else YELLOW if p["level"] == 2 else DIM
+                level_names = {0: "CLEAN", 1: "SUSPICIOUS", 2: "WARNING", 3: "CRITICAL"}
+                ln = level_names.get(p["level"], "?")
+                print(f"  {p['name']:40} {lc}[{ln}]{RESET}  {p['description'][:50]}")
+            return True
+
+        if sub.startswith("search"):
+            parts = sub.split(None, 1)
+            if len(parts) < 2:
+                self.io.print_error("Usage: /threats search <query>")
+                return True
+            query = parts[1]
+            results = ti.search_patterns(query)
+            if not results:
+                print(f"  {DIM}No patterns matching '{query}'{RESET}")
+                return True
+            print(f"\n{BOLD}Results for \"{query}\":{RESET}")
+            for p in results:
+                lc = RED if p["level"] == 3 else YELLOW if p["level"] == 2 else DIM
+                level_names = {0: "CLEAN", 1: "SUSPICIOUS", 2: "WARNING", 3: "CRITICAL"}
+                ln = level_names.get(p["level"], "?")
+                print(f"  {p['name']:40} {lc}[{ln}]{RESET}  {p['description'][:50]}")
+            return True
+
+        self.io.print_error("Usage: /threats [update | list [category] | search <query> | stats]")
         return True
 
     def _cmd_config(self, arg: str) -> bool:
@@ -513,13 +651,23 @@ class CommandHandler:
 
     def _cmd_scan(self, arg: str) -> bool:
         e = self.engine
-        path = arg if arg else e.cwd
-        self.io.print_info(f"Scanning codebase at {path}...")
+        if not hasattr(e, '_digester') or e._digester is None:
+            self.io.print_error("Codebase digester not initialized.")
+            return True
+        parts = arg.strip().split() if arg else []
+        force = False
+        path = e.cwd
+        for part in parts:
+            if part.lower() in ("force", "--force"):
+                force = True
+            else:
+                path = part
+        self.io.print_info(
+            f"Scanning codebase at {path}"
+            f"{' (forced)' if force else ''}...")
         try:
             from forge.tools.digest_tools import _scan_codebase
-            summary = _scan_codebase(
-                e._digester, path,
-                force=("force" in arg.lower() if arg else False))
+            summary = _scan_codebase(e._digester, path, force=force)
             print(f"\n{summary[:3000]}")
             if len(summary) > 3000:
                 print(f"\n{DIM}... ({len(summary) - 3000} more chars){RESET}")
@@ -624,7 +772,21 @@ class CommandHandler:
                 embed_fn=e.llm.embed,
             )
 
-        target_dir = arg or e.cwd
+        # --rebuild: clear cached hashes to force full re-chunk + re-embed
+        rebuild = False
+        parts = (arg or "").strip().split()
+        if "--rebuild" in parts:
+            rebuild = True
+            parts.remove("--rebuild")
+
+        target_dir = " ".join(parts) if parts else e.cwd
+
+        if rebuild:
+            e.index._file_hashes.clear()
+            e.index._metadata.clear()
+            e.index._vectors = None
+            self.io.print_info("Cleared index — full rebuild...")
+
         self.io.print_info(f"Indexing {target_dir}...")
 
         def progress(fpath, chunks):
@@ -759,14 +921,18 @@ class CommandHandler:
         if not arg:
             mode = e._voice.mode.upper()
             state = "active" if e._voice.ready else "inactive"
+            tts_label = e._tts.engine_label if e._tts else "None"
             print(f"\n{BOLD}Voice Input{RESET}")
             print(f"  Status: {GREEN}{state}{RESET}")
             print(f"  Mode:   {CYAN}{mode}{RESET}")
+            print(f"  TTS:    {CYAN}{tts_label}{RESET}")
             print(f"  Hotkey: {CYAN}`{RESET} (backtick)")
             print(f"\n  {DIM}Commands:{RESET}")
-            print(f"  {CYAN}/voice ptt{RESET}   Push-to-talk (hold ` to speak)")
-            print(f"  {CYAN}/voice vox{RESET}   Voice-activated (auto-detect speech)")
-            print(f"  {CYAN}/voice off{RESET}   Disable voice input")
+            print(f"  {CYAN}/voice ptt{RESET}          Push-to-talk (hold ` to speak)")
+            print(f"  {CYAN}/voice vox{RESET}          Voice-activated (auto-detect)")
+            print(f"  {CYAN}/voice engine edge{RESET}  Cloud neural voices (high quality)")
+            print(f"  {CYAN}/voice engine local{RESET} Offline system voices (no internet)")
+            print(f"  {CYAN}/voice off{RESET}          Disable voice input")
             return True
 
         sub = arg.strip().lower()
@@ -776,12 +942,29 @@ class CommandHandler:
         elif sub == "vox":
             e._voice.mode = "vox"
             self.io.print_info("Voice mode: VOX (voice-activated, auto-detect speech)")
+        elif sub.startswith("engine"):
+            parts = sub.split()
+            if len(parts) >= 2 and parts[1] in ("edge", "local"):
+                engine_choice = parts[1]
+                if e._tts:
+                    e._tts.engine = engine_choice
+                    self.io.print_info(f"TTS engine: {e._tts.engine_label}")
+                    # Save preference to config
+                    try:
+                        e.config.set("tts_engine", engine_choice)
+                        e.config.save()
+                    except Exception:
+                        pass
+                else:
+                    self.io.print_error("TTS not initialized.")
+            else:
+                self.io.print_error("Usage: /voice engine [edge|local]")
         elif sub == "off":
             e._voice.stop()
             e._voice = None
             self.io.print_info("Voice input disabled.")
         else:
-            self.io.print_error("Usage: /voice [ptt|vox|off]")
+            self.io.print_error("Usage: /voice [ptt|vox|engine|off]")
         return True
 
     # ── Plugins ──
@@ -953,6 +1136,82 @@ class CommandHandler:
             self.io.print_error("Usage: /continuity [history|set <N>|on|off]")
         return True
 
+    # ── Adaptive Model Intelligence ──
+
+    def _cmd_ami(self, arg: str) -> bool:
+        """Adaptive Model Intelligence status and controls.
+
+        Subcommands:
+          /ami          — Status overview
+          /ami probe    — Re-probe model capabilities
+          /ami reset    — Clear failure catalog and learned patterns
+          /ami stats    — Detailed analytics
+        """
+        e = self.engine
+        if not hasattr(e, 'ami'):
+            self.io.print_error("AMI not initialized.")
+            return True
+
+        sub = arg.strip().lower() if arg else ""
+
+        if not sub:
+            print(e.ami.format_status())
+            return True
+
+        if sub == "probe":
+            model = e.llm.model
+            self.io.print_info(f"Probing {model}...")
+            caps = e.ami.probe_model_capabilities(model, force=True)
+            if caps:
+                native_s = "YES" if caps.supports_native_tools else "NO"
+                json_s = "YES" if caps.supports_json_format else "NO"
+                text_s = "YES" if caps.supports_text_tool_calls else "PARTIAL"
+                self.io.print_info(f"  Native tool calling: {native_s}")
+                self.io.print_info(f"  JSON format mode:    {json_s}")
+                self.io.print_info(f"  Text JSON parsing:   {text_s}")
+                self.io.print_info(f"  Preferred format:    {caps.preferred_tool_format}")
+                self.io.print_info("Capabilities cached.")
+            else:
+                self.io.print_warning("Probe failed — LLM may not be available.")
+            return True
+
+        if sub == "reset":
+            e.ami._failure_catalog.clear()
+            e.ami._turn_history.clear()
+            from forge.ami import AMIStats
+            e.ami._stats = AMIStats()
+            e.ami._persist_state()
+            self.io.print_info("AMI failure catalog and learned patterns cleared.")
+            return True
+
+        if sub == "stats":
+            status = e.ami.get_status()
+            q = status["quality"]
+            r = status["retries"]
+            s = e.ami._stats
+            print(f"\nAMI Session Statistics:")
+            print(f"  Total turns:        {s.total_turns}")
+            print(f"  Retries triggered:  {r['total']} "
+                  f"({r['total']/max(1,s.total_turns)*100:.0f}%)")
+            rate = r['recovery_rate']
+            print(f"  Recovery rate:      {rate:.0%} "
+                  f"({r['succeeded']}/{r['total']})" if r['total'] else
+                  f"  Recovery rate:      N/A")
+            print(f"  Tier 1 (parse):     {r['tier1']['attempts']} attempts, "
+                  f"{r['tier1']['successes']} success")
+            print(f"  Tier 2 (constrain): {r['tier2']['attempts']} attempts, "
+                  f"{r['tier2']['successes']} success")
+            print(f"  Tier 3 (reset):     {r['tier3']['attempts']} attempts, "
+                  f"{r['tier3']['successes']} success")
+            if s.total_turns > 0:
+                print(f"  Avg quality:        {q['average']:.2f}")
+                print(f"  Worst quality:      {q['worst']:.2f}")
+                print(f"  Best quality:       {q['best']:.2f}")
+            return True
+
+        self.io.print_error("Usage: /ami [probe|reset|stats]")
+        return True
+
     # ── Synapse check ──
 
     def _cmd_synapse(self, arg: str) -> bool:
@@ -965,6 +1224,51 @@ class CommandHandler:
             self.io.print_info("(Dashboard must be running to see the animation cycle.)")
         except Exception as exc:
             self.io.print_error(f"Failed to trigger synapse check: {exc}")
+        return True
+
+    # ── Bug Reporter ──
+
+    def _cmd_report(self, arg: str) -> bool:
+        """Manually file a bug report via the Bug Reporter.
+
+        Usage: /report <description of the issue>
+        """
+        e = self.engine
+        if not arg.strip():
+            self.io.print_error("Usage: /report <description of the issue>")
+            return True
+
+        # Check gh CLI availability
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["gh", "auth", "status"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode != 0:
+                self.io.print_error(
+                    "GitHub CLI not authenticated. Run: gh auth login")
+                return True
+        except FileNotFoundError:
+            self.io.print_error(
+                "GitHub CLI (gh) not found. Install from: "
+                "https://cli.github.com/")
+            return True
+        except Exception as ex:
+            self.io.print_error(f"Failed to check gh auth: {ex}")
+            return True
+
+        reporter = getattr(e, "bug_reporter", None)
+        if not reporter:
+            self.io.print_error("Bug reporter not initialized.")
+            return True
+
+        self.io.print_info("Filing bug report...")
+        url = reporter.file_manual_report(arg.strip())
+        if url:
+            self.io.print_info(f"Bug report filed: {url}")
+        else:
+            self.io.print_error("Failed to file bug report.")
         return True
 
     # ── Audit export ──
@@ -1000,6 +1304,12 @@ class CommandHandler:
                 continuity=e.continuity,
                 plan_verifier=e.plan_verifier,
                 reliability=getattr(e, "reliability", None),
+                bug_reporter=getattr(e, "bug_reporter", None),
+                ami=getattr(e, "ami", None),
+                shipwright=getattr(e, "_shipwright", None),
+                autoforge=getattr(e, "_autoforge", None),
+                bpos=getattr(e, "_bpos", None),
+                tools=getattr(e, "tools", None),
                 session_start=e._session_start,
                 turn_count=e._turn_count,
                 model=e.llm.model,
@@ -1047,7 +1357,8 @@ class CommandHandler:
     def _cmd_benchmark(self, arg: str) -> bool:
         """Run or inspect benchmark suite.
 
-        Usage: /benchmark list | run [suite] | results [suite] | compare
+        Usage: /benchmark list | run [suite] | live [suite] | results [suite]
+                          | compare | report
         """
         from forge.benchmark import BenchmarkRunner
 
@@ -1066,27 +1377,58 @@ class CommandHandler:
                 self.io.print_info(f"  {s} ({len(scenarios)} scenarios)")
             return True
 
-        if sub == "run":
+        if sub == "run" or sub == "live":
             suite_name = parts[1] if len(parts) > 1 else "refactoring"
-            model = self.engine.llm.model if hasattr(self.engine, "llm") else ""
+            e = self.engine
+            model = e.llm.model if hasattr(e, "llm") else ""
             config_hash = BenchmarkRunner.compute_config_hash(
                 model=model,
-                context_size=self.engine.config.get("context_size", 0),
-                safety_level=self.engine.config.get("safety_level", 1),
-                router_enabled=self.engine.config.get("router_enabled", False),
-                dedup_enabled=self.engine.config.get("dedup_enabled", True),
-                verify_mode=self.engine.config.get("plan_verify_mode", "off"),
+                context_size=e.config.get("context_size", 0),
+                safety_level=e.config.get("safety_level", 1),
+                router_enabled=e.config.get("router_enabled", False),
+                dedup_enabled=e.config.get("dedup_enabled", True),
+                verify_mode=e.config.get("plan_verify_mode", "off"),
             )
             scenarios = runner.list_scenarios(suite_name)
             if not scenarios:
                 self.io.print_error(f"No scenarios found in suite '{suite_name}'.")
                 return True
+
+            # Live execution: send prompts to actual LLM backend
             self.io.print_info(
-                f"Running {len(scenarios)} scenarios from '{suite_name}'...")
-            result = runner.run_suite(suite_name, model=model,
-                                      config_hash=config_hash)
-            print(runner.format_results(result))
-            path = runner.save_result(result)
+                f"Running {len(scenarios)} scenarios from '{suite_name}' "
+                f"(live, model={model})...")
+            result = runner.run_suite_live(
+                suite_name, backend=e.llm,
+                system_prompt=None, config_hash=config_hash)
+            # Format and display results
+            passed = sum(1 for r in result.results if r.passed)
+            total = len(result.results)
+            print(f"\n{BOLD}Benchmark Results: {suite_name}{RESET}")
+            print(f"  Model:  {result.model}")
+            print(f"  Passed: {GREEN}{passed}{RESET}/{total} "
+                  f"({passed / total * 100:.0f}%)" if total else "")
+            print(f"  Avg quality: {sum(r.quality_score for r in result.results) / max(total, 1):.2f}")
+            for r in result.results:
+                icon = f"{GREEN}PASS{RESET}" if r.passed else f"{RED}FAIL{RESET}"
+                print(f"    [{icon}] {r.scenario_name} "
+                      f"({r.duration_s:.1f}s, q={r.quality_score:.2f})")
+                if r.error:
+                    print(f"      {DIM}{r.error[:80]}{RESET}")
+            # Save result
+            from dataclasses import asdict
+            save_data = asdict(result)
+            save_data["suite_name"] = suite_name
+            save_data["timestamp"] = time.time()
+            save_data["config_hash"] = config_hash
+            save_data["pass_rate"] = passed / max(total, 1)
+            results_dir = Path.home() / ".forge" / "benchmark_results"
+            results_dir.mkdir(parents=True, exist_ok=True)
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            path = results_dir / f"{suite_name}_{ts}.json"
+            import json as _json
+            path.write_text(_json.dumps(save_data, default=str, indent=2),
+                            encoding="utf-8")
             self.io.print_info(f"Results saved: {path}")
             return True
 
@@ -1116,7 +1458,7 @@ class CommandHandler:
                     "Need at least 2 results to compare. Run benchmarks first.")
                 return True
             diff = runner.compare_results(results[1], results[0])
-            self.io.print_info("Benchmark comparison (older → newer):")
+            self.io.print_info("Benchmark comparison (older -> newer):")
             for k, v in diff.items():
                 if "delta" in k:
                     sign = "+" if v > 0 else ""
@@ -1125,8 +1467,29 @@ class CommandHandler:
                     self.io.print_info(f"  {k}: {v}")
             return True
 
+        if sub == "report":
+            from forge.benchmark_report import build_comparison_report, save_report
+            results = runner.load_results(count=10)
+            if not results:
+                self.io.print_info("No benchmark results to report. Run benchmarks first.")
+                return True
+            html = build_comparison_report(results)
+            report_dir = Path.home() / ".forge" / "exports"
+            report_dir.mkdir(parents=True, exist_ok=True)
+            report_path = report_dir / "benchmark_report.html"
+            save_report(html, report_path)
+            self.io.print_info(f"Report saved: {report_path}")
+            # Try to open in browser
+            try:
+                import webbrowser
+                webbrowser.open(str(report_path))
+            except Exception:
+                pass
+            return True
+
         self.io.print_error(
-            "Usage: /benchmark list | run [suite] | results [suite] | compare")
+            "Usage: /benchmark list | run [suite] | results [suite] "
+            "| compare | report")
         return True
 
     # ── Update & Admin commands ──
@@ -1347,7 +1710,7 @@ class CommandHandler:
                 return True
             label = subarg.replace(" ", "-")
             token = secrets.token_hex(32)
-            token_hash = hashlib.sha256(token.encode()).hexdigest()
+            token_hash = hashlib.sha512(token.encode()).hexdigest()
 
             # Attempt server registration
             admin_token = self.engine.config.get("telemetry_token", "")
@@ -1510,8 +1873,321 @@ class CommandHandler:
         "/continuity": _cmd_continuity,
         "/theme": _cmd_theme,
         "/synapse": _cmd_synapse,
+        "/report": _cmd_report,
         "/export": _cmd_export,
         "/benchmark": _cmd_benchmark,
         "/update": _cmd_update,
         "/admin": _cmd_admin,
+        "/threats": _cmd_threats,
+        "/ami": _cmd_ami,
     }
+
+    # ── Shipwright commands ──
+
+    def _cmd_ship(self, arg: str) -> bool:
+        e = self.engine
+        if hasattr(e, '_bpos') and e._bpos and not e._bpos.is_feature_allowed("shipwright"):
+            self.io.print_error("Shipwright requires Pro or Power tier. Run /license for details.")
+            return True
+        if not hasattr(e, '_shipwright') or not e._shipwright:
+            from forge.shipwright import Shipwright
+            e._shipwright = Shipwright(
+                project_dir=e.cwd,
+                llm_backend=e.llm,
+            )
+        sw = e._shipwright
+        sub = arg.strip().lower().split()[0] if arg.strip() else "status"
+
+        if sub == "status":
+            print(f"\n{sw.format_status()}")
+        elif sub == "dry":
+            result = sw.release(dry_run=True)
+            if result["status"] == "no_release":
+                self.io.print_info(result["reason"])
+            else:
+                print(f"\n{BOLD}Dry Run:{RESET}")
+                print(f"  {result['current']} -> {result['next']} ({result['bump']})")
+                print(f"  {result['commits']} commits")
+                print(f"\n{result['changelog']}")
+        elif sub == "preflight":
+            self.io.print_info("Running preflight checks...")
+            results = sw.run_preflight()
+            for name, passed, msg in results:
+                icon = f"{GREEN}PASS{RESET}" if passed else f"{RED}FAIL{RESET}"
+                print(f"  [{icon}] {name}: {msg}")
+            all_pass = all(p for _, p, _ in results)
+            if all_pass:
+                self.io.print_info("All preflight checks passed.")
+            else:
+                self.io.print_error("Some preflight checks failed.")
+        elif sub == "go":
+            self.io.print_info("Executing release...")
+            result = sw.release(dry_run=False)
+            if result["status"] == "no_release":
+                self.io.print_info(result["reason"])
+            elif result["status"] == "released":
+                self.io.print_info(
+                    f"Released {result['tag']} "
+                    f"({result['current']} -> {result['next']})")
+                print(f"\n{result['changelog']}")
+        elif sub == "changelog":
+            commits = sw.get_unreleased_commits()
+            commits = sw.classify_commits(commits)
+            next_ver, _ = sw.compute_next_version(commits)
+            changelog = sw.generate_changelog(commits, next_ver)
+            print(f"\n{changelog}")
+        elif sub == "history":
+            print(f"\n{sw.format_history()}")
+        else:
+            self.io.print_error(
+                "Usage: /ship [status | dry | preflight | go | changelog | history]")
+        return True
+
+    # ── AutoForge commands ──
+
+    def _cmd_autocommit(self, arg: str) -> bool:
+        e = self.engine
+        if not hasattr(e, '_autoforge') or not e._autoforge:
+            from forge.autoforge import AutoForge
+            e._autoforge = AutoForge(
+                project_dir=e.cwd,
+                config_get=e.config.get,
+            )
+        af = e._autoforge
+        sub = arg.strip().lower() if arg.strip() else ""
+
+        if sub == "on":
+            if hasattr(e, '_bpos') and e._bpos and not e._bpos.is_feature_allowed("auto_commit"):
+                self.io.print_error("AutoForge requires Pro or Power tier. Run /license for details.")
+                return True
+            af.enable()
+            e.config.set("auto_commit", True)
+            e.config.save()
+            self.io.print_info("AutoForge enabled. File edits will be auto-committed.")
+        elif sub == "off":
+            af.disable()
+            e.config.set("auto_commit", False)
+            e.config.save()
+            self.io.print_info("AutoForge disabled.")
+        elif sub == "status":
+            print(f"\n{af.format_status()}")
+        elif sub == "hook":
+            from forge.autoforge import generate_hook_script
+            script = generate_hook_script(e.cwd)
+            hook_dir = Path(e.cwd) / ".claude" / "hooks"
+            hook_dir.mkdir(parents=True, exist_ok=True)
+            hook_path = hook_dir / "auto_commit.py"
+            hook_path.write_text(script, encoding="utf-8")
+            self.io.print_info(f"Hook script written to {hook_path}")
+            self.io.print_info("Add to .claude/settings.json to activate.")
+        else:
+            print(f"\n{af.format_status()}")
+            self.io.print_info("Usage: /autocommit [on | off | status | hook]")
+        return True
+
+    # ── License / BPoS commands ──
+
+    def _cmd_license(self, arg: str) -> bool:
+        e = self.engine
+        if not hasattr(e, '_bpos') or not e._bpos:
+            from forge.passport import BPoS
+            from forge.machine_id import get_machine_id
+            e._bpos = BPoS(
+                data_dir=Path.home() / ".forge",
+                machine_id=get_machine_id(),
+            )
+        bpos = e._bpos
+        sub = arg.strip().lower().split()[0] if arg.strip() else "status"
+
+        if sub == "status":
+            print(f"\n{bpos.format_status()}")
+        elif sub == "activate":
+            # Activation requires a passport JSON file
+            parts = arg.strip().split(None, 1)
+            if len(parts) < 2:
+                self.io.print_error("Usage: /license activate <passport.json>")
+                return True
+            passport_file = Path(parts[1])
+            if not passport_file.exists():
+                self.io.print_error(f"File not found: {passport_file}")
+                return True
+            try:
+                import json
+                data = json.loads(passport_file.read_text(encoding="utf-8"))
+                ok, msg = bpos.activate(data)
+                if ok:
+                    self.io.print_info(msg)
+                else:
+                    self.io.print_error(msg)
+            except Exception as ex:
+                self.io.print_error(f"Activation failed: {ex}")
+        elif sub == "deactivate":
+            ok, msg = bpos.deactivate()
+            if ok:
+                self.io.print_info(msg)
+            else:
+                self.io.print_error(msg)
+        elif sub == "genome":
+            snapshot = bpos.collect_genome(e)
+            maturity = bpos.get_genome_maturity()
+            print(f"\n{BOLD}Forge Genome{RESET}")
+            print(f"  Maturity: {int(maturity * 100)}%")
+            print(f"  Sessions: {bpos._genome.session_count}")
+            print(f"  AMI patterns: {snapshot.ami_failure_catalog_size}")
+            print(f"  Model profiles: {snapshot.ami_model_profiles}")
+            print(f"  Avg quality: {snapshot.ami_average_quality:.2f}")
+            print(f"  Reliability: {snapshot.reliability_score:.1f}")
+            print(f"  Threat scans: {bpos._genome.threat_scans_total}")
+        elif sub == "tiers":
+            from forge.passport import get_tiers
+            tiers = get_tiers()
+            for key, cfg in tiers.items():
+                marker = f" {GREEN}*{RESET}" if key == bpos.tier else ""
+                price = cfg.get('price_display', cfg.get('price', ''))
+                print(f"\n  {BOLD}{cfg.get('label', key)}{RESET} ({price}){marker}")
+                skip = {"label", "price", "price_display",
+                        "price_cents", "stripe_price_id"}
+                for feat, val in cfg.items():
+                    if feat in skip:
+                        continue
+                    icon = f"{GREEN}yes{RESET}" if val else f"{DIM}no{RESET}"
+                    if isinstance(val, int):
+                        icon = str(val)
+                    print(f"    {feat}: {icon}")
+        else:
+            self.io.print_error(
+                "Usage: /license [status | activate <file> | deactivate "
+                "| genome | tiers]")
+        return True
+
+    # ── Puppet / Fleet commands ──
+
+    def _cmd_puppet(self, arg: str) -> bool:
+        e = self.engine
+        if not hasattr(e, '_puppet_mgr') or not e._puppet_mgr:
+            from forge.puppet import PuppetManager
+            from forge.machine_id import get_machine_id
+            bpos = getattr(e, '_bpos', None)
+            e._puppet_mgr = PuppetManager(
+                data_dir=Path.home() / ".forge" / "puppets",
+                bpos=bpos,
+                machine_id=get_machine_id(),
+            )
+        pm = e._puppet_mgr
+
+        parts = arg.strip().split() if arg.strip() else ["status"]
+        sub = parts[0].lower()
+
+        if sub == "status":
+            print(f"\n{pm.format_status()}")
+
+        elif sub == "activate":
+            if len(parts) < 2:
+                self.io.print_error(
+                    "Usage: /puppet activate <passport.json>")
+                return True
+            self.io.print_info("Activating passport with server...")
+            ok, msg = pm.activate_master(parts[1])
+            if ok:
+                self.io.print_info(msg)
+            else:
+                self.io.print_error(msg)
+
+        elif sub == "generate":
+            if len(parts) < 2:
+                self.io.print_error("Usage: /puppet generate <name>")
+                return True
+            name = parts[1]
+            path = pm.generate_puppet_passport(name)
+            if path:
+                self.io.print_info(f"Puppet passport created: {path}")
+                self.io.print_info(
+                    "Give this file to the puppet machine. They run: "
+                    "/puppet join <file>")
+            else:
+                summary = pm.get_seat_summary()
+                self.io.print_error(
+                    f"Failed. Must be Master with available seats. "
+                    f"({summary['seats_used']}/{summary['puppet_limit']} "
+                    f"used)")
+
+        elif sub == "join":
+            if len(parts) < 2:
+                self.io.print_error(
+                    "Usage: /puppet join <puppet_passport.json>")
+                return True
+            # Optional sync_dir as second arg (backward compat)
+            sync = parts[2] if len(parts) > 2 else None
+            ok, msg = pm.init_as_puppet(parts[1], sync_dir=sync)
+            if ok:
+                self.io.print_info(msg)
+            else:
+                self.io.print_error(msg)
+
+        elif sub == "list":
+            puppets = pm.refresh_puppet_status()
+            if not puppets:
+                print("  No puppets registered.")
+            else:
+                for p in puppets:
+                    icon = {"active": f"{GREEN}+{RESET}",
+                            "stale": f"{YELLOW}?{RESET}",
+                            "revoked": f"{RED}x{RESET}"}.get(
+                                p.status, "?")
+                    print(f"  [{icon}] {p.name} ({p.machine_id}) "
+                          f"{p.passport_tier} "
+                          f"genome: {p.genome_maturity_pct}% "
+                          f"sessions: {p.session_count}")
+
+        elif sub == "revoke":
+            if len(parts) < 2:
+                self.io.print_error("Usage: /puppet revoke <machine_id>")
+                return True
+            if pm.revoke_puppet(parts[1]):
+                self.io.print_info(f"Revoked puppet: {parts[1]}")
+            else:
+                self.io.print_error(f"Puppet not found: {parts[1]}")
+
+        elif sub == "sync":
+            if not hasattr(e, '_bpos') or not e._bpos:
+                self.io.print_error("BPoS not initialized")
+                return True
+            from dataclasses import asdict
+            genome = asdict(e._bpos._genome)
+            if pm.sync_to_master(genome):
+                self.io.print_info("Genome synced to master")
+            else:
+                self.io.print_error(
+                    "Sync failed. Are you registered as a puppet?")
+
+        elif sub == "seats":
+            summary = pm.get_seat_summary()
+            print(f"\n  Seats total: {summary['seats_total']}")
+            print(f"  Puppet limit: {summary['puppet_limit']}")
+            print(f"  Seats used: {summary['seats_used']}")
+            print(f"  Available: {summary['seats_available']}")
+
+        elif sub == "master":
+            # Backward compat: local fleet master mode
+            if len(parts) < 2:
+                self.io.print_error("Usage: /puppet master <sync_dir>")
+                return True
+            sync_dir = parts[1]
+            if pm.init_as_master(sync_dir):
+                self.io.print_info(
+                    f"Initialized as local fleet master. Sync: {sync_dir}")
+            else:
+                self.io.print_error("Failed to initialize as master.")
+
+        else:
+            self.io.print_error(
+                "Usage: /puppet [status | activate <file> | "
+                "generate <name> | join <file> | list | "
+                "revoke <id> | sync | seats]")
+        return True
+
+    # Register commands defined after the _COMMANDS dict
+    _COMMANDS["/ship"] = _cmd_ship
+    _COMMANDS["/autocommit"] = _cmd_autocommit
+    _COMMANDS["/license"] = _cmd_license
+    _COMMANDS["/puppet"] = _cmd_puppet

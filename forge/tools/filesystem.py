@@ -4,6 +4,7 @@ Cross-platform (Windows + Linux). All paths are resolved to
 absolute paths before any operation.
 """
 
+import ast
 import os
 import re
 import fnmatch
@@ -23,6 +24,26 @@ def _check_path_safety(file_path: str) -> Optional[str]:
     """
     if "\x00" in file_path:
         return "Error: file path contains null byte."
+    return None
+
+
+def _validate_python(content: str, file_path: str) -> Optional[str]:
+    """Return error message if Python syntax is invalid, None if OK."""
+    try:
+        ast.parse(content, filename=file_path)
+        return None
+    except SyntaxError as e:
+        return f"SyntaxError at line {e.lineno}: {e.msg}"
+
+
+def _validate_syntax(file_path: str, content: str) -> Optional[str]:
+    """Validate syntax of content based on file extension.
+
+    Returns error string if invalid, None if valid or not a validated type.
+    """
+    ext = Path(file_path).suffix.lower()
+    if ext == ".py":
+        return _validate_python(content, file_path)
     return None
 
 
@@ -82,6 +103,12 @@ def write_file(file_path: str, content: str) -> str:
     if p.exists() and p.is_symlink():
         return f"Error: refusing to write through symlink: {p}"
     p.parent.mkdir(parents=True, exist_ok=True)
+
+    # Syntax validation — reject writes that produce broken files
+    err = _validate_syntax(str(p), content)
+    if err:
+        return f"Error: content has invalid syntax for {p}. {err}. File not written."
+
     try:
         # Atomic write: temp file in same dir then os.replace()
         # Prevents corruption if process is killed mid-write
@@ -145,6 +172,11 @@ def edit_file(file_path: str, old_string: str, new_string: str,
     else:
         new_text = text.replace(old_string, new_string, 1)
         replaced = 1
+
+    # Syntax validation — reject edits that break the file
+    err = _validate_syntax(str(p), new_text)
+    if err:
+        return f"Error: edit would break syntax in {p}. {err}. File unchanged."
 
     # Atomic write: temp file in same dir then os.replace()
     fd, tmp_path = tempfile.mkstemp(

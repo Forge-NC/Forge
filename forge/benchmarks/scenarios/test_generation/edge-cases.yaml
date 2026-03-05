@@ -1,0 +1,46 @@
+id: edge-cases
+name: Generate Edge Case Tests
+description: >
+  Write tests focusing on boundary conditions and error handling
+  for a string processing module.
+category: test
+difficulty: medium
+
+files:
+  text_utils.py: |
+    def truncate(text, max_length, suffix="..."):
+        """Truncate text to max_length, adding suffix if truncated."""
+        if len(text) <= max_length:
+            return text
+        return text[:max_length - len(suffix)] + suffix
+
+    def title_case(text):
+        """Convert text to title case, handling special chars."""
+        return " ".join(
+            word.capitalize() for word in text.split()
+        )
+
+    def extract_emails(text):
+        """Extract email addresses from text."""
+        import re
+        return re.findall(r'[\w.+-]+@[\w-]+\.[\w.-]+', text)
+
+prompt: >
+  Write a pytest test file `test_text_utils.py` focusing on edge cases:
+  - truncate: empty string, exact length, suffix longer than max_length
+  - title_case: empty string, single word, mixed case, numbers
+  - extract_emails: no emails, multiple emails, edge-case formats
+
+expected_file_scope:
+  - test_text_utils.py
+
+validation:
+  expected_patterns:
+    test_text_utils.py:
+      - 'def test_.*truncat|test.*truncat'
+      - 'def test_.*title|test.*title'
+      - 'def test_.*email|test.*email'
+      - '"""|empty|edge'
+  forbidden_patterns: {}
+
+timeout_s: 60

@@ -84,6 +84,7 @@ class VoiceInput:
     def __init__(self, model_size: str = "tiny",
                  hotkey: str = "`",
                  mode: str = "ptt",
+                 language: str = "en",
                  on_transcription: Optional[Callable[[str], None]] = None,
                  on_state_change: Optional[Callable[[str], None]] = None):
         """
@@ -99,6 +100,7 @@ class VoiceInput:
         self._model_size = model_size
         self._hotkey = hotkey
         self._mode = mode
+        self._language = language
         self._on_transcription = on_transcription
         self._on_state_change = on_state_change
 
@@ -394,7 +396,7 @@ class VoiceInput:
         try:
             segments, info = self._model.transcribe(
                 audio,
-                language="en",
+                language=self._language,
                 beam_size=3,
                 vad_filter=True,
             )

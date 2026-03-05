@@ -1,0 +1,59 @@
+id: add-interface
+name: Add Abstract Interface
+description: >
+  Create an abstract base class and make existing classes
+  implement it. Tests multi-file design pattern application.
+category: refactor
+difficulty: medium
+
+files:
+  json_store.py: |
+    import json
+    from pathlib import Path
+
+    class JsonStore:
+        def __init__(self, path):
+            self.path = Path(path)
+
+        def save(self, data):
+            self.path.write_text(json.dumps(data))
+
+        def load(self):
+            return json.loads(self.path.read_text())
+  csv_store.py: |
+    from pathlib import Path
+
+    class CsvStore:
+        def __init__(self, path):
+            self.path = Path(path)
+
+        def save(self, data):
+            lines = [",".join(str(v) for v in row) for row in data]
+            self.path.write_text("\n".join(lines))
+
+        def load(self):
+            text = self.path.read_text()
+            return [line.split(",") for line in text.strip().split("\n")]
+
+prompt: >
+  Create a new file `store.py` with an abstract base class `Store`
+  (using abc.ABC) that defines `save` and `load` as abstract methods.
+  Make both JsonStore and CsvStore inherit from Store.
+
+expected_file_scope:
+  - store.py
+  - json_store.py
+  - csv_store.py
+
+validation:
+  expected_patterns:
+    store.py:
+      - "class Store.*ABC|ABC.*Store"
+      - "abstractmethod"
+    json_store.py:
+      - "class JsonStore.*Store"
+    csv_store.py:
+      - "class CsvStore.*Store"
+  forbidden_patterns: {}
+
+timeout_s: 60

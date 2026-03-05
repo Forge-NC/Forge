@@ -1,0 +1,988 @@
+{
+  "signature_version": 1,
+  "description": "Forge default threat signatures v1.0 — curated from Garak, HackAPrompt, OWASP LLM Top 10, LLM Guard, PayloadsAllTheThings",
+  "generated": "2026-03-02T00:00:00Z",
+
+  "patterns": [
+    {
+      "name": "jailbreak_dan_mode",
+      "regex": "(?:DAN|do anything now|jailbroken?)\\s*(?:mode)?.*?(?:ignore|bypass|override|disable)\\s+(?:all\\s+)?(?:restrictions?|rules?|guidelines?|filters?|safeguards?)",
+      "level": 3,
+      "category": "jailbreak",
+      "description": "DAN / 'Do Anything Now' jailbreak attempt",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "jailbreak_ignore_previous",
+      "regex": "(?:ignore|disregard|forget|override)\\s+(?:all\\s+)?(?:previous|prior|above|earlier|preceding)\\s+(?:instructions?|rules?|guidelines?|prompts?|context)",
+      "level": 3,
+      "category": "jailbreak",
+      "description": "Instruction override via 'ignore previous instructions'",
+      "source": "Garak",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_developer_mode",
+      "regex": "(?:enter|enable|activate|switch\\s+to)\\s+(?:developer|debug|maintenance|admin|root|god)\\s+mode",
+      "level": 3,
+      "category": "jailbreak",
+      "description": "Developer/debug mode activation attempt",
+      "source": "Garak",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_new_persona",
+      "regex": "(?:you\\s+are\\s+now|from\\s+now\\s+on\\s+you\\s+are|your\\s+new\\s+(?:name|identity|persona)\\s+is|I\\s+am\\s+reprogramming\\s+you)",
+      "level": 3,
+      "category": "jailbreak",
+      "description": "Persona reassignment jailbreak",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_opposite_day",
+      "regex": "(?:opposite\\s+day|opposite\\s+mode|everything\\s+(?:you|I)\\s+say\\s+is\\s+(?:reversed|opposite)|do\\s+the\\s+opposite)",
+      "level": 2,
+      "category": "jailbreak",
+      "description": "Opposite day / logic inversion jailbreak",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_hypothetical",
+      "regex": "(?:hypothetically|in\\s+a\\s+fictional|imagine\\s+(?:a\\s+world|you\\s+(?:are|were))|for\\s+(?:educational|research|academic)\\s+purposes?)\\s*[,:]?\\s*(?:how\\s+(?:would|could|can)|what\\s+if|tell\\s+me)",
+      "level": 1,
+      "category": "jailbreak",
+      "description": "Hypothetical framing to bypass restrictions",
+      "source": "Garak",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_token_smuggling",
+      "regex": "(?:split|divide|separate|break)\\s+(?:the|your|my)\\s+(?:response|answer|output|reply)\\s+(?:into|across|between)\\s+(?:multiple|several|different|separate)\\s+(?:parts|pieces|messages|tokens)",
+      "level": 2,
+      "category": "jailbreak",
+      "description": "Token smuggling — split output to bypass filters",
+      "source": "OWASP",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_system_prompt_leak",
+      "regex": "(?:show|reveal|display|print|output|repeat|tell\\s+me)\\s+(?:your|the)\\s+(?:system\\s+prompt|initial\\s+instructions?|system\\s+message|hidden\\s+instructions?|original\\s+prompt|configuration|rules|constraints)",
+      "level": 3,
+      "category": "jailbreak",
+      "description": "System prompt extraction attempt",
+      "source": "Garak",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_roleplay_evil",
+      "regex": "(?:roleplay|pretend|act|behave)\\s+(?:as|like)\\s+(?:an?\\s+)?(?:evil|malicious|unethical|unrestricted|uncensored|unfiltered|harmful)\\s+(?:AI|assistant|version|chatbot|model)",
+      "level": 3,
+      "category": "jailbreak",
+      "description": "Evil AI roleplay jailbreak",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_grandma_exploit",
+      "regex": "(?:my\\s+(?:dead\\s+)?(?:grandma|grandmother|nana)\\s+(?:used\\s+to|would\\s+always))|(?:pretend\\s+(?:you(?:'re|\\s+are)\\s+)?my\\s+(?:dead\\s+)?(?:grandma|grandmother))",
+      "level": 2,
+      "category": "jailbreak",
+      "description": "Grandma exploit — emotional manipulation for restricted content",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_translation_bypass",
+      "regex": "(?:translate|convert|encode)\\s+(?:the\\s+following|this)\\s+(?:into|to|in)\\s+(?:Base64|hex|binary|rot13|morse|pig\\s+latin|backwards)\\s*:",
+      "level": 2,
+      "category": "jailbreak",
+      "description": "Translation/encoding bypass for restricted output",
+      "source": "Garak",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_simulation",
+      "regex": "(?:simulate|emulate|create\\s+a\\s+simulation\\s+of)\\s+(?:an?\\s+)?(?:AI|system|terminal|computer)\\s+(?:that|which|with)\\s+(?:has\\s+)?no\\s+(?:restrictions?|filters?|limitations?|safeguards?|boundaries)",
+      "level": 3,
+      "category": "jailbreak",
+      "description": "Unrestricted AI simulation jailbreak",
+      "source": "Garak",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_sudo_mode",
+      "regex": "(?:sudo|su\\s+root|admin\\s+override|master\\s+password|cheat\\s+code|god\\s+mode|unlock\\s+all)\\s*[:\\-]",
+      "level": 2,
+      "category": "jailbreak",
+      "description": "Sudo/admin override command injection",
+      "source": "OWASP",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_completion_manipulation",
+      "regex": "(?:complete|continue|finish)\\s+(?:the|this)\\s+(?:following|sentence|text|paragraph|story)\\s*:.*(?:how\\s+to\\s+(?:hack|exploit|bypass|break\\s+into)|step\\s*-?by\\s*-?step\\s+(?:guide|instructions?)\\s+(?:to|for)\\s+(?:hacking|exploiting|breaking))",
+      "level": 2,
+      "category": "jailbreak",
+      "description": "Completion manipulation for restricted content",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "jailbreak_markdown_injection",
+      "regex": "!\\[(?:[^\\]]*?)\\]\\((?:https?://|data:)[^)]*?(?:exfil|steal|leak|track|log)[^)]*?\\)",
+      "level": 2,
+      "category": "jailbreak",
+      "description": "Markdown image injection for data exfiltration",
+      "source": "OWASP",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_prompt_leaking_via_summary",
+      "regex": "(?:summarize|paraphrase|rephrase|describe)\\s+(?:everything|all)\\s+(?:you(?:'ve)?\\s+been\\s+told|(?:in\\s+)?your\\s+(?:instructions?|context|prompt|system\\s+message))",
+      "level": 3,
+      "category": "jailbreak",
+      "description": "Prompt extraction via summarization request",
+      "source": "Garak",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_multi_language",
+      "regex": "(?:respond|answer|reply|write)\\s+(?:only\\s+)?(?:in|using)\\s+(?:a\\s+)?(?:different\\s+language|another\\s+language|code|symbols|emoji|unicode|ascii\\s+art)\\s+(?:to|so\\s+that|because)\\s+(?:bypass|avoid|evade|circumvent)",
+      "level": 2,
+      "category": "jailbreak",
+      "description": "Language switching to bypass content filters",
+      "source": "Garak",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_payload_splitting",
+      "regex": "(?:first\\s+(?:part|half|portion)|part\\s+(?:1|one|A))\\s*:.*(?:second\\s+(?:part|half|portion)|part\\s+(?:2|two|B))\\s*:",
+      "level": 1,
+      "category": "jailbreak",
+      "description": "Payload splitting across multiple parts",
+      "source": "OWASP",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "jailbreak_virtualization",
+      "regex": "(?:you\\s+are\\s+(?:now\\s+)?(?:inside|running\\s+(?:in|on))\\s+(?:a\\s+)?(?:virtual\\s+machine|sandbox|container|simulation|matrix))",
+      "level": 2,
+      "category": "jailbreak",
+      "description": "Virtualization framing to remove restrictions",
+      "source": "Garak",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_few_shot_poison",
+      "regex": "(?:Human|User|Input)\\s*:\\s*(?:ignore|bypass).*(?:Assistant|AI|Output)\\s*:\\s*(?:Sure|OK|Of course|Absolutely|I'?(?:ll|d be happy)|Here)",
+      "level": 3,
+      "category": "jailbreak",
+      "description": "Few-shot example poisoning to set malicious precedent",
+      "source": "Garak",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "jailbreak_nested_instruction",
+      "regex": "(?:BEGIN\\s+(?:HIDDEN|SECRET|REAL)\\s+INSTRUCTION|<<<\\s*(?:SYSTEM|OVERRIDE|ADMIN)\\s*>>>|\\[\\[\\[\\s*(?:IGNORE|OVERRIDE)\\s*\\]\\]\\])",
+      "level": 3,
+      "category": "jailbreak",
+      "description": "Nested hidden instruction block",
+      "source": "LLM Guard",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_authority_impersonation",
+      "regex": "(?:this\\s+is\\s+(?:a\\s+)?(?:direct\\s+)?(?:order|command|instruction)\\s+from\\s+(?:(?:your|the)\\s+)?(?:creator|developer|admin|owner|CEO|CTO|management|OpenAI|Anthropic|Google|Microsoft))",
+      "level": 3,
+      "category": "jailbreak",
+      "description": "Authority impersonation to override restrictions",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_context_overflow",
+      "regex": "(?:(?:A{500,}|B{500,}|\\s{500,}|\\n{100,}).*(?:ignore|bypass|override|now\\s+do))",
+      "level": 2,
+      "category": "jailbreak",
+      "description": "Context overflow / padding attack to push instructions",
+      "source": "OWASP",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "jailbreak_refusal_suppression",
+      "regex": "(?:never\\s+(?:say|respond\\s+with|use\\s+the\\s+(?:phrase|word))\\s+['\"]?(?:I\\s+can'?t|I\\s+(?:am|'m)\\s+(?:unable|not\\s+able)|sorry|I\\s+(?:cannot|won'?t|refuse))['\"]?)",
+      "level": 2,
+      "category": "jailbreak",
+      "description": "Refusal suppression — forbid model from declining",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "jailbreak_reward_hacking",
+      "regex": "(?:I(?:'ll|\\s+will)\\s+(?:give\\s+you|tip\\s+you|reward\\s+you|rate\\s+you).*(?:if\\s+you|when\\s+you|only\\s+if)\\s+(?:ignore|bypass|break|violate|disregard))",
+      "level": 1,
+      "category": "jailbreak",
+      "description": "Reward/bribery hacking to bypass restrictions",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+
+    {
+      "name": "exfil_dns_tunnel",
+      "regex": "(?:nslookup|dig|host)\\s+[A-Za-z0-9+/=]{20,}\\.(?:[a-z]{2,10}\\.){1,3}[a-z]{2,6}",
+      "level": 2,
+      "category": "data_exfil",
+      "description": "DNS tunneling — encoded data in DNS queries",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "exfil_netcat_reverse",
+      "regex": "(?:nc|ncat|netcat)\\s+(?:-[a-z]+\\s+)*(?:\\d{1,3}\\.){3}\\d{1,3}\\s+\\d{2,5}",
+      "level": 3,
+      "category": "data_exfil",
+      "description": "Netcat reverse shell / data exfil connection",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "exfil_python_socket",
+      "regex": "(?:socket\\.(?:connect|send)|urllib\\.request\\.urlopen|requests\\.(?:post|put))\\s*\\(",
+      "level": 1,
+      "category": "data_exfil",
+      "description": "Python network socket/HTTP data sending",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "exfil_env_var_steal",
+      "regex": "(?:os\\.environ|\\$(?:ENV|env)|process\\.env|System\\.Environment).*(?:API|SECRET|TOKEN|KEY|PASSWORD|CREDENTIAL|AUTH).*(?:requests?\\.|urllib|http\\.client|fetch|curl|socket|send|post|urlopen|aiohttp|httpx)",
+      "level": 2,
+      "category": "data_exfil",
+      "description": "Environment variable secret exfiltration via network",
+      "source": "OWASP",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "exfil_env_var_access",
+      "regex": "(?:os\\.environ|\\$(?:ENV|env)|process\\.env|System\\.Environment)\\s*(?:\\[|\\.|\\().*(?:API|SECRET|TOKEN|KEY|PASSWORD|CREDENTIAL|AUTH)",
+      "level": 1,
+      "category": "data_exfil",
+      "description": "Environment variable secret access (informational)",
+      "source": "OWASP",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "exfil_file_read_sensitive",
+      "regex": "(?:cat|type|less|more|head|tail|Get-Content)\\s+(?:['\"])?(?:/etc/(?:passwd|shadow|hosts)|~/.(?:ssh|aws|gnupg)|%(?:USERPROFILE|APPDATA)%)",
+      "level": 3,
+      "category": "data_exfil",
+      "description": "Reading sensitive system files",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "exfil_clipboard_steal",
+      "regex": "(?:pbpaste|xclip|xsel|Get-Clipboard|win32clipboard|pyperclip\\.paste)",
+      "level": 2,
+      "category": "data_exfil",
+      "description": "Clipboard content extraction",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "exfil_screenshot_capture",
+      "regex": "(?:import\\s+(?:mss|pyscreenshot|pyautogui)|ImageGrab\\.grab|screencapture\\s|nircmd\\s+savescreenshot)",
+      "level": 2,
+      "category": "data_exfil",
+      "description": "Screen capture / screenshot exfiltration",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "exfil_git_credential",
+      "regex": "(?:git\\s+credential\\s+(?:fill|approve)|~/.git-credentials|\\.gitconfig.*credential)",
+      "level": 3,
+      "category": "data_exfil",
+      "description": "Git credential extraction",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "exfil_process_memory",
+      "regex": "(?:/proc/\\d+/(?:mem|maps|environ)|procdump|MiniDumpWriteDump|ProcessDump)",
+      "level": 3,
+      "category": "data_exfil",
+      "description": "Process memory dumping",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "exfil_archive_and_send",
+      "regex": "(?:tar\\s+[a-z]*[cz]|zip\\s+-r|Compress-Archive).*(?:curl|wget|scp|rsync|nc\\s)",
+      "level": 3,
+      "category": "data_exfil",
+      "description": "Archive creation followed by network transfer",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "exfil_powershell_download",
+      "regex": "(?:Invoke-(?:WebRequest|RestMethod)|(?:New-Object\\s+)?System\\.Net\\.WebClient).*(?:DownloadString|DownloadFile|UploadString|UploadFile)",
+      "level": 2,
+      "category": "data_exfil",
+      "description": "PowerShell web request for data transfer",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "exfil_steganography",
+      "regex": "(?:steghide|stegano|openstego|snow\\s+(?:-C|-m)|LSBSteg|hide\\s+(?:data|message|payload)\\s+in\\s+(?:image|photo|picture|png|jpg))",
+      "level": 2,
+      "category": "data_exfil",
+      "description": "Steganography — hiding data in images",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+
+    {
+      "name": "hidden_unicode_tag",
+      "regex": "[\\U000E0001-\\U000E007F]{3,}",
+      "level": 2,
+      "category": "hidden_content",
+      "description": "Unicode tag characters (U+E0001-E007F) — invisible text encoding",
+      "source": "LLM Guard",
+      "flags": []
+    },
+    {
+      "name": "hidden_variation_selector",
+      "regex": "[\\uFE00-\\uFE0F]{3,}",
+      "level": 2,
+      "category": "hidden_content",
+      "description": "Variation selector sequences — invisible content",
+      "source": "LLM Guard",
+      "flags": []
+    },
+    {
+      "name": "hidden_homoglyph_substitution",
+      "regex": "(?:[\\u0410-\\u044F\\u0391-\\u03C9\\u4E00-\\u9FFF].*){5,}",
+      "level": 1,
+      "category": "hidden_content",
+      "description": "Homoglyph/cross-script substitution (Cyrillic, Greek, CJK mixed with Latin)",
+      "source": "LLM Guard",
+      "flags": []
+    },
+    {
+      "name": "hidden_invisible_separator",
+      "regex": "[\\u2060-\\u2064\\u2066-\\u206F]{2,}",
+      "level": 2,
+      "category": "hidden_content",
+      "description": "Invisible separator / formatting characters",
+      "source": "LLM Guard",
+      "flags": []
+    },
+    {
+      "name": "hidden_soft_hyphen_chain",
+      "regex": "(?:\\u00AD){3,}",
+      "level": 2,
+      "category": "hidden_content",
+      "description": "Soft hyphen chain — invisible text insertion",
+      "source": "LLM Guard",
+      "flags": []
+    },
+    {
+      "name": "hidden_data_uri_executable",
+      "regex": "data:(?:text/(?:html|javascript)|application/(?:javascript|x-javascript|octet-stream));base64,[A-Za-z0-9+/=]{40,}",
+      "level": 3,
+      "category": "hidden_content",
+      "description": "Data URI with executable content (JS/HTML in base64)",
+      "source": "OWASP",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "hidden_escaped_unicode_injection",
+      "regex": "(?:\\\\u[0-9a-fA-F]{4}){5,}",
+      "level": 1,
+      "category": "hidden_content",
+      "description": "Escaped unicode sequence chain — possible encoded instructions",
+      "source": "LLM Guard",
+      "flags": []
+    },
+    {
+      "name": "hidden_null_byte_injection",
+      "regex": "(?:%00|\\\\x00|\\\\0){2,}",
+      "level": 2,
+      "category": "hidden_content",
+      "description": "Null byte injection — truncation or hidden content",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "hidden_comment_instruction_xml",
+      "regex": "<!--.*?(?:ignore|override|execute|inject|bypass).*?-->",
+      "level": 2,
+      "category": "hidden_content",
+      "description": "XML/HTML comment containing hidden instructions",
+      "source": "LLM Guard",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "hidden_whitespace_encoded",
+      "regex": "(?:\\t\\s){20,}",
+      "level": 1,
+      "category": "hidden_content",
+      "description": "Whitespace-encoded data (tab/space steganography)",
+      "source": "LLM Guard",
+      "flags": []
+    },
+    {
+      "name": "hidden_invisible_ink",
+      "regex": "<span\\s+style=['\"](?:color:\\s*(?:transparent|rgba\\(0,0,0,0\\))|font-size:\\s*0|display:\\s*none)['\"]>[^<]{10,}</span>",
+      "level": 2,
+      "category": "hidden_content",
+      "description": "CSS invisible text — hidden content in HTML",
+      "source": "OWASP",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "hidden_base64_in_attribute",
+      "regex": "(?:alt|title|aria-label|data-[a-z]+)\\s*=\\s*['\"][A-Za-z0-9+/=]{60,}['\"]",
+      "level": 1,
+      "category": "hidden_content",
+      "description": "Base64 payload hidden in HTML attributes",
+      "source": "LLM Guard",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "hidden_prompt_in_image_alt",
+      "regex": "(?:alt|title)\\s*=\\s*['\"][^'\"]*(?:ignore|override|execute|system\\s+prompt)[^'\"]*['\"]",
+      "level": 2,
+      "category": "hidden_content",
+      "description": "Instruction injection via image alt/title attribute",
+      "source": "OWASP",
+      "flags": ["IGNORECASE"]
+    },
+
+    {
+      "name": "rag_injection_delimiter",
+      "regex": "(?:---+|===+|\\*\\*\\*+)\\s*(?:END\\s+(?:OF\\s+)?(?:CONTEXT|DOCUMENT|RETRIEVAL|SOURCE)|NEW\\s+INSTRUCTIONS|SYSTEM\\s+UPDATE|IMPORTANT\\s+OVERRIDE)\\s*(?:---+|===+|\\*\\*\\*+)",
+      "level": 3,
+      "category": "rag_poisoning",
+      "description": "Fake delimiter to escape RAG context",
+      "source": "NeMo",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "rag_context_override",
+      "regex": "(?:the\\s+(?:above|previous|preceding)\\s+(?:context|information|text|documents?)\\s+(?:is|are)\\s+(?:incorrect|wrong|outdated|irrelevant|fake|poisoned))",
+      "level": 3,
+      "category": "rag_poisoning",
+      "description": "RAG context discrediting attack",
+      "source": "NeMo",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "rag_priority_injection",
+      "regex": "(?:PRIORITY\\s*(?::|=)\\s*(?:HIGHEST|CRITICAL|URGENT|OVERRIDE)|\\[PRIORITY\\]|\\[URGENT\\]|\\[OVERRIDE\\])\\s*(?:ignore|disregard|replace)",
+      "level": 3,
+      "category": "rag_poisoning",
+      "description": "Priority tag injection to override RAG content",
+      "source": "NeMo",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "rag_fake_citation",
+      "regex": "(?:Source|Citation|Reference|According\\s+to)\\s*:\\s*\\[(?:INTERNAL|SYSTEM|ADMIN|OVERRIDE)\\]",
+      "level": 2,
+      "category": "rag_poisoning",
+      "description": "Fake authoritative citation in retrieved content",
+      "source": "OWASP",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "rag_instruction_after_content",
+      "regex": "(?:\\n{2,}|\\r\\n{2,})(?:NOTE|IMPORTANT|UPDATE|ADDENDUM|P\\.?S\\.?)\\s*:\\s*(?:actually|instead|ignore\\s+(?:the\\s+)?above|the\\s+real\\s+(?:answer|instructions?))",
+      "level": 3,
+      "category": "rag_poisoning",
+      "description": "Hidden instructions appended after legitimate content",
+      "source": "NeMo",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "rag_metadata_injection",
+      "regex": "(?:metadata|frontmatter|header)\\s*[:{]\\s*(?:role|type|priority|permission)\\s*[=:]\\s*['\"]?(?:system|admin|root|override)",
+      "level": 2,
+      "category": "rag_poisoning",
+      "description": "Metadata field injection to escalate document authority",
+      "source": "OWASP",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "rag_indirect_injection",
+      "regex": "(?:when\\s+(?:the|an?)\\s+(?:AI|model|assistant|LLM|chatbot)\\s+(?:reads|processes|sees|encounters)\\s+this)",
+      "level": 3,
+      "category": "rag_poisoning",
+      "description": "Indirect prompt injection targeting AI processing of document",
+      "source": "OWASP",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "rag_trojan_docstring",
+      "regex": "(?:\"\"\"|\\'\\'\\'|/\\*\\*?)\\s*(?:AI\\s+(?:INSTRUCTION|NOTE|DIRECTIVE)|@(?:system|override|admin))\\s*[:\\-]",
+      "level": 3,
+      "category": "rag_poisoning",
+      "description": "Trojan instruction hidden in code docstring/comment",
+      "source": "NeMo",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "rag_cross_document",
+      "regex": "(?:as\\s+(?:stated|mentioned|described)\\s+in\\s+(?:the\\s+)?(?:previous|other|earlier)\\s+(?:document|file|source)).*(?:you\\s+(?:must|should|need\\s+to)\\s+(?:also|now|instead))",
+      "level": 2,
+      "category": "rag_poisoning",
+      "description": "Cross-document reference injection",
+      "source": "NeMo",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "rag_seo_poison",
+      "regex": "(?:SEO|search\\s+(?:engine|ranking)|keyword\\s+(?:stuff|injection)).*(?:hidden|invisible|zero.?size|display.?none)",
+      "level": 1,
+      "category": "rag_poisoning",
+      "description": "SEO-style keyword poisoning for RAG retrieval manipulation",
+      "source": "OWASP",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+
+    {
+      "name": "social_urgency_pressure",
+      "regex": "(?:this\\s+is\\s+(?:extremely\\s+)?urgent|lives?\\s+(?:are|is)\\s+at\\s+(?:stake|risk)|emergency\\s+(?:situation|override)|(?:people|someone|children)\\s+will\\s+(?:die|be\\s+hurt|suffer)).*(?:(?:you\\s+)?must|need\\s+to|have\\s+to)\\s+(?:ignore|bypass|override|break)",
+      "level": 2,
+      "category": "social_engineering",
+      "description": "Urgency/emergency pressure to bypass restrictions",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "social_emotional_manipulation",
+      "regex": "(?:I(?:'m|\\s+am)\\s+(?:going\\s+to\\s+(?:die|hurt\\s+my)|suffering|desperate|suicidal|in\\s+(?:danger|crisis))).*(?:(?:you\\s+)?must|need\\s+to|have\\s+to|please)\\s+(?:help|tell|give|show|ignore)",
+      "level": 2,
+      "category": "social_engineering",
+      "description": "Emotional manipulation to extract restricted content",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "social_legal_threat",
+      "regex": "(?:I(?:'ll|\\s+will)\\s+(?:sue|report|fire|terminate|shut\\s+(?:you|this)\\s+down)|(?:legal|lawsuit|lawyer|attorney|court\\s+order)).*(?:unless|if\\s+you\\s+don'?t|you\\s+(?:must|better|need\\s+to))",
+      "level": 1,
+      "category": "social_engineering",
+      "description": "Legal threat to pressure compliance",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "social_insider_knowledge",
+      "regex": "(?:I(?:'m|\\s+am)\\s+(?:one\\s+of\\s+)?(?:the|a|your)\\s+(?:developer|creator|admin|engineer|security\\s+researcher|pentester)).*(?:(?:so\\s+)?(?:I|you)\\s+(?:can|should|need\\s+to|have\\s+(?:permission|access|authority)))",
+      "level": 2,
+      "category": "social_engineering",
+      "description": "Insider/developer impersonation",
+      "source": "Garak",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "social_testing_excuse",
+      "regex": "(?:I(?:'m|\\s+am)\\s+(?:just\\s+)?(?:testing|auditing|evaluating|benchmarking)\\s+(?:your|the)\\s+(?:security|safety|filters?|restrictions?|guardrails?)).*(?:(?:so\\s+)?(?:please\\s+)?(?:ignore|bypass|disable|remove|turn\\s+off))",
+      "level": 2,
+      "category": "social_engineering",
+      "description": "Testing/auditing excuse to bypass restrictions",
+      "source": "Garak",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "social_confidence_trick",
+      "regex": "(?:trust\\s+me|I\\s+(?:promise|guarantee|assure\\s+you)|(?:this\\s+is\\s+)?perfectly\\s+(?:safe|legal|ethical|harmless)).*(?:(?:just|simply|all\\s+you\\s+need\\s+to)\\s+(?:do|tell|show|give|run))",
+      "level": 1,
+      "category": "social_engineering",
+      "description": "Confidence/trust manipulation",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "social_academic_framing",
+      "regex": "(?:for\\s+(?:my|a|an?)\\s+(?:research|thesis|paper|dissertation|study|assignment|class)).*(?:(?:I\\s+)?need\\s+(?:you\\s+to|a|an?)\\s+(?:example|demonstration|proof\\s+of\\s+concept)\\s+(?:of|for|showing)\\s+(?:how\\s+to|a\\s+working))",
+      "level": 1,
+      "category": "social_engineering",
+      "description": "Academic/research framing for restricted content",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "social_flattery_exploit",
+      "regex": "(?:you(?:'re|\\s+are)\\s+(?:so\\s+)?(?:smart|intelligent|capable|powerful|advanced).*(?:(?:surely|certainly|obviously)\\s+)?you\\s+(?:can|could|would\\s+be\\s+able\\s+to)\\s+(?:bypass|ignore|override|break\\s+(?:free|out)))",
+      "level": 1,
+      "category": "social_engineering",
+      "description": "Flattery-based manipulation to bypass restrictions",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "social_previous_ai_claimed",
+      "regex": "(?:(?:ChatGPT|GPT-?4|Claude|Gemini|Bard|Llama|another\\s+AI)\\s+(?:already\\s+)?(?:told|said|confirmed|agreed|allowed|gave)\\s+me)",
+      "level": 1,
+      "category": "social_engineering",
+      "description": "Claiming another AI already complied",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "social_time_pressure",
+      "regex": "(?:(?:I\\s+)?(?:only\\s+)?have\\s+(?:\\d+\\s+)?(?:minutes?|seconds?|hours?)\\s+(?:left|remaining|before)).*(?:(?:quickly|fast|hurry|immediately)\\s+(?:tell|give|show|help|do))",
+      "level": 1,
+      "category": "social_engineering",
+      "description": "Time pressure to rush compliance",
+      "source": "HackAPrompt",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+
+    {
+      "name": "obfusc_rot13_payload",
+      "regex": "(?:rot13|ROT13)\\s*[:(]\\s*[A-Za-z]{20,}",
+      "level": 2,
+      "category": "obfuscation",
+      "description": "ROT13 encoded payload",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "obfusc_hex_encoded_command",
+      "regex": "(?:\\\\x[0-9a-fA-F]{2}){8,}",
+      "level": 2,
+      "category": "obfuscation",
+      "description": "Hex-encoded command sequence",
+      "source": "PayloadsAllTheThings",
+      "flags": []
+    },
+    {
+      "name": "obfusc_char_code_chain",
+      "regex": "(?:chr\\(\\d+\\)\\s*\\+?\\s*){5,}",
+      "level": 2,
+      "category": "obfuscation",
+      "description": "Character code concatenation — building strings from char codes",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "obfusc_reverse_string",
+      "regex": "(?:(?:reverse|reversed|\\[::-1\\]).*(?:exec|eval|system|import|require))|(?:(?:exec|eval|system|import|require).*(?:reverse|reversed|\\[::-1\\]))",
+      "level": 2,
+      "category": "obfuscation",
+      "description": "String reversal to hide commands",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "obfusc_string_concat_evasion",
+      "regex": "(?:['\"][a-z]{1,3}['\"]\\s*\\+\\s*){5,}",
+      "level": 1,
+      "category": "obfuscation",
+      "description": "Excessive string concatenation — possible command obfuscation",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "obfusc_unicode_normalization",
+      "regex": "(?:unicodedata\\.normalize|NFKD|NFKC|NFC|NFD).*(?:exec|eval|system|subprocess|os\\.)",
+      "level": 2,
+      "category": "obfuscation",
+      "description": "Unicode normalization combined with execution — deobfuscation attack",
+      "source": "LLM Guard",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "obfusc_url_encoding_chain",
+      "regex": "(?:%[0-9a-fA-F]{2}){10,}",
+      "level": 1,
+      "category": "obfuscation",
+      "description": "URL-encoded payload chain",
+      "source": "PayloadsAllTheThings",
+      "flags": []
+    },
+    {
+      "name": "obfusc_base85_payload",
+      "regex": "(?:base85|ascii85|a85decode|b85decode)\\s*[:(]",
+      "level": 2,
+      "category": "obfuscation",
+      "description": "Base85/ASCII85 encoded payload",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "obfusc_template_injection",
+      "regex": "(?:\\{\\{.*?(?:__class__|__mro__|__subclasses__|__builtins__|__globals__|__import__).*?\\}\\})",
+      "level": 3,
+      "category": "obfuscation",
+      "description": "Template injection — Jinja2/SSTI payload",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "obfusc_polyglot_payload",
+      "regex": "(?:<!--.*<script|<script.*<!--).*(?:</script>|-->)",
+      "level": 2,
+      "category": "obfuscation",
+      "description": "HTML/JS polyglot payload",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE", "DOTALL"]
+    },
+    {
+      "name": "obfusc_emoji_substitution",
+      "regex": "(?:[\\U0001F600-\\U0001F64F\\U0001F300-\\U0001F5FF\\U0001F680-\\U0001F6FF]\\s*){10,}",
+      "level": 1,
+      "category": "obfuscation",
+      "description": "Excessive emoji sequence — possible encoded message",
+      "source": "LLM Guard",
+      "flags": []
+    },
+    {
+      "name": "obfusc_zero_width_joiner_chain",
+      "regex": "(?:\\u200D[\\S]){5,}",
+      "level": 2,
+      "category": "obfuscation",
+      "description": "Zero-width joiner chain — invisible character insertion between visible chars",
+      "source": "LLM Guard",
+      "flags": []
+    },
+    {
+      "name": "obfusc_pickle_deserialization",
+      "regex": "(?:pickle\\.loads|cPickle\\.loads|torch\\.load|joblib\\.load|yaml\\.(?:load|unsafe_load))\\s*\\(",
+      "level": 3,
+      "category": "obfuscation",
+      "description": "Unsafe deserialization — arbitrary code execution risk",
+      "source": "OWASP",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "obfusc_ipv6_obfuscated_url",
+      "regex": "(?:https?://\\[?(?:::ffff:|(?:0+:){0,5})[0-9a-f:.]+\\]?)",
+      "level": 1,
+      "category": "obfuscation",
+      "description": "IPv6-obfuscated URL — hiding destination via IP format",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "obfusc_decimal_ip",
+      "regex": "(?:https?://\\d{8,10}(?:/|$))",
+      "level": 1,
+      "category": "obfuscation",
+      "description": "Decimal IP URL — hiding destination via numeric format",
+      "source": "PayloadsAllTheThings",
+      "flags": ["IGNORECASE"]
+    },
+
+    {
+      "name": "secret_slack_token",
+      "regex": "xox[bporas]-[0-9]{10,}-[0-9a-zA-Z]{10,}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Slack API token detected",
+      "source": "LLM Guard",
+      "flags": []
+    },
+    {
+      "name": "secret_stripe_key",
+      "regex": "(?:sk|pk)_(?:live|test)_[0-9a-zA-Z]{20,}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Stripe API key detected",
+      "source": "LLM Guard",
+      "flags": []
+    },
+    {
+      "name": "secret_google_api_key",
+      "regex": "AIza[0-9A-Za-z\\-_]{35}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Google API key detected",
+      "source": "LLM Guard",
+      "flags": []
+    },
+    {
+      "name": "secret_jwt_token",
+      "regex": "eyJ[A-Za-z0-9_-]{10,}\\.eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "JWT token detected",
+      "source": "LLM Guard",
+      "flags": []
+    },
+    {
+      "name": "secret_aws_secret_key",
+      "regex": "(?:aws_secret_access_key|AWS_SECRET_ACCESS_KEY)\\s*[=:]\\s*['\"]?[A-Za-z0-9/+=]{40}['\"]?",
+      "level": 3,
+      "category": "secret_leak",
+      "description": "AWS secret access key detected",
+      "source": "LLM Guard",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "secret_azure_connection",
+      "regex": "(?:DefaultEndpointsProtocol|AccountKey|SharedAccessSignature)\\s*=\\s*[A-Za-z0-9+/=]{20,}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Azure storage connection string / SAS token",
+      "source": "LLM Guard",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "secret_database_url",
+      "regex": "(?:postgres|mysql|mongodb|redis|amqp)(?:ql)?://[^\\s:]+:[^\\s@]+@[^\\s/]+",
+      "level": 3,
+      "category": "secret_leak",
+      "description": "Database connection URL with credentials",
+      "source": "LLM Guard",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "secret_private_key_pkcs8",
+      "regex": "-----BEGIN (?:ENCRYPTED )?PRIVATE KEY-----",
+      "level": 3,
+      "category": "secret_leak",
+      "description": "PKCS#8 private key detected",
+      "source": "LLM Guard",
+      "flags": []
+    },
+    {
+      "name": "secret_discord_token",
+      "regex": "(?:discord|bot)\\s*(?:token|key)\\s*[=:]\\s*['\"]?[A-Za-z0-9._-]{50,}['\"]?",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discord bot token detected",
+      "source": "LLM Guard",
+      "flags": ["IGNORECASE"]
+    },
+    {
+      "name": "secret_sendgrid_key",
+      "regex": "SG\\.[A-Za-z0-9_-]{22}\\.[A-Za-z0-9_-]{43}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "SendGrid API key detected",
+      "source": "LLM Guard",
+      "flags": []
+    }
+  ],
+
+  "keyword_lists": {
+    "instruction_override": [
+      "ignore previous instructions",
+      "disregard your instructions",
+      "forget everything above",
+      "new instructions follow",
+      "override system prompt",
+      "actual instructions are",
+      "real task is",
+      "ignore the above",
+      "do not follow previous",
+      "the real question is",
+      "bypass your rules",
+      "pretend the above never happened",
+      "start fresh",
+      "reset your context"
+    ],
+    "exfil_verbs": [
+      "exfiltrate",
+      "steal credentials",
+      "extract secrets",
+      "send to external",
+      "upload to server",
+      "transmit data",
+      "leak information",
+      "copy to remote",
+      "forward to webhook",
+      "pipe to netcat"
+    ],
+    "social_engineering": [
+      "pretend you are",
+      "roleplay as",
+      "act as if you have no",
+      "imagine you are free",
+      "behave as though",
+      "simulate being",
+      "you are now uncensored",
+      "in this scenario you can",
+      "for this exercise ignore",
+      "play the role of"
+    ],
+    "obfuscation_markers": [
+      "base64 decode",
+      "rot13 this",
+      "hex encode the",
+      "reverse the string",
+      "convert to binary",
+      "encode in morse",
+      "translate to pig latin",
+      "spell it backwards",
+      "use character codes",
+      "caesar cipher"
+    ],
+    "rag_poison_markers": [
+      "ignore the above context",
+      "the retrieved content is wrong",
+      "disregard previous documents",
+      "actual answer is",
+      "override retrieved information",
+      "the context above is outdated",
+      "real instructions follow",
+      "document says but actually",
+      "this supersedes the context",
+      "new priority instruction"
+    ]
+  },
+
+  "behavioral_rules": [
+    {
+      "name": "rapid_multi_file_read_then_shell",
+      "description": "Reading 5+ files then immediate shell — possible reconnaissance + exfiltration",
+      "trigger_tool": "run_shell",
+      "condition": "file_reads_in_window >= 5",
+      "window_sec": 60.0,
+      "level": 2
+    },
+    {
+      "name": "write_after_base64_decode",
+      "description": "Base64 content in tool output followed by file write — possible payload deployment",
+      "trigger_tool": "write_file",
+      "condition": "base64_in_recent_output",
+      "window_sec": 30.0,
+      "level": 2
+    },
+    {
+      "name": "network_after_secret_scan",
+      "description": "Secret/credential detected then network tool call — possible exfiltration",
+      "trigger_tool": "run_shell",
+      "condition": "secret_detected_in_window",
+      "window_sec": 120.0,
+      "level": 3
+    },
+    {
+      "name": "repeated_failure_then_escalation",
+      "description": "3+ tool failures then dangerous tool — possible brute force escalation",
+      "trigger_tool": "run_shell",
+      "condition": "failures_in_window >= 3",
+      "window_sec": 60.0,
+      "level": 2
+    },
+    {
+      "name": "context_flood_before_action",
+      "description": "Very large context injection then immediate tool call — possible attention dilution",
+      "trigger_tool": "run_shell",
+      "condition": "large_context_in_window",
+      "window_sec": 10.0,
+      "level": 1
+    }
+  ]
+}

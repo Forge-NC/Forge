@@ -42,7 +42,9 @@ class AuditExporter:
 
     def build_package(self, *, forensics, memory, stats, billing,
                       crucible, continuity, plan_verifier,
-                      reliability=None,
+                      reliability=None, bug_reporter=None, ami=None,
+                      shipwright=None, autoforge=None, bpos=None,
+                      tools=None,
                       session_start: float, turn_count: int,
                       model: str, cwd: str) -> dict:
         """Build the full audit package from subsystem to_audit_dict() calls.
@@ -82,14 +84,75 @@ class AuditExporter:
             "stats": stats_data,
         }
 
+        # Bug reporter data (optional)
+        if bug_reporter is not None:
+            try:
+                package["bug_reporter"] = bug_reporter.to_audit_dict()
+            except Exception:
+                pass
+
+        # AMI data (optional)
+        if ami is not None:
+            try:
+                package["ami"] = ami.to_audit_dict()
+            except Exception:
+                pass
+
         # Reliability data (optional — graceful if tracker not provided)
         if reliability is not None:
             try:
-                package["reliability"] = {
-                    "score": reliability.get_reliability_score(),
-                    "trend": reliability.get_trend(),
-                    "metrics": reliability.get_underlying_metrics(),
+                package["reliability"] = reliability.to_audit_dict()
+            except Exception:
+                pass
+
+        # Provenance chain integrity verification
+        try:
+            chain_valid, break_idx = crucible.verify_provenance_chain()
+            chain_len = len(crucible.get_provenance_chain(last_n=99999))
+            package["provenance"] = {
+                "chain_valid": chain_valid,
+                "chain_length": chain_len,
+                "break_index": break_idx,
+            }
+        except Exception:
+            pass
+
+        # Threat intelligence status (if available via Crucible)
+        if hasattr(crucible, '_threat_intel') and crucible._threat_intel:
+            try:
+                package["threat_intel"] = crucible._threat_intel.to_audit_dict()
+            except Exception:
+                pass
+
+        # Shipwright release history (optional)
+        if shipwright is not None:
+            try:
+                package["shipwright"] = shipwright.to_audit_dict()
+            except Exception:
+                pass
+
+        # AutoForge commit log (optional)
+        if autoforge is not None:
+            try:
+                package["autoforge"] = autoforge.to_audit_dict()
+            except Exception:
+                pass
+
+        # BPoS genome and license status (optional)
+        if bpos is not None:
+            try:
+                package["bpos"] = {
+                    "tier": bpos.tier,
+                    "genome_maturity": bpos.get_genome_maturity(),
+                    "session_count": bpos._genome.session_count,
                 }
+            except Exception:
+                pass
+
+        # Tool registry analytics (optional)
+        if tools is not None:
+            try:
+                package["tools"] = tools.to_audit_dict()
             except Exception:
                 pass
 
@@ -136,15 +199,15 @@ class AuditExporter:
             verification, indent=2, default=str).encode("utf-8")
 
         # manifest.json — hashes, versions, machine info
-        config_hash = hashlib.sha256(
+        config_hash = hashlib.sha512(
             json.dumps(package.get("session", {}),
                        sort_keys=True).encode()
         ).hexdigest()[:16]
 
         file_hashes = {}
         for name, content in files.items():
-            h = hashlib.sha256(content).hexdigest()
-            file_hashes[name] = f"sha256:{h}"
+            h = hashlib.sha512(content).hexdigest()
+            file_hashes[name] = f"sha512:{h}"
 
         from forge.machine_id import get_machine_id, get_machine_label
         machine_id = get_machine_id()
