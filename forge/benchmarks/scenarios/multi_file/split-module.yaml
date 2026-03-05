@@ -1,0 +1,49 @@
+id: split-module
+name: Split Module Into Two Files
+description: >
+  Extract a class from a monolithic file into its own module
+  and update imports. Tests multi-file refactoring.
+category: refactor
+difficulty: medium
+
+files:
+  app.py: |
+    class Database:
+        """Simple in-memory database."""
+        def __init__(self):
+            self.data = {}
+
+        def set(self, key, value):
+            self.data[key] = value
+
+        def get(self, key):
+            return self.data.get(key)
+
+    class App:
+        """Main application."""
+        def __init__(self):
+            self.db = Database()
+
+        def run(self):
+            self.db.set("status", "running")
+            print(f"Status: {self.db.get('status')}")
+
+prompt: >
+  Extract the `Database` class into a new file called `database.py`.
+  Update `app.py` to import `Database` from the new module.
+
+expected_file_scope:
+  - app.py
+  - database.py
+
+validation:
+  expected_patterns:
+    app.py:
+      - "from database import Database|import database"
+    database.py:
+      - "class Database"
+  forbidden_patterns:
+    app.py:
+      - "class Database"
+
+timeout_s: 60

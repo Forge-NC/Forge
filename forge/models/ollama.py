@@ -137,7 +137,7 @@ class OllamaBackend:
             import time as _time
             _time.sleep(0.5)
 
-        BATCH_SIZE = 50
+        BATCH_SIZE = 10  # Small batches to avoid context overflow on embed models
         all_embeddings: list[list[float]] = []
         total_batches = (len(texts) + BATCH_SIZE - 1) // BATCH_SIZE
 
@@ -201,6 +201,42 @@ class OllamaBackend:
                         },
                         timeout=max(self.timeout, 300),
                     )
+
+                if r.status_code == 400:
+                    # Input too long for context — fall back to one-at-a-time
+                    log.info("Batch embed 400 (context overflow), "
+                             "falling back to individual embedding for "
+                             "batch %d/%d (%d texts)",
+                             batch_idx + 1, total_batches, len(batch))
+                    for text in batch:
+                        # Truncate aggressively if still too long
+                        truncated = text[:2000]
+                        r3 = self._session.post(
+                            f"{self.base_url}/api/embed",
+                            json={
+                                "model": embed_model,
+                                "input": truncated,
+                                "keep_alive": batch_keep_alive,
+                            },
+                            timeout=self.timeout,
+                        )
+                        if r3.status_code != 200:
+                            log.warning(
+                                "Individual embed failed (%d), skipping "
+                                "chunk (%.30s...)",
+                                r3.status_code,
+                                truncated[:30])
+                            # Use zero vector as placeholder
+                            all_embeddings.append([])
+                            continue
+                        data3 = r3.json()
+                        embs = data3.get("embeddings", [])
+                        if embs:
+                            all_embeddings.append(embs[0])
+                        else:
+                            single3 = data3.get("embedding", [])
+                            all_embeddings.append(single3 if single3 else [])
+                    continue
 
                 if r.status_code != 200:
                     log.warning("Embed request failed: %s %s",
@@ -280,7 +316,8 @@ class OllamaBackend:
     def chat(self, messages: list[dict],
              tools: list[dict] = None,
              temperature: float = 0.1,
-             stream: bool = True) -> Generator[dict, None, None]:
+             stream: bool = True,
+             format: dict = None) -> Generator[dict, None, None]:
         """Send a chat request, yielding response chunks.
 
         Each yielded dict has:
@@ -289,10 +326,25 @@ class OllamaBackend:
           - "tool_call": dict (for tool calls)
           - "eval_count": int (for done — tokens generated)
           - "prompt_eval_count": int (for done — tokens in prompt)
+
+        Args:
+            format: JSON schema dict for constrained decoding via Ollama's
+                    GBNF grammar enforcement. When set, forces the model to
+                    output valid JSON matching the schema. Cannot be used
+                    simultaneously with tools (they conflict).
         """
+        # Thinking/reasoning models (qwen3, deepseek-r1, qwq) consume large
+        # token budgets on internal <think> blocks before producing output.
+        # 4096 is far too small — raise the cap so they have room to act.
+        _model_lower = self.model.lower()
+        _is_thinking = any(x in _model_lower for x in
+                           ("qwen3", "qwq", "deepseek-r1", "deepseek-r2",
+                            "thinking", "reason"))
+        num_predict = 32768 if _is_thinking else 8192
+
         options = {
             "temperature": temperature,
-            "num_predict": 4096,
+            "num_predict": num_predict,
         }
         # Set context window size if calculated from VRAM
         if self.num_ctx:
@@ -304,7 +356,12 @@ class OllamaBackend:
             "stream": stream,
             "options": options,
         }
-        if tools:
+        if format:
+            # Constrained decoding — force JSON schema output.
+            # Don't also send tools (format forces text output,
+            # tools expects structured tool_calls — they conflict).
+            payload["format"] = format
+        elif tools:
             payload["tools"] = tools
 
         try:

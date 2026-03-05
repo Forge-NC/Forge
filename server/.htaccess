@@ -1,12 +1,48 @@
-# Forge Telemetry - protect data directories from direct access
+# Forge — Public web server security
+# CRITICAL: This file protects sensitive data. Do NOT remove.
 
+# ── Block entire data/ directory from web access ──
 <IfModule mod_rewrite.c>
     RewriteEngine On
+
+    # Block ALL files under data/ — no exceptions
     RewriteRule ^data/ - [F,L]
+
+    # Block rate_limits/ directory
     RewriteRule ^rate_limits/ - [F,L]
+
+    # Block includes/ directory (PHP includes, not for direct access)
+    RewriteRule ^includes/ - [F,L]
+
+    # Block the key generator if it somehow still exists
+    RewriteRule ^generate_origin_key\.php$ - [F,L]
 </IfModule>
 
-# Fallback for servers without mod_rewrite
-<FilesMatch "\.(zip|txt)$">
+# ── Fallback: deny by file type if mod_rewrite is unavailable ──
+<FilesMatch "\.(zip|txt|jsonl|log|tmp)$">
     Require all denied
 </FilesMatch>
+
+# ── Explicitly deny sensitive files by name ──
+<FilesMatch "^(generate_origin_key\.php|\.htaccess|\.htpasswd)$">
+    Require all denied
+</FilesMatch>
+
+# ── Block directory listings ──
+Options -Indexes
+
+# ── Deny access to hidden files (.git, .env, etc) ──
+<IfModule mod_rewrite.c>
+    RewriteRule (^|/)\.(?!well-known) - [F,L]
+</IfModule>
+
+# ── Security headers ──
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "DENY"
+    Header set X-XSS-Protection "1; mode=block"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+    Header set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+    Header set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+</IfModule>

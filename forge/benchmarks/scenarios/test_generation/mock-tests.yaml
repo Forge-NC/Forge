@@ -1,0 +1,53 @@
+id: mock-tests
+name: Generate Tests With Mocking
+description: >
+  Write tests that require mocking external dependencies.
+  Tests understanding of unittest.mock patterns.
+category: test
+difficulty: medium
+
+files:
+  weather.py: |
+    import requests
+
+    class WeatherService:
+        def __init__(self, api_key):
+            self.api_key = api_key
+            self.base_url = "https://api.weather.com/v1"
+
+        def get_temperature(self, city):
+            """Get current temperature for a city."""
+            resp = requests.get(
+                f"{self.base_url}/current",
+                params={"city": city, "key": self.api_key},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data["temperature"]
+
+        def is_raining(self, city):
+            """Check if it's currently raining."""
+            resp = requests.get(
+                f"{self.base_url}/current",
+                params={"city": city, "key": self.api_key},
+            )
+            resp.raise_for_status()
+            return resp.json().get("condition") == "rain"
+
+prompt: >
+  Write a pytest test file `test_weather.py` that tests both methods
+  using unittest.mock to mock the requests.get calls. Test both
+  success and error cases (HTTPError).
+
+expected_file_scope:
+  - test_weather.py
+
+validation:
+  expected_patterns:
+    test_weather.py:
+      - "mock|Mock|patch"
+      - "def test_.*temperature|test.*temperature"
+      - "def test_.*rain|test.*rain"
+  forbidden_patterns: {}
+
+timeout_s: 60

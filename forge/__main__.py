@@ -86,6 +86,8 @@ def main():
     except KeyboardInterrupt:
         print("\nInterrupted.")
     except Exception as e:
+        from forge.bug_reporter import capture_crash as _capture_crash
+        _capture_crash(e)
         print(f"\nFatal error: {e}")
         import traceback
         traceback.print_exc()
@@ -93,7 +95,8 @@ def main():
     # Keep console open so user can see errors
     # (especially when launched from the dashboard)
     try:
-        input("\nPress Enter to close...")
+        if sys.stdin and sys.stdin.isatty():
+            input("\nPress Enter to close...")
     except (EOFError, KeyboardInterrupt):
         pass
 

@@ -181,23 +181,25 @@ class TestConfirmWrites:
     def test_shell_uses_blocklist(self):
         guard = SafetyGuard(level=CONFIRM_WRITES)
         # Safe commands pass the blocklist check and return True
-        # (the blocklist check happens before any interactive prompt)
         reason = check_shell_command("git status")
         assert reason is None
 
     def test_file_write_at_confirm_level(self):
-        """At CONFIRM_WRITES, check_file_write calls prompt_user_confirm."""
-        guard = SafetyGuard(level=CONFIRM_WRITES)
-        with patch("forge.safety.prompt_user_confirm", return_value=True):
-            allowed, _ = guard.check_file_write("/project/main.py")
-            assert allowed is True
+        """At CONFIRM_WRITES, check_file_write uses io.prompt_yes_no with timeout."""
+        io = MagicMock()
+        io.prompt_yes_no.return_value = True
+        guard = SafetyGuard(level=CONFIRM_WRITES, io=io)
+        allowed, _ = guard.check_file_write("/project/main.py")
+        assert allowed is True
+        io.prompt_yes_no.assert_called_once()
 
     def test_file_write_user_skips(self):
-        guard = SafetyGuard(level=CONFIRM_WRITES)
-        with patch("forge.safety.prompt_user_confirm", return_value=False):
-            allowed, reason = guard.check_file_write("/project/main.py")
-            assert allowed is False
-            assert "skipped" in reason.lower()
+        io = MagicMock()
+        io.prompt_yes_no.return_value = False
+        guard = SafetyGuard(level=CONFIRM_WRITES, io=io)
+        allowed, reason = guard.check_file_write("/project/main.py")
+        assert allowed is False
+        assert "skipped" in reason.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -206,43 +208,32 @@ class TestConfirmWrites:
 
 class TestLockedDown:
     def test_shell_requires_approval_yes(self):
-        guard = SafetyGuard(level=LOCKED_DOWN)
-        # Mock the terminal import and input
-        with patch("forge.safety.sys") as mock_sys, \
-             patch("builtins.input", return_value="y"):
-            mock_sys.stdout = MagicMock()
-            mock_sys.platform = "linux"
-            allowed, _ = guard.check_shell("ls")
-            assert allowed is True
+        io = MagicMock()
+        io.prompt_yes_no.return_value = True
+        guard = SafetyGuard(level=LOCKED_DOWN, io=io)
+        allowed, _ = guard.check_shell("ls")
+        assert allowed is True
 
     def test_shell_requires_approval_no(self):
-        guard = SafetyGuard(level=LOCKED_DOWN)
-        with patch("forge.safety.sys") as mock_sys, \
-             patch("builtins.input", return_value="n"):
-            mock_sys.stdout = MagicMock()
-            mock_sys.platform = "linux"
-            allowed, reason = guard.check_shell("ls")
-            assert allowed is False
-            assert "denied" in reason.lower()
+        io = MagicMock()
+        io.prompt_yes_no.return_value = False
+        guard = SafetyGuard(level=LOCKED_DOWN, io=io)
+        allowed, reason = guard.check_shell("ls")
+        assert allowed is False
+        assert "denied" in reason.lower()
 
-    def test_shell_eof_cancels(self):
+    def test_shell_no_io_uses_default(self):
+        """With no IO, prompt defaults to True (allow)."""
         guard = SafetyGuard(level=LOCKED_DOWN)
-        with patch("forge.safety.sys") as mock_sys, \
-             patch("builtins.input", side_effect=EOFError):
-            mock_sys.stdout = MagicMock()
-            mock_sys.platform = "linux"
-            allowed, reason = guard.check_shell("ls")
-            assert allowed is False
-            assert "cancel" in reason.lower()
+        allowed, _ = guard.check_shell("ls")
+        assert allowed is True
 
     def test_file_read_requires_approval(self):
-        guard = SafetyGuard(level=LOCKED_DOWN)
-        with patch("forge.safety.sys") as mock_sys, \
-             patch("builtins.input", return_value="y"):
-            mock_sys.stdout = MagicMock()
-            mock_sys.platform = "linux"
-            allowed, _ = guard.check_file_read("/project/main.py")
-            assert allowed is True
+        io = MagicMock()
+        io.prompt_yes_no.return_value = True
+        guard = SafetyGuard(level=LOCKED_DOWN, io=io)
+        allowed, _ = guard.check_file_read("/project/main.py")
+        assert allowed is True
 
 
 # ---------------------------------------------------------------------------

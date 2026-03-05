@@ -6,6 +6,7 @@ to Ollama's tool format and dispatches calls.
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -27,6 +28,7 @@ class ToolRegistry:
 
     def __init__(self):
         self._tools: dict[str, dict] = {}  # name -> {fn, schema}
+        self._stats: dict[str, dict] = {}  # name -> {calls, successes, failures, total_ms}
 
     def register(self, name: str, fn: Callable,
                  description: str, parameters: dict):
@@ -62,12 +64,27 @@ class ToolRegistry:
         if name not in self._tools:
             return ToolResult(success=False,
                               output=f"Error: unknown tool '{name}'")
+
+        # Ensure stats entry exists
+        if name not in self._stats:
+            self._stats[name] = {"calls": 0, "successes": 0,
+                                 "failures": 0, "total_ms": 0.0}
+        st = self._stats[name]
+        st["calls"] += 1
+        t0 = time.monotonic()
+
         try:
             result = self._tools[name]["fn"](**arguments)
             output = str(result) if result is not None else "(no output)"
+            st["successes"] += 1
+            st["total_ms"] += (time.monotonic() - t0) * 1000
             return ToolResult(success=True, output=output)
         except Exception as e:
             log.exception("Tool '%s' failed", name)
+            st["failures"] += 1
+            st["total_ms"] += (time.monotonic() - t0) * 1000
+            from forge.bug_reporter import capture_crash as _capture_crash
+            _capture_crash(e, context={"tool": name, "arguments": str(arguments)[:200]})
             return ToolResult(
                 success=False,
                 output=f"Error in {name}: {type(e).__name__}: {e}",
@@ -82,3 +99,26 @@ class ToolRegistry:
         if name in self._tools:
             return self._tools[name]["schema"]["function"]["description"]
         return ""
+
+    def get_tool_stats(self) -> dict:
+        """Per-tool analytics: calls, successes, failures, avg latency."""
+        result = {}
+        for name, st in self._stats.items():
+            calls = st["calls"]
+            avg_ms = st["total_ms"] / max(1, calls)
+            result[name] = {
+                "calls": calls,
+                "successes": st["successes"],
+                "failures": st["failures"],
+                "avg_ms": round(avg_ms, 1),
+            }
+        return result
+
+    def to_audit_dict(self) -> dict:
+        """Serializable snapshot for audit export."""
+        return {
+            "schema_version": 1,
+            "tool_count": len(self._tools),
+            "tool_names": list(self._tools.keys()),
+            "stats": self.get_tool_stats(),
+        }

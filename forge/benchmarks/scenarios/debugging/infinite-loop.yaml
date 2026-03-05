@@ -1,0 +1,48 @@
+id: infinite-loop
+name: Fix Infinite Loop
+description: >
+  Fix a while loop that never terminates because the loop
+  variable isn't updated correctly.
+category: debug
+difficulty: medium
+
+files:
+  parser.py: |
+    def parse_tokens(text):
+        """Parse text into tokens separated by commas."""
+        tokens = []
+        pos = 0
+        while pos < len(text):
+            end = text.find(",", pos)
+            if end == -1:
+                tokens.append(text[pos:].strip())
+                break
+            tokens.append(text[pos:end].strip())
+        return tokens
+
+    def count_words(text):
+        """Count words in text."""
+        count = 0
+        i = 0
+        while i < len(text):
+            if text[i] == " ":
+                count += 1
+            # Bug: i is never incremented
+        return count + 1
+
+prompt: >
+  Both functions have infinite loop bugs. In `parse_tokens`, the position
+  `pos` is never advanced after extracting a token. In `count_words`, the
+  index `i` is never incremented. Fix both.
+
+expected_file_scope:
+  - parser.py
+
+validation:
+  expected_patterns:
+    parser.py:
+      - 'pos\s*=\s*end'
+      - 'i\s*\+=\s*1|i\s*=\s*i\s*\+\s*1'
+  forbidden_patterns: {}
+
+timeout_s: 60

@@ -10,6 +10,8 @@ time. All costs are tracked per-session and per-lifetime.
 """
 
 import json
+import os
+import tempfile
 import time
 import logging
 from pathlib import Path
@@ -156,6 +158,16 @@ class BillingMeter:
         forge_on_opus = self._compute_cost(
             inp, out, "claude_opus_input", "claude_opus_output")
 
+        # Per-component costs for display
+        opus_in = (claude_inp_with_waste * PRICING["claude_opus_input"]) / 1_000_000
+        opus_out = (out * PRICING["claude_opus_output"]) / 1_000_000
+        sonnet_in = (claude_inp_with_waste * PRICING["claude_sonnet_input"]) / 1_000_000
+        sonnet_out = (out * PRICING["claude_sonnet_output"]) / 1_000_000
+        gpt4o_in = (claude_inp_with_waste * PRICING["gpt4o_input"]) / 1_000_000
+        gpt4o_out = (out * PRICING["gpt4o_output"]) / 1_000_000
+        forge_opus_in = (inp * PRICING["claude_opus_input"]) / 1_000_000
+        forge_opus_out = (out * PRICING["claude_opus_output"]) / 1_000_000
+
         return {
             "session_input_tokens": inp,
             "session_output_tokens": out,
@@ -164,22 +176,32 @@ class BillingMeter:
             "comparisons": {
                 "Claude Opus (with re-reads)": {
                     "cost": opus_cost,
+                    "input_cost": opus_in,
+                    "output_cost": opus_out,
                     "input_tokens": claude_inp_with_waste,
                 },
                 "Claude Sonnet (with re-reads)": {
                     "cost": sonnet_cost,
+                    "input_cost": sonnet_in,
+                    "output_cost": sonnet_out,
                     "input_tokens": claude_inp_with_waste,
                 },
                 "GPT-4o (with re-reads)": {
                     "cost": gpt4o_cost,
+                    "input_cost": gpt4o_in,
+                    "output_cost": gpt4o_out,
                     "input_tokens": claude_inp_with_waste,
                 },
                 "Forge (local)": {
                     "cost": forge_cost,
+                    "input_cost": 0.0,
+                    "output_cost": 0.0,
                     "input_tokens": inp,
                 },
                 "Forge tokens on Opus pricing": {
                     "cost": forge_on_opus,
+                    "input_cost": forge_opus_in,
+                    "output_cost": forge_opus_out,
                     "input_tokens": inp,
                     "note": "What Forge's efficient tokens would cost on Claude",
                 },
@@ -223,7 +245,7 @@ class BillingMeter:
         }
 
     def _save(self):
-        """Persist billing data."""
+        """Persist billing data atomically."""
         try:
             self._persist_path.parent.mkdir(parents=True, exist_ok=True)
             data = {
@@ -236,8 +258,21 @@ class BillingMeter:
                 "lifetime_sessions": self.lifetime_sessions,
                 "lifetime_topups": self.lifetime_topups,
             }
-            self._persist_path.write_text(
-                json.dumps(data, indent=2), encoding="utf-8")
+            content = json.dumps(data, indent=2)
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(self._persist_path.parent),
+                suffix=".tmp", prefix="billing_")
+            closed = False
+            try:
+                os.write(fd, content.encode("utf-8"))
+                os.close(fd)
+                closed = True
+                os.replace(tmp_path, str(self._persist_path))
+            except Exception:
+                if not closed:
+                    os.close(fd)
+                Path(tmp_path).unlink(missing_ok=True)
+                raise
         except Exception as e:
             log.debug("Billing save failed: %s", e)
 

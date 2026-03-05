@@ -362,10 +362,7 @@ class EpisodicMemory:
                 os.write(fd, content.encode("utf-8"))
                 os.close(fd)
                 closed = True
-                # On Windows, need to remove target first
-                if path.exists():
-                    path.unlink()
-                os.rename(tmp_path, str(path))
+                os.replace(tmp_path, str(path))
             except Exception:
                 if not closed:
                     os.close(fd)

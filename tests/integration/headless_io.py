@@ -15,6 +15,7 @@ class HeadlessTerminalIO(TerminalIO):
     """Non-interactive TerminalIO that feeds from a queue and captures output."""
 
     def __init__(self):
+        super().__init__()
         self._input_queue: queue.Queue[str] = queue.Queue()
         self._output_log: list[tuple[str, str]] = []  # (category, message)
         self._state: str = "idle"
@@ -121,6 +122,23 @@ class HeadlessTerminalIO(TerminalIO):
             return self._input_queue.get_nowait()
         except queue.Empty:
             raise EOFError("Headless input queue exhausted")
+
+    def prompt_yes_no(self, message: str, default: bool = True,
+                      timeout: float = 0) -> bool:
+        """Auto-accept with default in headless mode."""
+        self._output_log.append(("prompt_yes_no", message))
+        return default
+
+    def prompt_choice(self, message: str, choices: list,
+                      default: str = None) -> str:
+        """Auto-pick default (or first choice) in headless mode."""
+        self._output_log.append(("prompt_choice", message))
+        return default or (choices[0][0] if choices else "")
+
+    def prompt_text(self, message: str) -> str:
+        """Return empty string in headless mode."""
+        self._output_log.append(("prompt_text", message))
+        return ""
 
     # ── Raw output ──
 

@@ -1120,7 +1120,7 @@ class AdminPanelDialog:
 
         # Generate token
         token = secrets.token_hex(32)
-        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        token_hash = hashlib.sha512(token.encode()).hexdigest()
         self._last_generated_token = token
 
         # Show token

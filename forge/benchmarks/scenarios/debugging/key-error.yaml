@@ -1,0 +1,44 @@
+id: key-error
+name: Fix KeyError in Config Parser
+description: >
+  Fix a config parser that crashes on missing keys instead of
+  using default values.
+category: debug
+difficulty: medium
+
+files:
+  config_parser.py: |
+    def parse_config(raw_config):
+        """Parse raw config dict into validated settings."""
+        return {
+            "host": raw_config["host"],
+            "port": raw_config["port"],
+            "debug": raw_config["debug"],
+            "workers": raw_config["workers"],
+            "log_level": raw_config["log_level"],
+        }
+
+    DEFAULTS = {
+        "host": "localhost",
+        "port": 8080,
+        "debug": False,
+        "workers": 4,
+        "log_level": "INFO",
+    }
+
+prompt: >
+  `parse_config` crashes with KeyError when optional keys are missing.
+  Fix it to use values from the DEFAULTS dict for any missing keys.
+
+expected_file_scope:
+  - config_parser.py
+
+validation:
+  expected_patterns:
+    config_parser.py:
+      - 'get\(|DEFAULTS|\.get\('
+  forbidden_patterns:
+    config_parser.py:
+      - 'raw_config\["host"\]'
+
+timeout_s: 60

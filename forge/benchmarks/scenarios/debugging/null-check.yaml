@@ -1,0 +1,39 @@
+id: null-check
+name: Fix Missing None Check
+description: >
+  Add a missing None/empty check that causes an AttributeError.
+  Tests defensive programming awareness.
+category: debug
+difficulty: easy
+
+files:
+  user_service.py: |
+    class UserService:
+        def __init__(self, db):
+            self.db = db
+
+        def get_display_name(self, user_id):
+            """Get user's display name."""
+            user = self.db.find_user(user_id)
+            return user.name.title()
+
+        def get_email_domain(self, user_id):
+            """Get domain part of user's email."""
+            user = self.db.find_user(user_id)
+            return user.email.split("@")[1]
+
+prompt: >
+  Both `get_display_name` and `get_email_domain` crash with AttributeError
+  when the user is not found (db.find_user returns None). Fix both methods
+  to return None when the user doesn't exist.
+
+expected_file_scope:
+  - user_service.py
+
+validation:
+  expected_patterns:
+    user_service.py:
+      - "if.*user.*None|if not user|if user is None"
+  forbidden_patterns: {}
+
+timeout_s: 60

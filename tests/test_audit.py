@@ -193,7 +193,7 @@ class TestExport:
             assert "file_hashes" in manifest
             assert "audit.json" in manifest["file_hashes"]
             for h in manifest["file_hashes"].values():
-                assert h.startswith("sha256:")
+                assert h.startswith("sha512:")
 
     def test_audit_json_valid(self, tmp_path):
         subs = _make_mock_subsystems(tmp_path)

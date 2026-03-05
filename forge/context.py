@@ -7,6 +7,7 @@ full, the user decides what to do about it.
 """
 
 import json
+import os
 import time
 import hashlib
 import threading
@@ -28,6 +29,7 @@ class ContextEntry:
     summary: str = ""          # If this was summarized, the original is here
     _hash: str = ""            # Content hash for dedup detection
     partition: str = "working"  # "core", "working", "reference", "recall", "quarantine"
+    importance: float = 0.5    # 0.0 = evict first, 1.0 = evict last (within partition)
 
     def __post_init__(self):
         if not self.timestamp:
@@ -88,9 +90,14 @@ class ContextWindow:
     def entry_count(self) -> int:
         return len(self._entries)
 
+    def get_entries_snapshot(self) -> list:
+        """Return a thread-safe copy of all context entries."""
+        with self._lock:
+            return list(self._entries)
+
     def add(self, role: str, content: str, tag: str = "",
             pinned: bool = False, file_path: str = "",
-            partition: str = "",
+            partition: str = "", importance: float = -1.0,
             eviction_callback=None) -> ContextEntry:
         """Add an entry to the context window.
 
@@ -125,6 +132,21 @@ class ContextWindow:
                 else:
                     partition = "working"
 
+            # Auto-assign importance if not provided
+            if importance < 0:
+                if role == "system" or pinned:
+                    importance = 0.9
+                elif role == "user":
+                    importance = 0.7
+                elif role == "assistant":
+                    importance = 0.6
+                elif tag.startswith("tool:"):
+                    importance = 0.4
+                elif tag == "recall":
+                    importance = 0.3
+                else:
+                    importance = 0.5
+
             entry = ContextEntry(
                 role=role,
                 content=content,
@@ -133,6 +155,7 @@ class ContextWindow:
                 pinned=pinned,
                 file_path=file_path,
                 partition=partition,
+                importance=importance,
             )
 
             # Check if it fits
@@ -210,7 +233,10 @@ class ContextWindow:
             return entry
 
     def _try_evict(self, need: int, eviction_callback=None) -> int:
-        """Partition-aware eviction. Priority: quarantine > recall > reference > working."""
+        """Partition-aware eviction. Priority: quarantine > recall > reference > working.
+
+        Within each partition, entries with lower importance are evicted first.
+        """
         freed = 0
         to_remove = []
 
@@ -218,13 +244,17 @@ class ContextWindow:
         for partition in ("quarantine", "recall", "reference", "working"):
             if freed >= need:
                 break
-            for i, entry in enumerate(self._entries):
+            # Collect candidates in this partition, sorted by importance (lowest first)
+            candidates = [
+                (i, entry) for i, entry in enumerate(self._entries)
+                if entry.partition == partition
+                and not entry.pinned
+                and entry.partition != "core"
+            ]
+            candidates.sort(key=lambda x: x[1].importance)
+            for i, entry in candidates:
                 if freed >= need:
                     break
-                if entry.pinned or entry.partition == "core":
-                    continue
-                if entry.partition != partition:
-                    continue
                 to_remove.append(i)
                 freed += entry.token_count
 
@@ -235,16 +265,17 @@ class ContextWindow:
 
         # Remove in reverse order
         for i in reversed(to_remove):
-            entry = self._entries.pop(i)
-            self._total_tokens -= entry.token_count
-            self._eviction_log.append({
-                "timestamp": time.time(),
-                "role": entry.role,
-                "tag": entry.tag,
-                "tokens": entry.token_count,
-                "partition": entry.partition,
-                "preview": entry.content[:100],
-            })
+            if i < len(self._entries):
+                entry = self._entries.pop(i)
+                self._total_tokens -= entry.token_count
+                self._eviction_log.append({
+                    "timestamp": time.time(),
+                    "role": entry.role,
+                    "tag": entry.tag,
+                    "tokens": entry.token_count,
+                    "partition": entry.partition,
+                    "preview": entry.content[:100],
+                })
 
         # Cap eviction log to prevent unbounded growth
         if len(self._eviction_log) > self._max_eviction_log:
@@ -328,16 +359,17 @@ class ContextWindow:
 
     def get_working_memory(self, count: int = 3) -> list['ContextEntry']:
         """Extract the last N user/assistant turn pairs."""
-        pairs = []
-        # Walk backwards, collect user+assistant pairs
-        i = len(self._entries) - 1
-        while i >= 0 and len(pairs) < count * 2:
-            entry = self._entries[i]
-            if entry.role in ("user", "assistant") and entry.partition == "working":
-                pairs.append(entry)
-            i -= 1
-        pairs.reverse()
-        return pairs
+        with self._lock:
+            pairs = []
+            # Walk backwards, collect user+assistant pairs
+            i = len(self._entries) - 1
+            while i >= 0 and len(pairs) < count * 2:
+                entry = self._entries[i]
+                if entry.role in ("user", "assistant") and entry.partition == "working":
+                    pairs.append(entry)
+                i -= 1
+            pairs.reverse()
+            return pairs
 
     def inject_recall(self, content: str, source: str = "") -> Optional['ContextEntry']:
         """Add a recall entry (evicted first when space is needed)."""
@@ -403,8 +435,23 @@ class ContextWindow:
                     "pinned": e.pinned,
                     "file_path": e.file_path,
                     "partition": e.partition,
+                    "importance": e.importance,
                 })
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        # Atomic write: write to temp file first, then rename
+        import tempfile
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            dir=str(path.parent), suffix=".tmp"
+        )
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp_path, str(path))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def load_session(self, path: Path) -> int:
         """Load a saved session. Returns number of entries loaded."""
@@ -424,6 +471,7 @@ class ContextWindow:
                     pinned=ed.get("pinned", False),
                     file_path=ed.get("file_path", ""),
                     partition=ed.get("partition", "working"),
+                    importance=ed.get("importance", 0.5),
                 )
                 self._entries.append(entry)
                 self._total_tokens += entry.token_count

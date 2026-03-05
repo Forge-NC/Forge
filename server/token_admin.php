@@ -18,13 +18,7 @@ header('Content-Type: application/json');
 // -- Authenticate and require admin/owner role --
 $auth = require_auth();
 $caller_role = isset($auth['role']) ? $auth['role'] : 'tester';
-// Backward compat fallback
-if ($caller_role === 'tester') {
-    $label_check = isset($auth['label']) ? $auth['label'] : '';
-    if (strpos($label_check, 'admin') !== false) {
-        $caller_role = 'admin';
-    }
-}
+// Role is determined by explicit role field only — no label inference
 if (!in_array($caller_role, array('owner', 'admin'))) {
     http_response_code(403);
     header('Content-Type: application/json');
@@ -47,8 +41,9 @@ if ($method !== 'POST') {
     exit;
 }
 
-// -- Parse POST body --
-$body = json_decode(file_get_contents('php://input'), true);
+// -- Parse POST body (64KB limit) --
+$raw = file_get_contents('php://input', false, null, 0, 65536);
+$body = json_decode($raw, true);
 if (!is_array($body)) {
     http_response_code(400);
     echo json_encode(['error' => 'Invalid JSON body']);
@@ -103,12 +98,10 @@ function list_tokens($path) {
     $tokens = load_tokens($path);
     $result = array();
     foreach ($tokens as $hash => $entry) {
-        // Determine role with 3-tier fallback
+        // Determine role from explicit role field only
         $role = 'tester';
-        if (isset($entry['role']) && in_array($entry['role'], array('owner', 'admin', 'tester'))) {
+        if (isset($entry['role']) && in_array($entry['role'], array('owner', 'admin', 'captain', 'master', 'tester'))) {
             $role = $entry['role'];
-        } elseif (isset($entry['label']) && strpos($entry['label'], 'admin') !== false) {
-            $role = 'admin';
         }
 
         $result[] = array(
@@ -196,7 +189,12 @@ function handle_revoke(array $body, $path, $caller_role) {
         exit;
     }
 
-    // Prefix match
+    // Prefix match (minimum 12 chars to avoid accidental collisions)
+    if (strlen($hash_input) < 12) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Token hash prefix must be at least 12 characters']);
+        exit;
+    }
     $match_key = null;
     foreach ($tokens as $hash => $entry) {
         if (strpos($hash, $hash_input) === 0) {

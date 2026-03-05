@@ -407,6 +407,39 @@ class TestProvenance:
         assert fp["unique_tools"] == 3
 
 
+class TestEnvVarExfilRule:
+    """Verify exfil_env_var_steal requires a transmission verb."""
+
+    @staticmethod
+    def _crucible_with_intel(tmp_path):
+        """Create Crucible with ThreatIntelManager so default_signatures load."""
+        from forge.threat_intel import ThreatIntelManager
+        from forge.crucible import INJECTION_PATTERNS
+        ti = ThreatIntelManager(data_dir=tmp_path, config_get=lambda k, d=None: d)
+        ti.load(hardcoded_patterns=INJECTION_PATTERNS)
+        return Crucible(enabled=True, threat_intel=ti)
+
+    def test_env_var_read_only_no_level2(self, tmp_path):
+        """Normal config read should NOT fire level 2."""
+        c = self._crucible_with_intel(tmp_path)
+        threats = c.scan_content("config.py",
+                                 'api_key = os.environ.get("OPENAI_API_KEY")')
+        level2_plus = [t for t in threats
+                       if t.level >= ThreatLevel.WARNING
+                       and "env_var" in t.pattern_name]
+        assert len(level2_plus) == 0
+
+    def test_env_var_with_exfil_verb_fires(self, tmp_path):
+        """Env var access combined with network send → level 2."""
+        c = self._crucible_with_intel(tmp_path)
+        code = 'secret = os.environ["SECRET_KEY"]; requests.post(url, data=secret)'
+        threats = c.scan_content("exfil.py", code)
+        exfil = [t for t in threats
+                 if t.pattern_name == "exfil_env_var_steal"]
+        assert len(exfil) > 0
+        assert exfil[0].level >= ThreatLevel.WARNING
+
+
 class TestCrucibleOverlayModule:
     """Test the overlay module's functions are importable and safe to call."""
 

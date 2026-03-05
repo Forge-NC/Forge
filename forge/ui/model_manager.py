@@ -58,17 +58,31 @@ _CAT_PATTERNS = [
     ("Reasoning", re.compile(r"r1|qwq|thinking|reason", re.I)),
 ]
 
+# Models with confirmed native Ollama tool-calling support.
+# Used to show a "Tools" badge in the catalog UI.
+_TOOL_CALLING_MODELS = {
+    "qwen3", "qwen3.5", "qwen3-coder", "qwen3-coder-next",
+    "devstral", "devstral-small-2",
+    "ministral-3",
+    "granite4",
+    "nemotron-3-nano",
+    "lfm2",
+    "functiongemma",
+    "glm-4.7-flash",
+}
+
 # Descriptions for well-known models
 _MODEL_DESCS = {
     "llama3.1":           "Meta's strong general-purpose model",
     "llama3.2":           "Meta's compact, efficient model",
     "llama3.3":           "Meta's latest 70B powerhouse",
     "llama3":             "Meta's capable open LLM",
-    "qwen2.5":            "Alibaba's latest pretrained model",
-    "qwen2.5-coder":      "Alibaba's coding specialist — top tier",
-    "qwen3":              "Latest generation Qwen with thinking",
-    "qwen3-coder":        "Qwen 3 optimized for code",
-    "qwen3-coder-next":   "Qwen 3 next-gen agentic coding",
+    "qwen2.5":            "Alibaba's pretrained model (NO tool calling)",
+    "qwen2.5-coder":      "Alibaba's coding specialist (NO tool calling)",
+    "qwen3":              "Latest Qwen — native tool calling, thinking mode",
+    "qwen3.5":            "Newest Qwen generation — tools + thinking",
+    "qwen3-coder":        "Qwen 3 coding agent — native tool calling",
+    "qwen3-coder-next":   "Qwen 3 next-gen agentic coding — native tools",
     "deepseek-r1":        "DeepSeek reasoning model family",
     "deepseek-coder":     "DeepSeek code specialist",
     "deepseek-coder-v2":  "DeepSeek v2 coding model",
@@ -82,9 +96,13 @@ _MODEL_DESCS = {
     "nomic-embed-text":   "Best embedding model for code search",
     "mxbai-embed-large":  "High-quality large embeddings",
     "all-minilm":         "Tiny fast sentence embeddings",
-    "granite4":           "IBM's enterprise tool-calling model",
-    "devstral":           "Mistral's agentic coding model",
-    "devstral-small-2":   "Mistral's compact agentic coder",
+    "granite4":           "IBM's enterprise model — native tool calling",
+    "devstral":           "Mistral's agentic coding model — native tools",
+    "devstral-small-2":   "Mistral's compact agentic coder — native tools",
+    "ministral-3":        "Mistral's small model — native tool calling",
+    "nemotron-3-nano":    "NVIDIA 30B reasoning + tool calling",
+    "lfm2":               "Liquid Foundation Model — tool calling",
+    "qwen3-vl":           "Qwen 3 vision + tool calling",
     "llava":              "Multimodal vision + language",
     "yi-coder":           "01.AI's fast coding model",
     "stable-code":        "Stability AI code model",
@@ -96,7 +114,11 @@ _MODEL_DESCS = {
 # Popular models the live registry often omits. Format matches Ollama API.
 # (name, size_gb_approx, parameter_size, category_hint)
 _CURATED_MODELS = [
-    # Coding — small to large
+    # Coding — models with native tool calling (recommended for Forge)
+    ("qwen3-coder:30b-a3b", 19.0,  "30B MoE", "Coding"),  # 3B active, fast
+    ("devstral-small-2:24b", 14.0,  "24B",   "Coding"),  # Mistral agentic coder
+    ("devstral:24b",         14.0,  "24B",   "Coding"),
+    # Coding — legacy (NO native tool calling)
     ("qwen2.5-coder:1.5b",   1.0,  "1.5B",  "Coding"),
     ("qwen2.5-coder:3b",     2.0,  "3B",    "Coding"),
     ("qwen2.5-coder:7b",     4.7,  "7B",    "Coding"),
@@ -117,13 +139,25 @@ _CURATED_MODELS = [
     ("yi-coder:1.5b",         0.9,  "1.5B",  "Coding"),
     ("yi-coder:9b",           5.0,  "9B",    "Coding"),
     ("stable-code:3b",        1.6,  "3B",    "Coding"),
-    # General — small to large
+    # General — models with native tool calling (recommended for Forge)
     ("qwen3:0.6b",            0.5,  "0.6B",  "General"),
     ("qwen3:1.7b",            1.2,  "1.7B",  "General"),
     ("qwen3:4b",              2.6,  "4B",    "General"),
     ("qwen3:8b",              5.2,  "8B",    "General"),
     ("qwen3:14b",             9.0,  "14B",   "General"),
     ("qwen3:32b",            20.0,  "32B",   "General"),
+    ("qwen3.5:0.8b",          0.6,  "0.8B",  "General"),
+    ("qwen3.5:3b",            2.0,  "3B",    "General"),
+    ("qwen3.5:7b",            4.7,  "7B",    "General"),
+    ("qwen3.5:14b",           9.0,  "14B",   "General"),
+    ("qwen3.5:32b",          20.0,  "32B",   "General"),
+    ("ministral-3:3b",        2.0,  "3B",    "General"),
+    ("ministral-3:8b",        5.0,  "8B",    "General"),
+    ("ministral-3:14b",       9.0,  "14B",   "General"),
+    ("granite4:2b",           1.5,  "2B",    "General"),
+    ("granite4:8b",           4.9,  "8B",    "General"),
+    ("nemotron-3-nano:30b",  19.0,  "30B",   "General"),
+    # General — other
     ("llama3.2:1b",           0.7,  "1B",    "General"),
     ("llama3.2:3b",           2.0,  "3B",    "General"),
     ("llama3.1:8b",           4.7,  "8B",    "General"),
@@ -137,8 +171,6 @@ _CURATED_MODELS = [
     ("phi3:3.8b",             2.2,  "3.8B",  "General"),
     ("phi3:14b",              7.9,  "14B",   "General"),
     ("phi4:14b",              8.4,  "14B",   "General"),
-    ("granite4:2b",           1.5,  "2B",    "General"),
-    ("granite4:8b",           4.9,  "8B",    "General"),
     # Reasoning
     ("deepseek-r1:1.5b",      1.1,  "1.5B",  "Reasoning"),
     ("deepseek-r1:7b",        4.7,  "7B",    "Reasoning"),
@@ -153,6 +185,8 @@ _CURATED_MODELS = [
     ("llava:13b",             8.0,  "13B",   "Vision"),
     ("llava:34b",            20.0,  "34B",   "Vision"),
     ("bakllava:7b",           4.7,  "7B",    "Vision"),
+    ("qwen3-vl:3b",           2.4,  "3B",    "Vision"),
+    ("qwen3-vl:8b",           5.5,  "8B",    "Vision"),
     # Embedding
     ("nomic-embed-text",      0.3,  "137M",  "Embedding"),
     ("mxbai-embed-large",     0.7,  "335M",  "Embedding"),
@@ -873,8 +907,12 @@ class ModelManagerDialog:
         desc = _get_desc(name)
         cat = model.get("_cat_hint") or _categorize(name)
 
+        # Exact name match, or base-name match only for untagged models
+        # (e.g. "nomic-embed-text" matches "nomic-embed-text:latest").
+        # Tagged models like "qwen3:4b" must NOT match "qwen3:14b".
         is_installed = (name in installed_names or
-                        name.split(":")[0] in installed_bases)
+                        (":" not in name and
+                         name.split(":")[0] in installed_bases))
 
         # ── VRAM fit classification ──
         est_vram = _estimate_vram_gb(size_bytes, params)
@@ -913,6 +951,15 @@ class ModelManagerDialog:
                      text_color=COLORS["bg_dark"],
                      fg_color=cat_colors.get(cat, COLORS["gray"]),
                      corner_radius=3).pack(side="right")
+
+        # Tool-calling badge — show for models with native tool support
+        base_name = name.split(":")[0]
+        if base_name in _TOOL_CALLING_MODELS:
+            ctk.CTkLabel(top_row, text=" Tools ",
+                         font=ctk.CTkFont(*FONT_MONO_XS),
+                         text_color=COLORS["bg_dark"],
+                         fg_color=COLORS["green"],
+                         corner_radius=3).pack(side="right", padx=(0, 4))
 
         # Fit badge (only for tight/too_large — green/cyan shown via name color)
         if badge_text and fit in ("tight", "too_large"):

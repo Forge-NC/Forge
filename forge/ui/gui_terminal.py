@@ -19,6 +19,7 @@ import os
 import io
 import re
 import logging
+import queue
 import threading
 import time
 import math
@@ -239,9 +240,13 @@ class ForgeTerminalWindow:
             command=self._on_send)
         self._send_btn.pack(side="right", padx=(4, 8), pady=4)
 
-        # Bind Enter and Escape
+        # Bind Enter, Escape, and F12 (autopilot takeover toggle)
         self._input_entry.bind("<Return>", lambda e: self._on_send())
         self._root.bind("<Escape>", self._on_escape)
+        self._root.bind("<F12>", self._on_f12)
+
+        # Autopilot reference — set by launch_gui_terminal after creation
+        self._autopilot = None
 
         # Command history
         self._history = []
@@ -253,8 +258,10 @@ class ForgeTerminalWindow:
         # Input state — managed by GuiTerminalIO
         self._input_ready = threading.Event()
         self._input_text = ""
+        self._prompt_result = None  # For yes/no and choice prompts
         self._escape_pressed = threading.Event()
         self._input_enabled = False
+        self._prompt_buttons = []  # Temporary prompt buttons
 
         # Start with input disabled
         self._disable_input()
@@ -546,6 +553,10 @@ class ForgeTerminalWindow:
         # Show user input in output
         self.append_text(f"\n> {text}\n", "user")
 
+        # Notify autopilot that the human is driving
+        if self._autopilot is not None:
+            self._autopilot.on_user_input()
+
         # Signal the engine thread
         self._input_text = text
         self._input_ready.set()
@@ -553,6 +564,11 @@ class ForgeTerminalWindow:
     def _on_escape(self, event=None):
         """Handle Escape key — signal interrupt to engine."""
         self._escape_pressed.set()
+
+    def _on_f12(self, event=None):
+        """Handle F12 — toggle autopilot user-control."""
+        if self._autopilot is not None:
+            self._autopilot.toggle_user_control()
 
     def _history_up(self, event=None):
         if not self._history:
@@ -577,11 +593,66 @@ class ForgeTerminalWindow:
             self._input_entry.delete(0, "end")
         return "break"
 
+    def show_inline_prompt(self, message, choices, default, timeout):
+        """Show inline buttons for prompt_yes_no / prompt_choice.
+
+        Called on the GUI thread via root.after(). Sets _prompt_result
+        and fires _input_ready when user clicks a button.
+        """
+        # Display the prompt message
+        self.append_text(f"\n  {message}\n", "info")
+
+        # Clean up any previous prompt buttons
+        for btn in self._prompt_buttons:
+            try:
+                btn.destroy()
+            except Exception:
+                pass
+        self._prompt_buttons = []
+
+        # Create a frame for buttons inside the input area
+        btn_frame = ctk.CTkFrame(self._input_frame, fg_color="transparent")
+        btn_frame.pack(side="left", padx=5)
+        self._prompt_buttons.append(btn_frame)
+
+        def _on_choice(key):
+            """Handle button click."""
+            self._prompt_result = key
+            # Clean up buttons
+            for btn in self._prompt_buttons:
+                try:
+                    btn.destroy()
+                except Exception:
+                    pass
+            self._prompt_buttons = []
+            self._input_ready.set()
+
+        for key, label in choices:
+            btn = ctk.CTkButton(
+                btn_frame, text=label, width=80, height=28,
+                command=lambda k=key: _on_choice(k),
+                fg_color=COLORS.get("cyan_dim", "#2a6e7a"),
+                hover_color=COLORS.get("cyan", "#00d4ff"),
+            )
+            btn.pack(side="left", padx=3)
+            self._prompt_buttons.append(btn)
+
+        # Auto-select default after timeout
+        if timeout > 0:
+            def _auto():
+                if self._prompt_result is None:
+                    _on_choice(default)
+            self._root.after(int(timeout * 1000), _auto)
+
+        # Scroll to bottom
+        self._output.see("end")
+
     def _on_close(self):
         """Handle window close."""
         self._shutting_down = True
         self._brain_running = False
-        # Wake up any blocked prompt_user
+        # Wake up any blocked prompt_user or prompt
+        self._prompt_result = None
         self._input_text = "/quit"
         self._input_ready.set()
         self._escape_pressed.set()
@@ -614,6 +685,8 @@ class GuiTerminalIO(TerminalIO):
         # stdout/stderr redirect for capturing direct print() calls
         self._stdout_redirect = _GuiStdoutRedirect(
             window.append_text, root)
+        # Queue for autopilot-injected prompts (checked in prompt_user)
+        self._autopilot_queue: queue.Queue = queue.Queue()
 
     def _safe_after(self, callback, *args):
         """Schedule callback on the GUI thread, safely."""
@@ -800,12 +873,62 @@ class GuiTerminalIO(TerminalIO):
     # ── Input ──
 
     def prompt_user(self, cwd: str) -> str:
-        """Block engine thread until user enters text."""
+        """Block engine thread until user or autopilot enters text."""
+        # Check if autopilot already has a queued prompt — serve it immediately
+        # without showing the input box (engine stays in autonomous mode)
+        try:
+            return self._autopilot_queue.get_nowait()
+        except queue.Empty:
+            pass
+
         self._win._input_ready.clear()
         self._win._escape_pressed.clear()
         self._safe_after(self._win.enable_input, cwd)
 
+        # Notify autopilot that engine is now idle and accepting input
+        if self._win._autopilot is not None:
+            self._win._autopilot.on_engine_idle()
+
         # Block engine thread until input is ready
+        self._win._input_ready.wait()
+
+        # Check if autopilot woke us up with a queued prompt
+        try:
+            return self._autopilot_queue.get_nowait()
+        except queue.Empty:
+            pass
+
+        return self._win._input_text
+
+    def prompt_yes_no(self, message, default=True, timeout=0):
+        """Show yes/no prompt in GUI, block engine thread for answer."""
+        self._win._prompt_result = None
+        self._win._input_ready.clear()
+        self._safe_after(
+            self._win.show_inline_prompt, message,
+            [("y", "Yes"), ("n", "No")],
+            "y" if default else "n", timeout)
+        self._win._input_ready.wait()
+        result = self._win._prompt_result
+        return result == "y" if result else default
+
+    def prompt_choice(self, message, choices, default=None):
+        """Show choice buttons in GUI, block engine thread for answer."""
+        if default is None and choices:
+            default = choices[0][0]
+        self._win._prompt_result = None
+        self._win._input_ready.clear()
+        self._safe_after(
+            self._win.show_inline_prompt, message, choices, default, 0)
+        self._win._input_ready.wait()
+        return self._win._prompt_result or default
+
+    def prompt_text(self, message):
+        """Show text prompt in GUI, block engine thread for answer."""
+        # Reuse the standard input mechanism with a custom label
+        self._win._input_ready.clear()
+        label = message if message else "Enter text"
+        self._safe_after(self._win.enable_input, label)
         self._win._input_ready.wait()
         return self._win._input_text
 
@@ -830,8 +953,48 @@ class GuiTerminalIO(TerminalIO):
 # Launch helpers
 # ──────────────────────────────────────────────────────────────────
 
+def _setup_file_logging():
+    """Add a persistent log file handler so errors are always captured.
+
+    Writes to ~/.forge/forge.log at DEBUG level. This is what the
+    AutopilotMonitor polls to detect problems.
+    """
+    import logging.handlers
+    forge_dir = Path.home() / ".forge"
+    forge_dir.mkdir(parents=True, exist_ok=True)
+    log_path = forge_dir / "forge.log"
+
+    root_logger = logging.getLogger()
+    # Only add once — check if we already have a FileHandler on this path
+    for h in root_logger.handlers:
+        if isinstance(h, (logging.FileHandler, logging.handlers.RotatingFileHandler)):
+            if hasattr(h, 'baseFilename') and str(log_path) in h.baseFilename:
+                return
+            if hasattr(h, 'stream') and hasattr(h.stream, 'name') and str(log_path) in str(h.stream.name):
+                return
+
+    fh = logging.handlers.RotatingFileHandler(
+        log_path,
+        maxBytes=2 * 1024 * 1024,  # 2 MB per file
+        backupCount=3,
+        encoding="utf-8",
+    )
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    root_logger.addHandler(fh)
+    # Ensure root level allows DEBUG through to the file handler
+    if root_logger.level == logging.NOTSET or root_logger.level > logging.DEBUG:
+        root_logger.setLevel(logging.DEBUG)
+
+
 def _run_engine_thread(gui_io, model, cwd, win):
     """Run ForgeEngine on a background thread with stdout redirect."""
+    # Set up persistent log file before engine starts
+    _setup_file_logging()
+
     old_stdout = sys.stdout
     old_stderr = sys.stderr
 
@@ -847,6 +1010,9 @@ def _run_engine_thread(gui_io, model, cwd, win):
             terminal_io=gui_io)
         engine.run()
     except Exception as e:
+        # Capture crash for auto-filing
+        from forge.bug_reporter import capture_crash as _capture_crash
+        _capture_crash(e)
         # Show errors in the GUI window
         import traceback
         tb = traceback.format_exc()
@@ -866,6 +1032,8 @@ def launch_gui_terminal(model: str = None, cwd: str = None):
     """Launch the GUI terminal as a standalone window.
 
     CTk mainloop on main thread, ForgeEngine on daemon thread.
+    AutopilotMonitor runs on a third daemon thread, watching for errors
+    and injecting self-repair prompts. Press F12 to take control.
     """
     if not HAS_CTK:
         print("GUI Terminal requires: pip install customtkinter Pillow numpy")
@@ -879,6 +1047,15 @@ def launch_gui_terminal(model: str = None, cwd: str = None):
 
     gui_io = GuiTerminalIO(root, win)
 
+    # Create and wire AutopilotMonitor
+    try:
+        from forge.autopilot import AutopilotMonitor
+        autopilot = AutopilotMonitor(gui_io, win, cwd=cwd or os.getcwd())
+        win._autopilot = autopilot
+    except Exception as e:
+        log.warning("Autopilot init failed: %s", e)
+        autopilot = None
+
     # Theme listener
     theme_cb = lambda cm: root.after(0, _apply_theme, root, cm)
     add_theme_listener(theme_cb)
@@ -889,10 +1066,16 @@ def launch_gui_terminal(model: str = None, cwd: str = None):
         daemon=True, name="ForgeEngine")
     engine_thread.start()
 
+    # Start autopilot after engine thread is spawned
+    if autopilot is not None:
+        autopilot.start()
+
     root.mainloop()
 
     # Cleanup
     remove_theme_listener(theme_cb)
+    if autopilot is not None:
+        autopilot.stop()
 
 
 def _apply_theme(root, color_map):

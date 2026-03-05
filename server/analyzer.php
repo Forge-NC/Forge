@@ -233,6 +233,15 @@ function update_profile(string $profiles_dir, string $machine_id, array $bundle)
         ];
     }
 
+    // Fleet metadata — role + master association
+    $fleet_meta = $manifest['fleet'] ?? $audit['fleet'] ?? [];
+    if (!empty($fleet_meta)) {
+        $profile['fleet_role'] = $fleet_meta['role'] ?? ($profile['fleet_role'] ?? 'standalone');
+        $profile['master_id'] = $fleet_meta['master_id'] ?? ($profile['master_id'] ?? null);
+        $profile['account_id'] = $fleet_meta['account_id'] ?? ($profile['account_id'] ?? null);
+        $profile['seat_id'] = $fleet_meta['seat_id'] ?? ($profile['seat_id'] ?? null);
+    }
+
     // Usage — incremental merge
     $usage = &$profile['usage'];
     $usage['total_sessions'] = ($usage['total_sessions'] ?? 0) + 1;
