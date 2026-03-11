@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 _API_KEY = "fg_tel_2026_e7eb55900b70bd84eaeb62f7cd0153e7"
 
 # Default endpoint
-_DEFAULT_URL = "https://dirt-star.com/Forge/telemetry_receiver.php"
+_DEFAULT_URL = "https://forge-nc.dev/telemetry_receiver.php"
 
 # Upload constraints
 _TIMEOUT_S = 5

@@ -42,8 +42,8 @@ TRENDLINE_FILE = FORGE_DIR / "harness_trend.jsonl"
 NIGHTLY_LOG_DIR = FORGE_DIR / "nightly_logs"
 MANIFEST_AUDIT_FILE = NIGHTLY_LOG_DIR / "manifest_audit.jsonl"
 
-DEFAULT_MANIFEST_URL = "https://dirt-star.com/Forge/manifest.php"
-DEFAULT_TELEMETRY_URL = "https://dirt-star.com/Forge/telemetry_receiver.php"
+DEFAULT_MANIFEST_URL = "https://forge-nc.dev/manifest.php"
+DEFAULT_TELEMETRY_URL = "https://forge-nc.dev/telemetry_receiver.php"
 LEGACY_API_KEY = "fg_tel_2026_e7eb55900b70bd84eaeb62f7cd0153e7"
 
 # ── Hardcoded allowlist — never run anything else ──
