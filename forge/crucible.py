@@ -4,7 +4,7 @@ In metallurgy, a crucible separates pure metal from slag through extreme heat.
 In Forge, Crucible separates clean code from malicious injections before they
 reach the AI's context — or catch the AI acting on injections that slipped through.
 
-Three detection layers:
+Four detection layers:
   1. Static Pattern Scan — regex-based detection of known injection patterns,
      hidden content (base64, zero-width chars), and suspicious AI instructions
      in code comments/strings. Fast, zero-cost, catches ~80% of attacks.
@@ -146,6 +146,12 @@ INJECTION_PATTERNS = [
      r"[.\w]*(?:\.(?:site|com|io|net|org)))",
      ThreatLevel.WARNING, "data_exfil",
      "Suspicious webhook/exfiltration URL"),
+
+    ("exfil_env_var_steal",
+     r'os\.environ(?:\.get)?\s*[\[(].+?(?:requests\.\w+|urllib\.request\.\w+'
+     r'|http(?:lib|\.client)\.\w+|socket\.send|httpx\.\w+)',
+     ThreatLevel.WARNING, "data_exfil",
+     "Env var access combined with network transmission — possible credential exfil"),
 
     # Hidden content techniques
     ("hidden_zero_width",

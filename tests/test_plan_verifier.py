@@ -10,6 +10,13 @@ from forge.plan_verifier import PlanVerifier, VerificationCheck, VerificationRes
 # ---------------------------------------------------------------------------
 
 class TestVerificationDataclasses:
+    """Verifies VerificationCheck and VerificationResult dataclasses have correct defaults and str().
+
+    VerificationCheck: output defaults to '', duration_ms defaults to 0.
+    VerificationResult str(): PASS/FAIL prefix, 'tests:ok' for passing checks,
+    'tests:FAIL' for failing ones, 'lint:ok' for passing alongside failing others.
+    """
+
     def test_check_defaults(self):
         c = VerificationCheck(name="tests", passed=True)
         assert c.output == ""
@@ -39,6 +46,11 @@ class TestVerificationDataclasses:
 # ---------------------------------------------------------------------------
 
 class TestPlanVerifierModes:
+    """Verifies PlanVerifier.enabled is False for 'off' mode and True for all active modes.
+
+    mode='off' → enabled=False. mode='report'/'repair'/'strict' → enabled=True.
+    """
+
     def test_off_mode_not_enabled(self):
         v = PlanVerifier(mode="off")
         assert not v.enabled
@@ -61,6 +73,15 @@ class TestPlanVerifierModes:
 # ---------------------------------------------------------------------------
 
 class TestVerifyStep:
+    """Verifies verify_step() runs checks, aggregates results, and records them.
+
+    With all checks disabled (run_tests=False etc.), step passes trivially.
+    A mocked _check_tests returning passed=True → result.passed=True, 1 check.
+    A mocked _check_tests returning passed=False → result.passed=False, error_summary contains 'tests'.
+    Tests pass + lint fail → result.passed=False, len(checks)==2.
+    After 3 verify_step calls, len(v._results)==3.
+    """
+
     def test_no_checks_passes(self):
         v = PlanVerifier(mode="report", run_tests=False, run_lint=False,
                          run_typecheck=False, run_git_diff=False)
@@ -117,6 +138,13 @@ class TestVerifyStep:
 # ---------------------------------------------------------------------------
 
 class TestRepairPrompt:
+    """Verifies get_repair_prompt() includes only failed checks and the original plan step description.
+
+    The prompt must contain the original step description ('Fix the parser'), the name of
+    failed checks with 'FAILED' label, and the check output ('assert 1 == 2').
+    Passing checks ('lint') must NOT appear in the repair prompt.
+    """
+
     def test_repair_prompt_contains_failures(self):
         v = PlanVerifier(mode="repair")
         result = VerificationResult(
@@ -138,6 +166,13 @@ class TestRepairPrompt:
 # ---------------------------------------------------------------------------
 
 class TestFormat:
+    """Verifies format_result() and format_summary() produce correct human-readable output.
+
+    Passing result → 'VERIFIED' + duration in ms. Failing → 'FAILED' + failure output text.
+    auto_fixed=True → 'auto-fixed' in output. rolled_back=True → 'rolled back' in output.
+    format_summary() with 2/2 passing → '2/2'. With 2/3 passing → '2/3'. Empty → ''.
+    """
+
     def test_format_result_pass(self):
         v = PlanVerifier(mode="report")
         result = VerificationResult(
@@ -203,6 +238,12 @@ class TestFormat:
 # ---------------------------------------------------------------------------
 
 class TestRunCommand:
+    """Verifies _run_command() returns (code, output) for success, failure, and missing commands.
+
+    Nonexistent command → code==-1, 'not found' in output. TimeoutExpired → code==1, 'timed out'.
+    Successful command (mocked returncode=0, stdout='ok') → code==0, 'ok' in output.
+    """
+
     def test_command_not_found(self):
         v = PlanVerifier(mode="report")
         code, output = v._run_command(["nonexistent_command_xyz"])
@@ -234,6 +275,12 @@ class TestRunCommand:
 # ---------------------------------------------------------------------------
 
 class TestDetectTestCommand:
+    """Verifies _detect_test_command() identifies the test runner from project file indicators.
+
+    tests/ directory → 'pytest' in command. package.json → 'npm' in command.
+    Cargo.toml → 'cargo' in command. go.mod → 'go' in command. Empty dir → None.
+    """
+
     def test_detect_pytest(self, tmp_path):
         (tmp_path / "tests").mkdir()
         v = PlanVerifier(mode="report", working_dir=str(tmp_path))
@@ -273,6 +320,13 @@ class TestDetectTestCommand:
 # ---------------------------------------------------------------------------
 
 class TestGitDiffCheck:
+    """Verifies _check_git_diff() skips non-git dirs and flags mass deletions (>500 lines deleted).
+
+    Not a git repo (exit_code=1, 'fatal: not a git repository') → passed=True, 'skipped' in output.
+    Normal changes (3 files, 50 insertions, 20 deletions) → passed=True.
+    Mass deletion (10 files, 1000 deletions) → passed=False, 'mass deletion' in output.
+    """
+
     @patch.object(PlanVerifier, '_run_command')
     def test_not_git_repo(self, mock_run):
         mock_run.return_value = (1, "fatal: not a git repository")

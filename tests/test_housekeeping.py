@@ -24,6 +24,14 @@ def _make_engine(safety_level=2, retention_days=30):
 
 
 class TestHousekeeping:
+    """Verifies _run_housekeeping() prunes stale files based on safety level and retention config.
+
+    Safety L0 → no files pruned regardless of age. Safety L2, retention_days=30:
+    file with 60-day-old mtime → deleted. Recent file (current mtime) → kept.
+    retention_days=0 → pruning disabled, old files kept. Missing forensics/exports
+    directories → no exception raised.
+    """
+
     def test_safety_l0_no_pruning(self, tmp_path):
         engine = _make_engine(safety_level=0)
         forensics_dir = tmp_path / ".forge" / "forensics"

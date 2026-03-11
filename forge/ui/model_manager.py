@@ -298,6 +298,94 @@ _FIT_STYLES = {
     "unknown":   (None,             None,          None,      "#e0e8f0"),
 }
 
+# ── Quantization VRAM estimation ──
+
+# Bytes per parameter for common GGUF quantization levels
+_QUANT_BPP: dict[str, float] = {
+    "fp16":    2.00,
+    "q8_0":    1.00,
+    "q6_k":    0.82,
+    "q5_k_m":  0.68,
+    "q5_k_s":  0.65,
+    "q5_0":    0.63,
+    "q4_k_m":  0.55,
+    "q4_k_s":  0.52,
+    "q4_0":    0.50,
+    "q3_k_m":  0.44,
+    "q3_k_l":  0.47,
+    "q3_k_s":  0.40,
+    "q2_k":    0.34,
+    "iq4_xs":  0.48,
+    "iq3_xxs": 0.36,
+    "iq2_xxs": 0.28,
+}
+
+# Human-readable quant descriptions
+_QUANT_LABELS: dict[str, str] = {
+    "fp16":    "FP16 \u2014 Full precision, best quality",
+    "q8_0":    "Q8_0 \u2014 Near-lossless 8-bit",
+    "q6_k":    "Q6_K \u2014 High quality 6-bit",
+    "q5_k_m":  "Q5_K_M \u2014 Balanced quality/size",
+    "q5_k_s":  "Q5_K_S \u2014 Balanced (small variant)",
+    "q5_0":    "Q5_0 \u2014 Standard 5-bit",
+    "q4_k_m":  "Q4_K_M \u2014 Good quality, popular default",
+    "q4_k_s":  "Q4_K_S \u2014 Good quality (small variant)",
+    "q4_0":    "Q4_0 \u2014 Basic 4-bit",
+    "q3_k_m":  "Q3_K_M \u2014 Lower quality, saves VRAM",
+    "q3_k_l":  "Q3_K_L \u2014 Lower quality (large variant)",
+    "q3_k_s":  "Q3_K_S \u2014 Lower quality (small variant)",
+    "q2_k":    "Q2_K \u2014 Minimum viable quality",
+    "iq4_xs":  "IQ4_XS \u2014 Importance quant 4-bit",
+    "iq3_xxs": "IQ3_XXS \u2014 Importance quant 3-bit",
+    "iq2_xxs": "IQ2_XXS \u2014 Importance quant 2-bit",
+}
+
+# Standard quant variants most Ollama models offer
+_COMMON_QUANTS = ["q2_K", "q3_K_M", "q4_K_M", "q5_K_M", "q6_K", "q8_0", "fp16"]
+
+
+def _extract_params_b(s: str) -> float:
+    """Extract parameter count in billions. '14B' -> 14.0, '137M' -> 0.137."""
+    m = re.match(r"([\d.]+)\s*[Bb]", s)
+    if m:
+        return float(m.group(1))
+    m = re.match(r"([\d.]+)\s*[Mm]", s)
+    if m:
+        return float(m.group(1)) / 1000
+    return 0.0
+
+
+def _estimate_quant_vram(params_b: float, quant: str) -> float:
+    """Estimate VRAM (GB) for a model with given params and quantization."""
+    if params_b <= 0:
+        return 0.0
+    key = quant.lower().strip().replace("-", "_")
+    bpp = _QUANT_BPP.get(key, 0.55)
+    return params_b * bpp + 0.5  # +0.5 GB overhead for KV cache
+
+
+def _quant_from_tag(tag: str, param_prefix: str) -> str:
+    """Extract quantization key from an Ollama tag.
+
+    '14b' with prefix '14b' -> 'q4_k_m' (default)
+    '14b-q8_0' with prefix '14b' -> 'q8_0'
+    'latest' with prefix '' -> 'q4_k_m'
+    """
+    if param_prefix and tag == param_prefix:
+        return "q4_k_m"
+
+    if param_prefix and tag.startswith(param_prefix + "-"):
+        suffix = tag[len(param_prefix) + 1:]
+    elif not param_prefix:
+        suffix = tag
+    else:
+        return "q4_k_m"
+
+    key = suffix.lower().replace("-", "_")
+    if key in _QUANT_BPP:
+        return key
+    return "q4_k_m"
+
 
 class ModelManagerDialog:
     """Enterprise-grade model management dialog."""
@@ -331,11 +419,13 @@ class ModelManagerDialog:
     # ──────────────────────────────────────────────────────────
 
     def _build_window(self):
+        from forge.ui.window_geo import WindowGeo as _WG
         self._win = ctk.CTkToplevel(self._parent)
         self._win.title("Forge — Model Manager")
-        self._win.geometry("820x660")
         self._win.minsize(720, 520)
         self._win.configure(fg_color=COLORS["bg_dark"])
+        _WG.restore("model_manager", self._win, "820x660")
+        _WG.track("model_manager", self._win)
         self._win.after(50, self._win.lift)
         self._win.after(50, self._win.focus_force)
         self._win.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -1011,7 +1101,7 @@ class ModelManagerDialog:
                 hover_color=COLORS["red"],
                 text_color=COLORS["yellow"],
                 font=ctk.CTkFont(*FONT_MONO_XS),
-                command=lambda n=name: self._enqueue_pull(n)
+                command=lambda n=name, p=params: self._show_quant_picker(n, p)
             ).pack(side="left")
             if est_vram > 0:
                 over = est_vram - self._vram_gb
@@ -1027,7 +1117,7 @@ class ModelManagerDialog:
                 hover_color=COLORS["cyan"],
                 text_color=COLORS["bg_dark"],
                 font=ctk.CTkFont(*FONT_MONO_BOLD),
-                command=lambda n=name: self._enqueue_pull(n)
+                command=lambda n=name, p=params: self._show_quant_picker(n, p)
             ).pack(side="left")
 
             if size_bytes:
@@ -1198,6 +1288,306 @@ class ModelManagerDialog:
 
         threading.Thread(target=_bg, daemon=True,
                          name="ModelMgrDelete").start()
+
+    # ──────────────────────────────────────────────────────────
+    # Actions: Quantization variant picker
+    # ──────────────────────────────────────────────────────────
+
+    def _show_quant_picker(self, catalog_name: str, params_str: str):
+        """Open a dialog showing available quantization variants."""
+        if ":" in catalog_name:
+            base, param_tag = catalog_name.split(":", 1)
+        else:
+            base, param_tag = catalog_name, ""
+
+        params_b = _extract_params_b(params_str)
+
+        # ── Build dialog ──
+        dlg = ctk.CTkToplevel(self._win)
+        dlg.title(f"Select Variant \u2014 {catalog_name}")
+        dlg.geometry("560x520")
+        dlg.configure(fg_color=COLORS["bg_dark"])
+        dlg.transient(self._win)
+        dlg.grab_set()
+        dlg.resizable(True, True)
+        dlg.minsize(440, 320)
+
+        dlg.update_idletasks()
+        x = self._win.winfo_x() + (self._win.winfo_width() - 560) // 2
+        y = self._win.winfo_y() + (self._win.winfo_height() - 520) // 2
+        dlg.geometry(f"+{max(0, x)}+{max(0, y)}")
+
+        # Header
+        hdr = ctk.CTkFrame(dlg, fg_color=COLORS["bg_panel"], height=50,
+                           corner_radius=0, border_width=1,
+                           border_color=COLORS["border"])
+        hdr.pack(fill="x")
+        hdr.pack_propagate(False)
+
+        ctk.CTkLabel(hdr, text=f"  {catalog_name}",
+                     font=ctk.CTkFont(*FONT_TITLE),
+                     text_color=COLORS["cyan"]).pack(side="left", padx=10)
+
+        if self._vram_gb > 0:
+            ctk.CTkLabel(
+                hdr, text=f"GPU: {self._vram_gb:.0f}GB VRAM  ",
+                font=ctk.CTkFont(*FONT_MONO_XS),
+                text_color=COLORS["green"]).pack(side="right", padx=10)
+
+        ctk.CTkLabel(
+            dlg, text="  Choose a quantization variant to pull:",
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            text_color=COLORS["text_dim"],
+            anchor="w").pack(fill="x", padx=8, pady=(8, 4))
+
+        # Scrollable variant list
+        scroll = ctk.CTkScrollableFrame(
+            dlg, fg_color=COLORS["bg_dark"],
+            scrollbar_button_color=COLORS["border"],
+            scrollbar_button_hover_color=COLORS["cyan_dim"])
+        scroll.pack(fill="both", expand=True, padx=8, pady=(0, 0))
+
+        loading_lbl = ctk.CTkLabel(
+            scroll, text="Fetching available variants...",
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            text_color=COLORS["text_dim"])
+        loading_lbl.pack(pady=40)
+
+        # Bottom bar
+        bottom = ctk.CTkFrame(dlg, fg_color=COLORS["bg_panel"], height=46,
+                              corner_radius=0, border_width=1,
+                              border_color=COLORS["border"])
+        bottom.pack(fill="x", side="bottom")
+        bottom.pack_propagate(False)
+
+        ctk.CTkButton(
+            bottom, text="Cancel", width=80, height=30,
+            fg_color=COLORS["bg_card"],
+            hover_color=COLORS["bg_panel"],
+            text_color=COLORS["white"],
+            font=ctk.CTkFont(*FONT_MONO),
+            command=dlg.destroy
+        ).pack(side="right", padx=10, pady=8)
+
+        # Fetch tags in background
+        def _bg():
+            tags = self._fetch_model_tags(base)
+            try:
+                dlg.after(0, lambda: self._render_quant_variants(
+                    dlg, scroll, loading_lbl, base, param_tag,
+                    params_b, tags))
+            except Exception:
+                pass  # Dialog closed while loading
+
+        threading.Thread(target=_bg, daemon=True,
+                         name="ModelMgrTags").start()
+
+    def _fetch_model_tags(self, base: str) -> list[str]:
+        """Fetch available tags from Ollama registry.
+
+        Tries the Docker v2 registry API, falls back to empty list.
+        """
+        url = f"https://registry.ollama.ai/v2/library/{base}/tags/list"
+        try:
+            req = urllib.request.Request(
+                url, method="GET",
+                headers={"User-Agent": "Forge/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+                tags = data.get("tags", [])
+                if isinstance(tags, list):
+                    return [t for t in tags if isinstance(t, str)]
+        except Exception:
+            log.debug("Registry tag fetch failed for %s, using fallback", base)
+        return []
+
+    def _render_quant_variants(self, dlg, scroll, loading_lbl,
+                               base: str, param_tag: str,
+                               params_b: float, tags: list[str]):
+        """Render variant cards in the quant picker (main thread)."""
+        loading_lbl.destroy()
+
+        # If no tags fetched, generate standard quant variants as fallback
+        if not tags and param_tag and params_b > 0:
+            tags = [param_tag] + [
+                f"{param_tag}-{q.lower()}" for q in _COMMON_QUANTS]
+
+        if not tags:
+            # Can't determine variants — offer direct pull
+            default_name = f"{base}:{param_tag}" if param_tag else base
+            ctk.CTkLabel(
+                scroll,
+                text="Could not fetch variant list.\n\n"
+                     "Click below to pull the default variant.",
+                font=ctk.CTkFont(*FONT_MONO_SM),
+                text_color=COLORS["text_dim"],
+                justify="center").pack(pady=20)
+            ctk.CTkButton(
+                scroll, text=f"Pull {default_name}",
+                width=200, height=34,
+                fg_color=COLORS["cyan_dim"],
+                hover_color=COLORS["cyan"],
+                text_color=COLORS["bg_dark"],
+                font=ctk.CTkFont(*FONT_MONO_BOLD),
+                command=lambda: (
+                    dlg.destroy(), self._enqueue_pull(default_name))
+            ).pack(pady=8)
+            return
+
+        # Filter tags matching our parameter tag
+        if param_tag:
+            matching = [t for t in tags
+                        if t == param_tag or t.startswith(param_tag + "-")]
+        else:
+            matching = tags
+
+        # Build variant data: (tag, full_name, quant_key, vram_est, fit)
+        variants = []
+        seen = set()
+        for tag in matching:
+            full_name = f"{base}:{tag}"
+            if full_name in seen:
+                continue
+            seen.add(full_name)
+            quant_key = _quant_from_tag(tag, param_tag)
+            vram = _estimate_quant_vram(params_b, quant_key)
+            fit = _classify_fit(vram, self._vram_gb) if vram > 0 else "unknown"
+            variants.append((tag, full_name, quant_key, vram, fit))
+
+        # Sort by VRAM ascending (smallest/most-compressed first)
+        variants.sort(key=lambda v: (v[3] if v[3] > 0 else 999, v[0]))
+
+        if not variants:
+            default_name = f"{base}:{param_tag}" if param_tag else base
+            ctk.CTkLabel(
+                scroll,
+                text=f"No variants found for '{param_tag or base}'.",
+                font=ctk.CTkFont(*FONT_MONO_SM),
+                text_color=COLORS["text_dim"],
+                justify="center").pack(pady=20)
+            ctk.CTkButton(
+                scroll, text=f"Pull {default_name}",
+                width=200, height=34,
+                fg_color=COLORS["cyan_dim"],
+                hover_color=COLORS["cyan"],
+                text_color=COLORS["bg_dark"],
+                font=ctk.CTkFont(*FONT_MONO_BOLD),
+                command=lambda: (
+                    dlg.destroy(), self._enqueue_pull(default_name))
+            ).pack(pady=8)
+            return
+
+        # Check installed models
+        installed_names = {m.get("name", "") for m in self._installed}
+
+        for tag, full_name, quant_key, vram, fit in variants:
+            self._build_variant_card(
+                scroll, dlg, tag, full_name, quant_key, vram, fit,
+                full_name in installed_names)
+
+    def _build_variant_card(self, parent, dlg, tag: str, full_name: str,
+                            quant_key: str, vram: float, fit: str,
+                            is_installed: bool):
+        """Build a single variant card in the quant picker."""
+        style = _FIT_STYLES.get(fit, _FIT_STYLES["unknown"])
+        _, badge_text, badge_fg, name_color = style
+
+        border_color = COLORS["border"]
+        if fit == "too_large":
+            border_color = COLORS["red"]
+        elif fit == "tight":
+            border_color = COLORS["yellow"]
+
+        card = ctk.CTkFrame(parent, fg_color=COLORS["bg_card"],
+                            corner_radius=6, border_color=border_color,
+                            border_width=1)
+        card.pack(fill="x", padx=2, pady=2)
+
+        # Top row: full name + fit badge
+        top_row = ctk.CTkFrame(card, fg_color="transparent")
+        top_row.pack(fill="x", padx=8, pady=(6, 0))
+
+        ctk.CTkLabel(top_row, text=full_name,
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=name_color,
+                     anchor="w").pack(side="left")
+
+        # Fit badge — show for all fit levels
+        if fit == "good":
+            ctk.CTkLabel(top_row, text=" GOOD FIT ",
+                         font=ctk.CTkFont(*FONT_MONO_XS),
+                         text_color=COLORS["bg_dark"],
+                         fg_color=COLORS["green"],
+                         corner_radius=3).pack(side="right", padx=2)
+        elif fit == "ok":
+            ctk.CTkLabel(top_row, text=" OK FIT ",
+                         font=ctk.CTkFont(*FONT_MONO_XS),
+                         text_color=COLORS["bg_dark"],
+                         fg_color=COLORS["cyan"],
+                         corner_radius=3).pack(side="right", padx=2)
+        elif fit == "tight":
+            ctk.CTkLabel(top_row, text=" HEAVY ",
+                         font=ctk.CTkFont(*FONT_MONO_XS),
+                         text_color=badge_fg,
+                         fg_color=COLORS["yellow"],
+                         corner_radius=3).pack(side="right", padx=2)
+        elif fit == "too_large":
+            ctk.CTkLabel(top_row, text=" TOO LARGE ",
+                         font=ctk.CTkFont(*FONT_MONO_XS),
+                         text_color=badge_fg,
+                         fg_color=COLORS["red"],
+                         corner_radius=3).pack(side="right", padx=2)
+
+        # Info row: quant description + VRAM
+        quant_label = _QUANT_LABELS.get(quant_key, quant_key.upper())
+        parts = [quant_label]
+        if vram > 0:
+            vram_str = f"~{vram:.1f}GB VRAM"
+            if self._vram_gb > 0:
+                vram_str += f" of {self._vram_gb:.0f}GB"
+            parts.append(vram_str)
+        info = "  |  ".join(parts)
+
+        ctk.CTkLabel(card, text=f"  {info}",
+                     font=ctk.CTkFont(*FONT_MONO_XS),
+                     text_color=COLORS["gray"],
+                     anchor="w").pack(fill="x", padx=8, pady=(1, 2))
+
+        # Action row
+        action_row = ctk.CTkFrame(card, fg_color="transparent")
+        action_row.pack(fill="x", padx=8, pady=(0, 6))
+
+        if is_installed:
+            ctk.CTkLabel(action_row, text="Installed",
+                         font=ctk.CTkFont(*FONT_MONO_XS),
+                         text_color=COLORS["green"]).pack(side="left")
+        elif fit == "too_large":
+            ctk.CTkButton(
+                action_row, text="Pull Anyway", width=100, height=24,
+                fg_color=COLORS["bg_panel"],
+                hover_color=COLORS["red"],
+                text_color=COLORS["yellow"],
+                font=ctk.CTkFont(*FONT_MONO_XS),
+                command=lambda n=full_name: (
+                    dlg.destroy(), self._enqueue_pull(n))
+            ).pack(side="left")
+            if vram > 0 and self._vram_gb > 0:
+                over = vram - self._vram_gb
+                ctk.CTkLabel(
+                    action_row,
+                    text=f"  {over:.1f}GB over your VRAM",
+                    font=ctk.CTkFont(*FONT_MONO_XS),
+                    text_color=COLORS["red"]).pack(side="left")
+        else:
+            ctk.CTkButton(
+                action_row, text="Pull", width=60, height=24,
+                fg_color=COLORS["cyan_dim"],
+                hover_color=COLORS["cyan"],
+                text_color=COLORS["bg_dark"],
+                font=ctk.CTkFont(*FONT_MONO_BOLD),
+                command=lambda n=full_name: (
+                    dlg.destroy(), self._enqueue_pull(n))
+            ).pack(side="left")
 
     # ──────────────────────────────────────────────────────────
     # Actions: Pull with progress bar queue

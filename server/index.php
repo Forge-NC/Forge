@@ -41,15 +41,15 @@ require_once __DIR__ . '/includes/header.php';
 
                 <div class="hero-stats stagger">
                     <div class="hero-stat">
-                        <span class="num" data-count="68000" data-suffix="+">0</span>
-                        <span class="label">Lines of Code</span>
+                        <span class="num" data-count="54207" data-suffix="+">0</span>
+                        <span class="label">Lines of Source</span>
                     </div>
                     <div class="hero-stat">
-                        <span class="num" data-count="1265" data-suffix="+">0</span>
+                        <span class="num" data-count="1318">0</span>
                         <span class="label">Tests Passing</span>
                     </div>
                     <div class="hero-stat">
-                        <span class="num" data-count="55">0</span>
+                        <span class="num" data-count="59">0</span>
                         <span class="label">Commands</span>
                     </div>
                     <div class="hero-stat">
@@ -102,9 +102,9 @@ require_once __DIR__ . '/includes/header.php';
                     <span class="terminal-title">forge terminal</span>
                 </div>
                 <div class="terminal-body" data-demo='[
-                    "<span class=\"prompt\">forge&gt;<\/span> <span class=\"cmd\">Add input validation to the signup form<\/span>\n<span class=\"dim\">[routing] qwen3:14b \u2022 quality-aware \u2022 38.2 tok/s<\/span>\n<span class=\"dim\">[crucible] scan clean \u2022 9 security layers passed<\/span>\n<span class=\"dim\">[plan] 3 files identified \u2022 verified against spec<\/span>\n<span class=\"out\">Created validators in auth/validate.py<\/span>\n<span class=\"out\">Updated signup_form.py with field validation<\/span>\n<span class=\"out\">Added 12 test cases to test_signup.py<\/span>\n<span class=\"dim\">[continuity: A] [reliability: 94.2] [billing: $0.00]<\/span>",
+                    "<span class=\"prompt\">forge&gt;<\/span> <span class=\"cmd\">Add input validation to the signup form<\/span>\n<span class=\"dim\">[routing] qwen2.5-coder:14b \u2022 quality-aware \u2022 38.2 tok/s<\/span>\n<span class=\"dim\">[crucible] scan clean \u2022 9 security layers passed<\/span>\n<span class=\"dim\">[plan] 3 files identified \u2022 verified against spec<\/span>\n<span class=\"out\">Created validators in auth/validate.py<\/span>\n<span class=\"out\">Updated signup_form.py with field validation<\/span>\n<span class=\"out\">Added 12 test cases to test_signup.py<\/span>\n<span class=\"dim\">[continuity: A] [reliability: 94.2] [billing: $0.00]<\/span>",
                     "<span class=\"prompt\">forge&gt;<\/span> <span class=\"cmd\">/puppet generate DevBox<\/span>\n<span class=\"out\">Puppet passport created: forge_puppet_DevBox.json<\/span>\n<span class=\"out\">Seats: 2/3 used. 1 remaining.<\/span>\n\n<span class=\"prompt\">forge&gt;<\/span> <span class=\"cmd\">/puppet status<\/span>\n<span class=\"out\">Role: Master \u2022 Tier: Pro \u2022 Seats: 2/3<\/span>\n<span class=\"out\">Puppets: DevBox (active), WorkLaptop (active)<\/span>\n<span class=\"dim\">[fleet sync: OK] [genome: 847 patterns]<\/span>",
-                    "<span class=\"prompt\">forge&gt;<\/span> <span class=\"cmd\">Fix the race condition in the connection pool<\/span>\n<span class=\"dim\">[routing] qwen3:14b \u2022 complexity: high \u2022 AMI tier 1<\/span>\n<span class=\"dim\">[context] 4 files pinned \u2022 2,847 tokens<\/span>\n<span class=\"dim\">[plan] Lock ordering issue in pool.py:142<\/span>\n<span class=\"out\">Replaced threading.Lock with RLock in ConnectionPool<\/span>\n<span class=\"out\">Added acquire timeout (30s default)<\/span>\n<span class=\"out\">Tests: 8 passed, 0 failed<\/span>\n<span class=\"dim\">[continuity: A] [reliability: 96.1] [billing: $0.00]<\/span>"
+                    "<span class=\"prompt\">forge&gt;<\/span> <span class=\"cmd\">Fix the race condition in the connection pool<\/span>\n<span class=\"dim\">[routing] qwen2.5-coder:14b \u2022 complexity: high \u2022 AMI tier 1<\/span>\n<span class=\"dim\">[context] 4 files pinned \u2022 2,847 tokens<\/span>\n<span class=\"dim\">[plan] Lock ordering issue in pool.py:142<\/span>\n<span class=\"out\">Replaced threading.Lock with RLock in ConnectionPool<\/span>\n<span class=\"out\">Added acquire timeout (30s default)<\/span>\n<span class=\"out\">Tests: 8 passed, 0 failed<\/span>\n<span class=\"dim\">[continuity: A] [reliability: 96.1] [billing: $0.00]<\/span>"
                 ]'>
                     <span class="dim">Loading demo...</span>
                 </div>
@@ -131,8 +131,8 @@ require_once __DIR__ . '/includes/header.php';
             </div>
             <div class="feature-card card-hover explain-card">
                 <span class="feature-icon">&#128737;</span>
-                <h3>9-Layer Security Shield</h3>
-                <p class="explain-what">Every AI response passes through 9 independent security checks before it can touch your code.</p>
+                <h3>9-Layer Security Pipeline</h3>
+                <p class="explain-what">Every AI response passes through 9 security layers &mdash; shell gating, path sandboxing, pattern scanning, semantic anomaly detection, behavioral tripwires, canary traps, output fencing, rate limiting, and SSRF protection &mdash; before it can touch your code.</p>
                 <p class="explain-why">Why it matters: AI models can be tricked into running malicious code. Forge catches it automatically.</p>
             </div>
             <div class="feature-card card-hover explain-card">
@@ -153,12 +153,12 @@ require_once __DIR__ . '/includes/header.php';
             <div class="feature-card card-hover explain-card">
                 <span class="feature-icon">&#128200;</span>
                 <h3>Session Health Monitor</h3>
-                <p class="explain-what">Long coding sessions degrade AI quality. Forge tracks 6 health signals and gives you a letter grade (A through F). Drops below C? Auto-recovery kicks in.</p>
+                <p class="explain-what">Long coding sessions degrade AI quality. Forge tracks 6 health signals &mdash; objective alignment, file coverage, decision retention, swap freshness, recall quality, and working memory depth &mdash; and gives you a letter grade (A through F). Drops below C? Auto-recovery kicks in.</p>
                 <p class="explain-why">Why it matters: You'll know before the AI starts giving bad answers, and Forge fixes it without you asking.</p>
             </div>
             <div class="feature-card card-hover explain-card">
                 <span class="feature-icon">&#128736;</span>
-                <h3>55 Built-in Commands</h3>
+                <h3>59 Built-in Commands</h3>
                 <p class="explain-what">From /model to switch AI models, to /scan to analyze your codebase, to /export for compliance-ready audit bundles. Full toolbox out of the box.</p>
                 <p class="explain-why">Why it matters: Everything you need is already built in. No plugins required to get started.</p>
             </div>
@@ -176,7 +176,7 @@ require_once __DIR__ . '/includes/header.php';
             </div>
             <div class="feature-card card-hover explain-card">
                 <span class="feature-icon">&#127912;</span>
-                <h3>70+ Configuration Options</h3>
+                <h3>97 Configuration Options</h3>
                 <p class="explain-what">Safety levels, model routing, context management, voice settings, plan verification, enterprise mode, telemetry &mdash; every aspect of Forge is configurable via a single YAML file.</p>
                 <p class="explain-why">Why it matters: Your AI, your rules. Tune every knob or leave the defaults. Both work.</p>
             </div>
@@ -373,7 +373,7 @@ require_once __DIR__ . '/includes/header.php';
                 <div class="security-layer-num"></div>
                 <div>
                     <h4>Pattern Scanner</h4>
-                    <p>Checks every response against 23+ known attack patterns &mdash; prompt injection, data theft, hidden instructions, and credential leaks. Catches the obvious stuff instantly.</p>
+                    <p>Checks every response against 21 compiled regex patterns across 5 categories &mdash; prompt injection, data exfiltration, obfuscated payloads, hidden content, and credential leaks. Catches the obvious stuff instantly.</p>
                 </div>
             </div>
             <div class="security-layer">
@@ -408,7 +408,7 @@ require_once __DIR__ . '/includes/header.php';
                 <div class="security-layer-num"></div>
                 <div>
                     <h4>Command Guard</h4>
-                    <p>36 regex patterns block dangerous shell commands &mdash; reverse shells, crypto miners, registry edits, privilege escalation. 4 safety levels from "off" to "locked down."</p>
+                    <p>49 regex patterns block dangerous shell commands &mdash; reverse shells, crypto miners, registry edits, privilege escalation, LOLBins, PowerShell cradles. 4 safety levels from "unleashed" to "locked down."</p>
                 </div>
             </div>
             <div class="security-layer">
@@ -460,7 +460,7 @@ require_once __DIR__ . '/includes/header.php';
             <div class="compliance-card">
                 <div class="compliance-icon">&#127760;</div>
                 <h4>Air-Gapped Operation</h4>
-                <p>Designed from day one for networks with zero internet access. License validation, model loading, genome persistence, and all 55 commands work fully offline.</p>
+                <p>Designed from day one for networks with zero internet access. License validation, model loading, genome persistence, and all 59 commands work fully offline.</p>
                 <span class="compliance-badge ready">Air-Gap Ready</span>
             </div>
             <div class="compliance-card">
@@ -533,7 +533,7 @@ require_once __DIR__ . '/includes/header.php';
         <div class="steps-row animate-on-scroll">
             <div class="step-card">
                 <h3>Install Ollama</h3>
-                <p>Download <a href="https://ollama.com" style="color:var(--accent)">Ollama</a> (free) and pull a coding model. One command: <code>ollama pull qwen3:14b</code></p>
+                <p>Download <a href="https://ollama.com" style="color:var(--accent)">Ollama</a> (free) and pull a coding model. One command: <code>ollama pull qwen2.5-coder:14b</code></p>
             </div>
             <div class="step-card">
                 <h3>Launch Forge</h3>
@@ -557,13 +557,13 @@ require_once __DIR__ . '/includes/header.php';
         <div class="section-header">
             <span class="badge-label">Performance</span>
             <h2>Real-World Benchmarks</h2>
-            <p>Measured on an RTX 5070 Ti (16GB VRAM) with Qwen3:14b. These aren't theoretical maximums &mdash; they're what you get in daily coding.</p>
+            <p>Measured on an RTX 5070 Ti (16GB VRAM) with qwen2.5-coder:14b. These aren't theoretical maximums &mdash; they're what you get in daily coding.</p>
         </div>
         <div class="benchmark-grid animate-on-scroll">
             <div class="bench-card">
                 <span class="bench-value">38.2 <span class="bench-unit">tok/s</span></span>
                 <span class="bench-label">Token Generation</span>
-                <span class="bench-detail">Qwen3:14b on RTX 5070 Ti with KV Q8</span>
+                <span class="bench-detail">qwen2.5-coder:14b on RTX 5070 Ti with KV Q8</span>
                 <div class="bench-bar-wrap"><div class="bench-bar" style="width:76%"></div></div>
             </div>
             <div class="bench-card">
@@ -579,15 +579,15 @@ require_once __DIR__ . '/includes/header.php';
                 <div class="bench-bar-wrap"><div class="bench-bar" style="width:85%"></div></div>
             </div>
             <div class="bench-card">
-                <span class="bench-value">94.2<span class="bench-unit">%</span></span>
-                <span class="bench-label">Reliability Score</span>
-                <span class="bench-detail">AMI-tracked across 500+ real-world sessions</span>
+                <span class="bench-value">A&ndash;F</span>
+                <span class="bench-label">Continuity Grade</span>
+                <span class="bench-detail">6-signal context health tracking with auto-recovery</span>
                 <div class="bench-bar-wrap"><div class="bench-bar" style="width:94%"></div></div>
             </div>
             <div class="bench-card">
-                <span class="bench-value">1,265</span>
+                <span class="bench-value">1,318</span>
                 <span class="bench-label">Automated Tests</span>
-                <span class="bench-detail">219 security + 204 AI + 90 license + 75 chaos</span>
+                <span class="bench-detail">226 security + 373 AI + 198 licensing + 63 integration + 458 infra</span>
                 <div class="bench-bar-wrap"><div class="bench-bar" style="width:100%"></div></div>
             </div>
             <div class="bench-card">
@@ -766,7 +766,7 @@ require_once __DIR__ . '/includes/header.php';
             </div>
             <div class="beyond-card">
                 <h4>Plugin System</h4>
-                <p>Build custom plugins that hook into 6 lifecycle events: user input, AI response, tool calls, commands, file reads, and context changes. Priority dispatch, hot-reload.</p>
+                <p>Build custom plugins that hook into 17 lifecycle events including user input, AI response, tool calls, commands, file reads, session lifecycle, model switches, threats, and context pressure. Priority dispatch with glob-pattern event filtering.</p>
                 <p class="beyond-tech">ForgePlugin base class, ~/.forge/plugins/, 6 hook points</p>
             </div>
             <div class="beyond-card">
@@ -813,7 +813,7 @@ require_once __DIR__ . '/includes/header.php';
             <div class="eco-category">
                 <h4>AI Models</h4>
                 <ul class="eco-items">
-                    <li>Qwen3 (7B/14B/32B/72B)</li>
+                    <li>Qwen2.5-Coder (3B/7B/14B/32B)</li>
                     <li>Llama 3.3 (8B/70B)</li>
                     <li>DeepSeek-Coder V3</li>
                     <li>CodeGemma / Gemma 2</li>
@@ -858,19 +858,19 @@ require_once __DIR__ . '/includes/header.php';
     <div class="container">
         <div class="section-header">
             <span class="badge-label">Commands</span>
-            <h2>55 Commands, Zero Plugins Required</h2>
+            <h2>59 Commands, Zero Plugins Required</h2>
             <p>Every command ships with Forge. No extensions to install, no marketplace to browse. Full toolbox from the first launch.</p>
         </div>
         <div class="cmd-showcase animate-on-scroll">
             <div class="cmd-group">
                 <h4>Core AI</h4>
                 <ul class="cmd-list">
-                    <li><code>/ask</code> <span class="cmd-desc">Ask without executing changes</span></li>
                     <li><code>/plan</code> <span class="cmd-desc">Generate and verify an implementation plan</span></li>
                     <li><code>/model</code> <span class="cmd-desc">Switch AI models on the fly</span></li>
+                    <li><code>/router</code> <span class="cmd-desc">Multi-model routing (simple/complex)</span></li>
                     <li><code>/context</code> <span class="cmd-desc">Manage conversation context window</span></li>
                     <li><code>/voice</code> <span class="cmd-desc">Toggle voice input/output modes</span></li>
-                    <li><code>/undo</code> <span class="cmd-desc">Rollback last AI change with full diff</span></li>
+                    <li><code>/ami</code> <span class="cmd-desc">AI model intelligence and quality scoring</span></li>
                 </ul>
             </div>
             <div class="cmd-group">
@@ -879,36 +879,36 @@ require_once __DIR__ . '/includes/header.php';
                     <li><code>/scan</code> <span class="cmd-desc">Deep-scan codebase for patterns and issues</span></li>
                     <li><code>/search</code> <span class="cmd-desc">Semantic code search via embeddings</span></li>
                     <li><code>/index</code> <span class="cmd-desc">Build or refresh the code search index</span></li>
-                    <li><code>/refs</code> <span class="cmd-desc">Find all references to a symbol</span></li>
-                    <li><code>/defs</code> <span class="cmd-desc">Jump to symbol definitions</span></li>
-                    <li><code>/web</code> <span class="cmd-desc">Search the web or fetch URLs</span></li>
+                    <li><code>/digest</code> <span class="cmd-desc">AST analysis and code structure breakdown</span></li>
+                    <li><code>/recall</code> <span class="cmd-desc">Semantic memory search with previews</span></li>
+                    <li><code>/dedup</code> <span class="cmd-desc">Detect and suppress duplicate responses</span></li>
                 </ul>
             </div>
             <div class="cmd-group">
                 <h4>Security &amp; Compliance</h4>
                 <ul class="cmd-list">
-                    <li><code>/crucible</code> <span class="cmd-desc">Run all 9 security layers manually</span></li>
-                    <li><code>/export</code> <span class="cmd-desc">Generate compliance audit bundle</span></li>
-                    <li><code>/threat</code> <span class="cmd-desc">View/update threat intelligence signatures</span></li>
-                    <li><code>/provenance</code> <span class="cmd-desc">Verify forensic chain integrity</span></li>
-                    <li><code>/safety</code> <span class="cmd-desc">Set safety level (permissive to locked)</span></li>
-                    <li><code>/quarantine</code> <span class="cmd-desc">Isolate suspicious AI session</span></li>
+                    <li><code>/crucible</code> <span class="cmd-desc">4-layer threat scanner status and controls</span></li>
+                    <li><code>/export</code> <span class="cmd-desc">Generate compliance audit bundle with SHA-256</span></li>
+                    <li><code>/threats</code> <span class="cmd-desc">View threat intelligence patterns and rules</span></li>
+                    <li><code>/provenance</code> <span class="cmd-desc">Verify forensic tool-call chain integrity</span></li>
+                    <li><code>/safety</code> <span class="cmd-desc">Set safety level (unleashed to locked down)</span></li>
+                    <li><code>/forensics</code> <span class="cmd-desc">Session forensics summary and export</span></li>
                 </ul>
             </div>
             <div class="cmd-group">
-                <h4>Fleet &amp; Licensing</h4>
+                <h4>Reliability &amp; Fleet</h4>
                 <ul class="cmd-list">
-                    <li><code>/license</code> <span class="cmd-desc">View license status and tier</span></li>
-                    <li><code>/puppet</code> <span class="cmd-desc">Generate and manage Puppet passports</span></li>
+                    <li><code>/break</code> <span class="cmd-desc">Run reliability suite with signed reports</span></li>
+                    <li><code>/assure</code> <span class="cmd-desc">AI assurance suite (31 scenarios, 6 categories)</span></li>
                     <li><code>/ship</code> <span class="cmd-desc">Shipwright release management</span></li>
                     <li><code>/autocommit</code> <span class="cmd-desc">Smart auto-commit with AI messages</span></li>
-                    <li><code>/benchmark</code> <span class="cmd-desc">Run coding benchmarks on any model</span></li>
-                    <li><code>/genome</code> <span class="cmd-desc">View/manage learning memory</span></li>
+                    <li><code>/license</code> <span class="cmd-desc">View license status and tier</span></li>
+                    <li><code>/puppet</code> <span class="cmd-desc">Fleet puppet passport management</span></li>
                 </ul>
             </div>
         </div>
         <p style="text-align:center; color:var(--text-dim); font-size:0.88em; margin-top:16px">
-            Plus 31 more commands for themes, plugins, config, debugging, and session management. <a href="docs.php#commands" style="color:var(--accent)">See the full list &rarr;</a>
+            Plus 35 more commands for themes, plugins, config, billing, benchmarks, and session management. <a href="docs.php#commands" style="color:var(--accent)">See the full list &rarr;</a>
         </p>
     </div>
 </section>
@@ -933,7 +933,7 @@ require_once __DIR__ . '/includes/header.php';
         <div class="persona-panel active" data-persona-panel="solo">
             <div class="persona-content">
                 <ul class="persona-features">
-                    <li><span class="pf-icon">&#10003;</span> All 55 commands and 27 AI tools included free</li>
+                    <li><span class="pf-icon">&#10003;</span> All 59 commands and 28 AI tools included free</li>
                     <li><span class="pf-icon">&#10003;</span> 14 themes with live visual effects</li>
                     <li><span class="pf-icon">&#10003;</span> Voice input and output &mdash; code hands-free</li>
                     <li><span class="pf-icon">&#10003;</span> $0 per token. Run as much as your GPU allows</li>
@@ -968,7 +968,7 @@ require_once __DIR__ . '/includes/header.php';
                     <li><span class="pf-icon">&#10003;</span> 9-layer Crucible scans every AI response in real-time</li>
                     <li><span class="pf-icon">&#10003;</span> Forensic Auditor logs every action with HMAC-SHA512 chains</li>
                     <li><span class="pf-icon">&#10003;</span> Canary traps detect prompt injection and context poisoning</li>
-                    <li><span class="pf-icon">&#10003;</span> Auto-updating threat intelligence with 23+ attack signatures</li>
+                    <li><span class="pf-icon">&#10003;</span> Auto-updating threat intelligence with signature database</li>
                     <li><span class="pf-icon">&#10003;</span> Export compliance bundles with /export command</li>
                 </ul>
                 <div class="persona-scenario">
@@ -1059,9 +1059,9 @@ require_once __DIR__ . '/includes/header.php';
                 <tr>
                     <td class="spec-label">Models</td>
                     <td>1.5B &ndash; 7B params</td>
-                    <td class="spec-rec">14B params (Qwen3:14b)</td>
+                    <td class="spec-rec">14B params (qwen2.5-coder:14b)</td>
                     <td>32B &ndash; 34B params</td>
-                    <td>70B+ params (Llama 3.3:70b, Qwen3:72b)</td>
+                    <td>70B+ params (Llama 3.3:70b, Qwen2.5-Coder:32b)</td>
                 </tr>
                 <tr>
                     <td class="spec-label">Use Case</td>
@@ -1122,28 +1122,28 @@ require_once __DIR__ . '/includes/header.php';
         </div>
         <div class="code-stats-grid animate-on-scroll">
             <div class="code-stat">
-                <span class="cs-num" data-count="68000" data-suffix="+">0</span>
-                <span class="cs-label">Lines of Code</span>
+                <span class="cs-num" data-count="54207" data-suffix="+">0</span>
+                <span class="cs-label">Lines of Source</span>
             </div>
             <div class="code-stat">
-                <span class="cs-num" data-count="131">0</span>
+                <span class="cs-num" data-count="95">0</span>
                 <span class="cs-label">Source Files</span>
             </div>
             <div class="code-stat">
-                <span class="cs-num" data-count="1265">0</span>
+                <span class="cs-num" data-count="1318">0</span>
                 <span class="cs-label">Tests Passing</span>
             </div>
             <div class="code-stat">
-                <span class="cs-num" data-count="27">0</span>
+                <span class="cs-num" data-count="28">0</span>
                 <span class="cs-label">AI Tools</span>
             </div>
             <div class="code-stat">
-                <span class="cs-num" data-count="55">0</span>
+                <span class="cs-num" data-count="59">0</span>
                 <span class="cs-label">Commands</span>
             </div>
             <div class="code-stat">
-                <span class="cs-num" data-count="15">0</span>
-                <span class="cs-label">Novel Methods</span>
+                <span class="cs-num" data-count="9">0</span>
+                <span class="cs-label">Core Subsystems</span>
             </div>
         </div>
         <div class="methodology-list animate-on-scroll">
@@ -1191,24 +1191,24 @@ require_once __DIR__ . '/includes/header.php';
 <section class="section" style="padding-top:0; padding-bottom:40px">
     <div class="container">
         <div class="trust-pills animate-on-scroll">
-            <span class="trust-pill"><span class="tp-icon">&#128187;</span> 68,000+ Lines of Code</span>
-            <span class="trust-pill"><span class="tp-icon">&#10003;</span> 1,265 Tests Passing</span>
+            <span class="trust-pill"><span class="tp-icon">&#128187;</span> 54,207 Lines of Source</span>
+            <span class="trust-pill"><span class="tp-icon">&#10003;</span> 1,318 Tests Passing</span>
             <span class="trust-pill"><span class="tp-icon">&#128274;</span> HMAC-SHA512 Audit Chain</span>
             <span class="trust-pill"><span class="tp-icon">&#127760;</span> 100% Offline Capable</span>
             <span class="trust-pill"><span class="tp-icon">&#128737;</span> Zero Data Egress</span>
         </div>
         <div class="credibility-grid animate-on-scroll">
             <div class="credibility-card">
-                <h4>1,265 Automated Tests</h4>
-                <p>219 security tests (red-team attacks, prompt injection, PII scanning). 204 AI intelligence tests (self-healing, continuity, reliability). 90 licensing tests (passport crypto, fleet management). 75 chaos/stress tests (crash recovery, network chaos, context storms). 68 test files. Zero skip, zero xfail. Every test passes on every commit.</p>
+                <h4>1,318 Automated Tests</h4>
+                <p>226 security tests (red-team attacks, prompt injection, PII scanning, threat intel, rate limiting, output fencing). 373 AI intelligence tests (self-healing, quality scoring, continuity, reliability, benchmarks, plan verification, dedup). 198 licensing &amp; release tests (passport crypto, fleet management, auto-commit, semantic versioning). 63 integration/stress tests (crash recovery, network chaos, context storms, policy drift). 458 infrastructure tests (context window, billing, forensics, event bus, plugins, config). 77 test files. Zero skip, zero xfail. Every test passes on every commit.</p>
             </div>
             <div class="credibility-card">
                 <h4>Security Depth</h4>
-                <p>9 independent security layers. 23 threat pattern signatures. Canary traps for prompt injection. HMAC-SHA512 forensic chains. Built by someone who assumes the AI is hostile.</p>
+                <p>9 security layers across 3 tiers. 21 content-scanning regex patterns. 49 shell command blocklist patterns. Canary traps for prompt injection. HMAC-SHA512 forensic provenance chain. Built by someone who assumes the AI is hostile.</p>
             </div>
             <div class="credibility-card">
                 <h4>Novel Research</h4>
-                <p>15 published methods. Behavioral Proof of Stake. Adaptive Model Intelligence. Symbiotic Capability Scaling. These aren't buzzwords &mdash; they're implemented, tested systems.</p>
+                <p>10 published method papers plus a comprehensive systems paper. Behavioral Proof of Stake. Adaptive Model Intelligence. Continuity Grading. Semantic Anomaly Detection. These aren't buzzwords &mdash; they're implemented, tested systems with full source code.</p>
             </div>
         </div>
         <div class="transparency-callout animate-on-scroll">
@@ -1262,7 +1262,7 @@ require_once __DIR__ . '/includes/header.php';
                 </div>
                 <ul class="price-features">
                     <li><span class="check">&#10003;</span> Full local AI assistant</li>
-                    <li><span class="check">&#10003;</span> All 55 commands</li>
+                    <li><span class="check">&#10003;</span> All 59 commands</li>
                     <li><span class="check">&#10003;</span> 9-layer security shield</li>
                     <li><span class="check">&#10003;</span> 14 themes + HUD dashboard</li>
                     <li>
@@ -1284,6 +1284,27 @@ require_once __DIR__ . '/includes/header.php';
                             <span class="check">&#10003;</span> Enterprise mode + audit export
                         <?php else: ?>
                             <span class="x">&#10007;</span> <span class="disabled">Enterprise mode</span>
+                        <?php endif; ?>
+                    </li>
+                    <li>
+                        <?php if (!empty($t['genome_sync'])): ?>
+                            <span class="check">&#10003;</span> Shared team genome sync
+                        <?php else: ?>
+                            <span class="x">&#10007;</span> <span class="disabled">Team genome sync</span>
+                        <?php endif; ?>
+                    </li>
+                    <li>
+                        <?php if (!empty($t['compliance_scenarios'])): ?>
+                            <span class="check">&#10003;</span> HIPAA/SOC2 compliance scenarios
+                        <?php else: ?>
+                            <span class="x">&#10007;</span> <span class="disabled">Compliance scenarios</span>
+                        <?php endif; ?>
+                    </li>
+                    <li>
+                        <?php if (!empty($t['priority_support'])): ?>
+                            <span class="check">&#10003;</span> Priority support SLA
+                        <?php else: ?>
+                            <span class="x">&#10007;</span> <span class="disabled">Priority support</span>
                         <?php endif; ?>
                     </li>
                 </ul>
@@ -1311,7 +1332,7 @@ require_once __DIR__ . '/includes/header.php';
             <div class="roadmap-item done">
                 <div class="roadmap-phase">Shipped &mdash; v0.5</div>
                 <h4>Core AI Engine</h4>
-                <p>Local AI execution via Ollama, 27 tools, context management, streaming responses, file editing, shell execution, code search.</p>
+                <p>Local AI execution via Ollama, 28 tools, context management, streaming responses, file editing, shell execution, code search.</p>
             </div>
             <div class="roadmap-item done">
                 <div class="roadmap-phase">Shipped &mdash; v0.7</div>
@@ -1353,7 +1374,7 @@ require_once __DIR__ . '/includes/header.php';
         <div class="faq-list">
             <div class="faq-item">
                 <button class="faq-q">What models does Forge support?<span class="faq-arrow">&#9660;</span></button>
-                <div class="faq-a">Forge works with any model available through Ollama &mdash; that includes hundreds of open-source AI models ranging from lightweight 3B models to massive 70B+ parameter models. We recommend Qwen3:14b for most users (needs ~10GB of GPU memory), but the full catalog spans from Qwen2.5-coder:3b on a 4GB card all the way up to Llama 3.3:70b and Qwen3:72b on workstation-class 48GB+ GPUs. Forge automatically profiles your hardware and picks the best model for each task.</div>
+                <div class="faq-a">Forge works with any model available through Ollama &mdash; that includes hundreds of open-source AI models ranging from lightweight 3B models to massive 70B+ parameter models. We recommend qwen2.5-coder:14b for most users (needs ~10GB of GPU memory), but the full catalog spans from Qwen2.5-coder:3b on a 4GB card all the way up to Llama 3.3:70b and Qwen2.5-Coder:32b on workstation-class 48GB+ GPUs. Forge automatically profiles your hardware and picks the best model for each task.</div>
             </div>
             <div class="faq-item">
                 <button class="faq-q">Does my code ever leave my machine?<span class="faq-arrow">&#9660;</span></button>
@@ -1385,11 +1406,11 @@ require_once __DIR__ . '/includes/header.php';
             </div>
             <div class="faq-item">
                 <button class="faq-q">What happens if my monthly subscription lapses?<span class="faq-arrow">&#9660;</span></button>
-                <div class="faq-a">Forge doesn't stop working. It drops back to Community tier features &mdash; you keep all 55 commands, the full security shield, and local AI execution. What you lose is Pro/Power-tier features: Genome persistence (learning memory resets each session), AutoForge, Shipwright, fleet analytics, and enterprise mode. Your data, projects, and local models are untouched. Resubscribe anytime to restore your tier instantly &mdash; your Genome picks up right where it left off.</div>
+                <div class="faq-a">Forge doesn't stop working. It drops back to Community tier features &mdash; you keep all 59 commands, the full security shield, and local AI execution. What you lose is Pro/Power-tier features: Genome persistence (learning memory resets each session), AutoForge, Shipwright, fleet analytics, and enterprise mode. Your data, projects, and local models are untouched. Resubscribe anytime to restore your tier instantly &mdash; your Genome picks up right where it left off.</div>
             </div>
             <div class="faq-item">
                 <button class="faq-q">How does the 9-layer security system work?<span class="faq-arrow">&#9660;</span></button>
-                <div class="faq-a">Every AI response passes through 9 checks: pattern matching (known attacks), semantic analysis (AI detects anomalies), behavioral monitoring (catches exfiltration), canary traps (detects hijacked AI), threat intelligence (auto-updating signatures), command blocklist (36 dangerous patterns), path sandbox (filesystem jail), plan verification (runs your tests), and forensic logging (tamper-proof audit trail). All 9 run locally, in real-time.</div>
+                <div class="faq-a">Every AI response passes through 9 checks: pattern matching (known attacks), semantic analysis (AI detects anomalies), behavioral monitoring (catches exfiltration), canary traps (detects hijacked AI), threat intelligence (auto-updating signatures), command blocklist (49 dangerous patterns), path sandbox (filesystem jail), plan verification (runs your tests), and forensic logging (tamper-proof audit trail). All 9 run locally, in real-time.</div>
             </div>
             <div class="faq-item">
                 <button class="faq-q">Can I use Forge for commercial projects?<span class="faq-arrow">&#9660;</span></button>
@@ -1401,7 +1422,7 @@ require_once __DIR__ . '/includes/header.php';
             </div>
             <div class="faq-item">
                 <button class="faq-q">What's included in the free Community tier?<span class="faq-arrow">&#9660;</span></button>
-                <div class="faq-a">Everything except fleet management and persistence features. You get: full local AI execution, all 55 commands, all 27 AI tools, the complete 9-layer security shield, 14 themes with effects, voice I/O, the Neural Cortex visualization, web search, plugin system, benchmarks, and unlimited tokens. Community tier has no time limit, no trial period, and no feature gating on core functionality.</div>
+                <div class="faq-a">Everything except fleet management and persistence features. You get: full local AI execution, all 59 commands, all 28 registered AI tools, the complete 9-layer security shield, 14 themes with effects, voice I/O, the Neural Cortex visualization, web search, plugin system, benchmarks, and unlimited tokens. Community tier has no time limit, no trial period, and no feature gating on core functionality.</div>
             </div>
             <div class="faq-item">
                 <button class="faq-q">How does Forge compare in speed to cloud AI tools?<span class="faq-arrow">&#9660;</span></button>

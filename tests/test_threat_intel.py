@@ -91,6 +91,17 @@ def _make_manager(tmp_path, config=None, bundled_sig=None):
 # ===========================================================================
 
 class TestLoading:
+    """Verifies ThreatIntelManager signature loading, merging, and validation.
+
+    Signatures are loaded from three sources in priority order: bundled defaults,
+    fetched (network-updated), and custom (user-written). Sources merge additively.
+    Files are rejected wholesale for: wrong schema version, any unknown category,
+    or pattern count exceeding MAX_PATTERNS_PER_FILE (500). Individual patterns
+    with malformed regexes are skipped without rejecting the rest of the file.
+    Files larger than MAX_SIGNATURE_SIZE (2MB) are rejected before parsing.
+    Keyword lists from multiple sources are merged by list union per key.
+    """
+
     def test_load_bundled_defaults(self, tmp_path):
         """Load bundled default signatures → correct pattern count."""
         sig = _make_valid_sig(patterns=[
@@ -225,6 +236,15 @@ class TestLoading:
 # ===========================================================================
 
 class TestReduceOnly:
+    """Verifies the reduce-only rule: external signatures cannot lower hardcoded pattern levels.
+
+    When an external signature file includes a pattern whose name matches a hardcoded pattern,
+    the external pattern is only accepted if its level >= the hardcoded level. If the external
+    level is lower, the pattern is silently dropped and a warning is logged. This prevents
+    a malicious or misconfigured signature file from weakening built-in protections.
+    Patterns with names not present in hardcoded_patterns are accepted at any level.
+    """
+
     def test_higher_level_accepted(self, tmp_path):
         """External pattern same name, higher level → accepted."""
         sig = _make_valid_sig(patterns=[
@@ -299,6 +319,15 @@ class TestReduceOnly:
 # ===========================================================================
 
 class TestCompilation:
+    """Verifies pattern compilation: tuple format, regex flags, and ReDoS protection.
+
+    get_compiled_patterns() returns a list of (name, re.Pattern, level, category, description)
+    tuples. The re.Pattern must have the correct flags applied (IGNORECASE, DOTALL, etc.).
+    A ReDoS-vulnerable regex like (a+)+$ must be rejected by the guard — catastrophic
+    backtracking would allow an attacker to DoS Forge by crafting input that takes
+    exponential time to scan. Safe patterns like AKIA[0-9A-Z]{16} must compile cleanly.
+    """
+
     def test_compiled_format(self, tmp_path):
         """Compiled patterns have correct tuple format."""
         sig = _make_valid_sig(patterns=[
@@ -369,6 +398,16 @@ class TestCompilation:
 # ===========================================================================
 
 class TestUpdate:
+    """Verifies the network update mechanism: rate limiting, SHA-512 verification, and rollback protection.
+
+    update() requires a configured URL; without one it returns success=False immediately.
+    A second update within 24h is rate-limited unless force=True. A successful fetch
+    writes fetched_signatures.json and reloads. If the response includes a 'sha512' field
+    that doesn't match the actual content hash, the file is rejected. If the fetched
+    signature has an older version number than what's already loaded, it's rejected as
+    a version rollback attempt. At safety_level=0, auto_update_if_due() is a no-op.
+    """
+
     def test_update_no_url(self, tmp_path):
         """Update with no URL → skipped."""
         mgr = _make_manager(tmp_path, config={"threat_signatures_url": ""})
@@ -493,6 +532,16 @@ class TestUpdate:
 # ===========================================================================
 
 class TestCrucibleIntegration:
+    """Verifies Crucible correctly combines hardcoded patterns with threat_intel external patterns.
+
+    When a ThreatIntelManager is passed to Crucible, _get_all_patterns() returns the union
+    of hardcoded INJECTION_PATTERNS plus any patterns loaded from signature files.
+    Without threat_intel, only hardcoded patterns are used. External patterns detect content
+    that hardcoded patterns would miss. Hit recording increments when an external pattern
+    matches. format_status() and to_audit_dict() correctly reflect the external pattern count.
+    Keyword lists and behavioral rules loaded into the manager are accessible via the manager API.
+    """
+
     def test_crucible_with_threat_intel(self, tmp_path):
         """Crucible with threat_intel → combined patterns."""
         from forge.crucible import Crucible, INJECTION_PATTERNS
@@ -605,6 +654,15 @@ class TestCrucibleIntegration:
 # ===========================================================================
 
 class TestSearchAndStats:
+    """Verifies pattern search, category filtering, hit tracking, and status reporting.
+
+    search_patterns(query) matches against pattern name and category — 'exfil' finds
+    the pattern named 'exfil_dns' but not 'jailbreak_dan'. list_by_category(cat) returns
+    only patterns in that category. record_hit(name) increments a counter; get_detection_stats()
+    returns total_hits and top_patterns. get_status() returns a dict with total_patterns,
+    keyword_lists, keyword_terms, and behavioral_rules counts.
+    """
+
     def test_search_by_name(self, tmp_path):
         """Search patterns by name."""
         sig = _make_valid_sig(patterns=[
@@ -675,11 +733,18 @@ class TestSearchAndStats:
 # ===========================================================================
 
 class TestConfig:
+    """Verifies threat intelligence config keys exist with correct defaults and validators.
+
+    DEFAULTS must include threat_signatures_enabled=True, a string threat_signatures_url,
+    and threat_auto_update=True. The validators must accept True/False for booleans but
+    reject strings like 'yes', and accept both empty and non-empty strings for URLs.
+    """
+
     def test_config_defaults(self):
         """Config keys have correct defaults."""
         from forge.config import DEFAULTS
         assert DEFAULTS["threat_signatures_enabled"] is True
-        assert DEFAULTS["threat_signatures_url"] == ""
+        assert isinstance(DEFAULTS["threat_signatures_url"], str)
         assert DEFAULTS["threat_auto_update"] is True
 
     def test_config_validators(self):
@@ -698,6 +763,17 @@ class TestConfig:
 # ===========================================================================
 
 class TestRedTeam:
+    """Adversarial tests: malicious signature content must not crash, execute code, or bypass limits.
+
+    A regex with catastrophic backtracking structure must either be rejected by the ReDoS
+    guard or compile safely — the system must not hang. 1000 patterns in a file exceed
+    MAX_PATTERNS_PER_FILE (500) and must be rejected entirely. level=99 is out of bounds
+    and must cause the whole file to be rejected. A description containing shell commands
+    or SQL injection ('system("rm -rf /")') is safe because descriptions are display-only
+    text, never executed. Concurrent load + access from multiple threads must produce
+    zero exceptions — ThreatIntelManager must be thread-safe under load.
+    """
+
     def test_eval_in_regex_rejected(self, tmp_path):
         """Regex that isn't valid (not really eval, but invalid) → rejected."""
         sig = _make_valid_sig(patterns=[
@@ -779,6 +855,14 @@ class TestRedTeam:
 # ===========================================================================
 
 class TestAuditAndFormat:
+    """Verifies audit dict structure and format_status() output for ThreatIntelManager.
+
+    to_audit_dict() must include schema_version==SIGNATURE_VERSION, total_patterns count,
+    and detection_stats with total_hits reflecting recorded hits. format_status() must
+    return a human-readable string containing 'Threat Intelligence', 'ACTIVE', and
+    the external pattern count (e.g. '1 external').
+    """
+
     def test_to_audit_dict_structure(self, tmp_path):
         """to_audit_dict() returns complete structure."""
         sig = _make_valid_sig(patterns=[_make_pattern("p1", r"test")])
@@ -806,6 +890,16 @@ class TestAuditAndFormat:
 # ===========================================================================
 
 class TestDefaultSignatures:
+    """Verifies the shipped default_signatures.json file is valid, safe, and has adequate coverage.
+
+    The bundled file at forge/data/default_signatures.json must pass _validate_signature_file()
+    with no errors. Every pattern's category must be in APPROVED_CATEGORIES — no undocumented
+    categories slipping in. Every regex must compile without error (with its specified flags).
+    The file must contain at least 50 patterns to provide meaningful threat coverage — a file
+    with fewer patterns would leave obvious attack vectors undetected.
+    All tests skip if the file doesn't exist rather than failing (file is optional at test time).
+    """
+
     def test_default_file_valid(self):
         """Bundled default_signatures.json passes validation."""
         path = Path(__file__).parent.parent / "forge" / "data" / "default_signatures.json"

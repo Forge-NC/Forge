@@ -24,6 +24,17 @@ def _make_engine(safety_level=1, rag_scanning=True, crucible_enabled=True):
 
 
 class TestRAGScanner:
+    """Verifies _scan_recall_content() enforces safety-level-appropriate RAG scanning.
+
+    L0: scan_content never called, always returns True.
+    L1: threats logged to forensics.record, still injects (returns True).
+    L2: print_warning called + forensics recorded, still injects (True).
+    L3: print_warning called + returns False (blocked, not injected into context).
+    Clean content at all levels → True with no side effects.
+    rag_scanning=False or crucible disabled → scan never called, always True.
+    forensics.record called with ('rag_scan', 'flagged') when threat found at L2.
+    """
+
     def test_safety_l0_always_clean(self):
         engine = _make_engine(safety_level=0)
         result = engine._scan_recall_content("malicious content", "evil.py")

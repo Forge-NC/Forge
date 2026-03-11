@@ -35,6 +35,13 @@ def _add_sessions(tracker, count, **overrides):
 
 
 class TestToAuditDict:
+    """Verifies ReliabilityTracker.to_audit_dict() structure, content, and empty defaults.
+
+    Audit dict has schema_version=1, score, trend, metrics, score_history, sessions_count keys.
+    With 5 sessions: sessions_count=5, len(score_history)==5, score>0.
+    Empty tracker: sessions_count=0, score_history=[], score=100.0 (optimistic default).
+    """
+
     def test_audit_dict_structure(self, tracker):
         audit = tracker.to_audit_dict()
         assert audit["schema_version"] == 1
@@ -63,6 +70,12 @@ class TestToAuditDict:
 
 
 class TestGetScoreHistory:
+    """Verifies get_score_history() returns recent composite scores capped at 20 entries.
+
+    Empty tracker → []. 3 sessions → list of 3 floats > 0. 30 sessions → list of <= 20.
+    Perfect-health session (pass_rate=1.0, grade=100, tool_success=1.0) → score >= 50.
+    """
+
     def test_empty_history(self, tracker):
         assert tracker.get_score_history() == []
 

@@ -57,6 +57,7 @@ class AutoForge:
         self._commits: list[AutoCommit] = []
         self._turn = 0
         self._enabled = False
+        self._is_git_repo_cache: Optional[bool] = None
 
     @property
     def enabled(self) -> bool:
@@ -69,25 +70,36 @@ class AutoForge:
         self._enabled = False
 
     def _is_git_repo(self) -> bool:
-        """Check if project dir is inside a git repo."""
+        """Check if project dir is inside a git repo (result cached per session)."""
+        if self._is_git_repo_cache is not None:
+            return self._is_git_repo_cache
         try:
+            flags = {}
+            if os.name == "nt":
+                flags["creationflags"] = subprocess.CREATE_NO_WINDOW
             result = subprocess.run(
                 ["git", "rev-parse", "--is-inside-work-tree"],
                 cwd=str(self._project_dir),
                 capture_output=True, text=True, timeout=5,
                 env=self._git_env,
+                **flags,
             )
-            return result.returncode == 0
+            self._is_git_repo_cache = result.returncode == 0
         except (subprocess.TimeoutExpired, FileNotFoundError):
-            return False
+            self._is_git_repo_cache = False
+        return self._is_git_repo_cache
 
     def _git(self, *args, check: bool = True) -> str:
         """Run git command."""
+        flags = {}
+        if os.name == "nt":
+            flags["creationflags"] = subprocess.CREATE_NO_WINDOW
         result = subprocess.run(
             ["git"] + list(args),
             cwd=str(self._project_dir),
             capture_output=True, text=True, timeout=30,
             env=self._git_env or {**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            **flags,
         )
         if check and result.returncode != 0:
             raise RuntimeError(f"git {args[0]} failed: {result.stderr.strip()}")
@@ -99,6 +111,12 @@ class AutoForge:
                     tool_name: str = ""):
         """Record a file edit for future commit."""
         if not self.enabled:
+            return
+        # Skip files outside the project directory — git won't stage them
+        # and attempting to do so produces noisy failures.
+        rel = os.path.relpath(file_path, self._project_dir)
+        if rel.startswith(".."):
+            log.debug("AutoForge: skipping out-of-repo file: %s", file_path)
             return
         self._pending.append(PendingEdit(
             path=file_path, action=action,
@@ -144,9 +162,13 @@ class AutoForge:
                     self._git("add", rel)
                     staged.append(rel)
                 else:
-                    # File was deleted
-                    self._git("add", rel, check=False)
-                    staged.append(rel)
+                    # File was deleted — same error handling as above so we
+                    # only append to staged if git actually accepted it.
+                    try:
+                        self._git("add", rel)
+                        staged.append(rel)
+                    except RuntimeError as ex:
+                        log.debug("Failed to stage deleted file %s: %s", rel, ex)
             except RuntimeError as ex:
                 log.debug("Failed to stage %s: %s", rel, ex)
 
@@ -173,6 +195,20 @@ class AutoForge:
         )
         self._commits.append(commit)
         self._pending.clear()
+
+        # Push to origin if configured.
+        # Security: GitHub enforces push authorization — only machines
+        # with valid credentials can push. A tester without push access
+        # to a repo will get an auth rejection; Forge logs and continues.
+        if self._config_get("push_on_commit", False):
+            try:
+                branch = self._git(
+                    "branch", "--show-current", check=False).strip() or "main"
+                self._git("push", "origin", branch, check=False)
+                log.info("AutoForge: pushed %s to origin/%s", sha, branch)
+            except Exception as ex:
+                log.debug("AutoForge: push failed (no credentials?): %s", ex)
+
         return commit
 
     def _generate_message(self, files: list[str], actions: set[str],

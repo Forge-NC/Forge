@@ -699,6 +699,9 @@ class CardManager:
             log.debug("Failed to load dashboard layout", exc_info=True)
 
 
+from forge.ui.window_geo import WindowGeo as _WinGeo
+
+
 # ──────────────────────────────────────────────────────────────────
 # ForgeLauncher — single-window: boot → dashboard → terminal
 # ──────────────────────────────────────────────────────────────────
@@ -788,7 +791,7 @@ class ForgeLauncher:
 
         self._root = ctk.CTk()
         self._root.title("Forge Neural Cortex")
-        self._root.geometry("400x700")
+        _WinGeo.restore("dashboard", self._root, "400x700")
         self._root.minsize(380, 600)
         self._root.configure(fg_color=COLORS["bg_dark"])
         self._root.resizable(True, True)
@@ -886,6 +889,9 @@ class ForgeLauncher:
         self._running = True
         self._schedule_animation()
 
+        # Track dashboard geometry changes (save on move/resize)
+        _WinGeo.track("dashboard", self._root)
+
         # Start boot checks in background
         threading.Thread(target=self._boot_sequence, daemon=True).start()
 
@@ -921,10 +927,22 @@ class ForgeLauncher:
 
     def _swap_to_dashboard(self):
         """Replace boot content with dashboard cards + launch button."""
+        import datetime as _dt2
+        _dlog2_path = Path.home() / ".forge" / "boot_debug.log"
+        def _dlog2(msg):
+            try:
+                ts = _dt2.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                with open(_dlog2_path, "a", encoding="utf-8") as _f:
+                    _f.write(f"{ts} SWAP {msg}\n")
+            except Exception:
+                pass
+        _dlog2("start")
+
         # Destroy boot content
         if self._boot_frame:
             self._boot_frame.destroy()
             self._boot_frame = None
+        _dlog2("boot frame destroyed")
 
         # Build scrollable dashboard in content area
         self._dash_scroll = ctk.CTkScrollableFrame(
@@ -934,14 +952,17 @@ class ForgeLauncher:
             scrollbar_button_hover_color=COLORS["cyan_dim"])
         self._dash_scroll.pack(fill="both", expand=True, padx=0, pady=0)
         self._dash_frame = self._dash_scroll
+        _dlog2("scroll frame built")
 
         # Initialize effects engine (before cards so _make_card can register)
         from forge.config import ForgeConfig
         fx_enabled = ForgeConfig().get("effects_enabled", True)
         self._effects = EffectsEngine(self._root, enabled=fx_enabled)
+        _dlog2("effects engine init")
 
         # Initialize card manager (loads saved order/collapse/hide state)
         self._card_mgr = CardManager(self._dash_frame, self._effects)
+        _dlog2("card manager init")
 
         # Build all cards — _make_card returns (frame, body)
         # Each builder is guarded so one failure can't block the rest.
@@ -959,15 +980,18 @@ class ForgeLauncher:
             self._build_shipwright_card,
             self._build_license_card,
         ]:
+            _dlog2(f"building {_builder.__name__}")
             try:
                 _builder()
             except Exception:
                 log.error("Card build failed: %s", _builder.__name__,
                           exc_info=True)
+            _dlog2(f"done {_builder.__name__}")
 
         # Update notification card (only if behind)
         if getattr(self, "_update_behind", 0) > 0:
             self._build_update_card()
+        _dlog2("cards done")
 
         # Register edge glow + border color + widget glow on the dashboard.
         # Wrapped in try/except so a failure here can't kill card management,
@@ -984,13 +1008,16 @@ class ForgeLauncher:
                     self._cg_bar, WidgetGlow.PROGRESS)
         except Exception:
             log.debug("Effects registration failed", exc_info=True)
+        _dlog2("effects registered")
 
         # Ensure effects animation loop is running now that all
         # cards, edge glow, and widgets are registered.
         self._effects.start()
+        _dlog2("effects started")
 
         # Apply saved layout (reorder, collapse, hide)
         self._card_mgr.apply_initial_state()
+        _dlog2("layout applied")
 
         # Force scroll region update — CTkScrollableFrame's canvas must
         # know the full content height or the last cards get clipped.
@@ -1004,15 +1031,21 @@ class ForgeLauncher:
         _fix_scroll()
         # Schedule a second pass after the event loop settles
         self._root.after(300, _fix_scroll)
+        _dlog2("scroll fixed")
 
         # Show restore button if any cards hidden
         self._update_restore_btn()
+        _dlog2("restore btn updated")
 
         # Initialize voice input
         self._init_dashboard_voice()
+        _dlog2("voice init done")
 
         # Start polling state file
         self._schedule_state_poll()
+        # Populate cards immediately from static files (no engine needed)
+        self._populate_static_data()
+        _dlog2("swap complete")
 
     def _build_launch_card(self):
         """Launch Terminal wrapped in a manageable card."""
@@ -1200,17 +1233,29 @@ class ForgeLauncher:
             model_size="tiny",
             hotkey="`",
             mode=mode,
+            device="cpu",
             on_transcription=on_transcription,
             on_state_change=on_state_change,
         )
 
-        if self._voice.initialize():
-            self._voice.start_hotkey()
-            lbl = "hold ` to speak" if mode == "ptt" else "listening..."
-            self._update_voice_label(lbl)
-        else:
-            self._update_voice_label("init failed")
-            self._voice = None
+        # Run model loading + device enumeration in background so the main
+        # thread (Tkinter event loop) is never blocked by voice init.
+        lbl = "hold ` to speak" if mode == "ptt" else "listening..."
+
+        def _finish_init():
+            if self._voice and self._voice.initialize():
+                self._voice.start_hotkey()
+                if self._root and self._running:
+                    self._root.after(0, lambda: self._update_voice_label(lbl))
+            else:
+                if self._root and self._running:
+                    self._root.after(
+                        0, lambda: self._update_voice_label("init failed"))
+                self._voice = None
+
+        threading.Thread(
+            target=_finish_init, daemon=True,
+            name="ForgeVoiceInit").start()
 
     def _update_voice_label(self, text: str, color: str = None):
         if self._voice_status_label:
@@ -2160,12 +2205,32 @@ class ForgeLauncher:
                 self._root.after(1000, self._swap_to_dashboard)
 
     def _boot_sequence_inner(self):
+        # Debug log — written to file so boot hang is diagnosable even under pythonw
+        import datetime as _dt
+        _dlog_path = Path.home() / ".forge" / "boot_debug.log"
+        def _dlog(msg):
+            try:
+                ts = _dt.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                with open(_dlog_path, "a", encoding="utf-8") as _f:
+                    _f.write(f"{ts} {msg}\n")
+            except Exception:
+                pass
+        try:
+            _dlog_path.parent.mkdir(parents=True, exist_ok=True)
+            _dlog_path.write_text(
+                f"=== boot {_dt.datetime.now().isoformat()} ===\n",
+                encoding="utf-8")
+        except Exception:
+            pass
+        _dlog("start")
+
         # Set Ollama env vars (needed when launched via pythonw without .bat)
         os.environ.setdefault("OLLAMA_FLASH_ATTENTION", "1")
         os.environ.setdefault("OLLAMA_KV_CACHE_TYPE", "q8_0")
         os.environ.setdefault("OLLAMA_MAX_LOADED_MODELS", "2")
 
         # First-run: persona name setup
+        _dlog("persona check")
         persona = get_persona()
         if not persona.configured:
             self._root.after(0, self._show_persona_setup)
@@ -2179,6 +2244,7 @@ class ForgeLauncher:
             persona = get_persona()
 
         # First-run telemetry setup (only once — skip if already prompted)
+        _dlog("telemetry check")
         _telem_token = self._config.get("telemetry_token", "")
         _telem_on = self._config.get("telemetry_enabled", False)
         _telem_prompted = self._config.get("telemetry_prompted", False)
@@ -2196,9 +2262,11 @@ class ForgeLauncher:
                 text=f'"{persona.name}" — Neural Cortex'))
 
         # Play boot sound
+        _dlog("boot sound")
         if self._sound:
             self._sound.play("boot")
 
+        _dlog("ollama check")
         time.sleep(0.5)
         self._add_status("[..] Checking Ollama...")
 
@@ -2243,6 +2311,7 @@ class ForgeLauncher:
             except Exception as e:
                 self._add_status(f"[!!] Ollama start failed: {e}")
 
+        _dlog(f"ollama_ok={ollama_ok}")
         if ollama_ok:
             self._add_status("[OK] Ollama running")
             try:
@@ -2260,6 +2329,7 @@ class ForgeLauncher:
         else:
             self._add_status("[!!] Ollama failed to start")
 
+        _dlog("hardware detect")
         time.sleep(0.3)
         self._add_status("[..] Detecting hardware...")
         try:
@@ -2278,6 +2348,7 @@ class ForgeLauncher:
         except Exception as e:
             self._add_status(f"[!!] Hardware: {e}")
             hw = {}
+        _dlog("hardware done")
 
         time.sleep(0.3)
         try:
@@ -2295,6 +2366,7 @@ class ForgeLauncher:
             pass
 
         # Auto-update check (silent on failure)
+        _dlog("git fetch")
         self._update_behind = 0
         self._update_version = ""
         self._update_changelog = []
@@ -2307,8 +2379,9 @@ class ForgeLauncher:
             _sp.run(
                 ["git", "fetch", "origin"],
                 cwd=_forge_root,
-                capture_output=True, timeout=10, **_flags,
+                stdout=_sp.DEVNULL, stderr=_sp.DEVNULL, timeout=10, **_flags,
             )
+            _dlog("git fetch done")
             result = _sp.run(
                 ["git", "rev-list", "--count", "HEAD..origin/master"],
                 cwd=_forge_root,
@@ -2350,14 +2423,16 @@ class ForgeLauncher:
                         f"{count} new commit{'s' if count != 1 else ''}")
                 else:
                     self._add_status("[OK] Forge is up to date")
-        except Exception:
-            pass  # Silent failure -- no network, no git, etc.
+        except Exception as _git_exc:
+            _dlog(f"git exception: {_git_exc}")
 
+        _dlog("git update check done")
         time.sleep(0.2)
         persona = get_persona()
         self._add_status(f"[OK] {persona.name} is ready")
 
         # Play ready sound
+        _dlog("ready sound")
         if self._sound:
             self._sound.stop()
             self._sound.play("ready")
@@ -2365,9 +2440,11 @@ class ForgeLauncher:
         if self._anim_engine:
             self._anim_engine.set_state(AnimState.IDLE)
 
+        _dlog("boot_complete — scheduling swap")
         self._boot_complete = True
         if self._root and self._running:
             self._root.after(500, self._swap_to_dashboard)
+        _dlog("after() queued — boot thread done")
 
     # ── Update notification card ──
 
@@ -2594,6 +2671,8 @@ class ForgeLauncher:
 
             # Create a toplevel window (shares mainloop with dashboard)
             top = ctk.CTkToplevel(self._root)
+            _WinGeo.restore("terminal", top, "960x720")
+            _WinGeo.track("terminal", top)
 
             def on_gui_close():
                 self._gui_terminal = None
@@ -2733,6 +2812,300 @@ class ForgeLauncher:
         if self._terminal_proc and self._terminal_proc.poll() is None:
             self._pause_dashboard_voice()
 
+    # ── Static data population (fills cards from disk, no engine needed) ──
+
+    def _populate_static_data(self):
+        """Read ~/.forge/ files and populate dashboard cards immediately on load.
+
+        Runs on a background thread; pushes updates via root.after().
+        Uses the same _apply_state_data() path as the live state poll so
+        there's no duplicate widget-update code.
+        """
+        import threading as _t
+
+        def _worker():
+            try:
+                cfg_dir = Path.home() / ".forge"
+                data: dict = {}
+
+                # ── Reliability ──────────────────────────────────────────────
+                try:
+                    rel_path = cfg_dir / "reliability.json"
+                    if rel_path.exists():
+                        rel_raw = json.loads(
+                            rel_path.read_text(encoding="utf-8"))
+                        sessions = rel_raw.get("sessions", [])
+                        if sessions:
+                            recent = sessions[-20:]
+                            n = len(recent)
+                            avg_vr = sum(
+                                s.get("verification_pass_rate", 1)
+                                for s in recent) / n
+                            avg_ca = sum(
+                                s.get("continuity_grade_avg", 100)
+                                for s in recent) / n
+                            avg_tr = sum(
+                                s.get("tool_success_rate", 1)
+                                for s in recent) / n
+                            score = (avg_vr * 50
+                                     + (avg_ca / 100) * 30
+                                     + avg_tr * 20)
+                            direction = "--"
+                            if len(sessions) >= 10:
+                                def _s(ss):
+                                    return (
+                                        ss.get("verification_pass_rate", 1) * 50
+                                        + (ss.get("continuity_grade_avg", 100)
+                                           / 100) * 30
+                                        + ss.get("tool_success_rate", 1) * 20)
+                                prev5 = sessions[-10:-5]
+                                last5 = sessions[-5:]
+                                ps = sum(_s(s) for s in prev5) / 5
+                                ls = sum(_s(s) for s in last5) / 5
+                                if ls > ps + 2:
+                                    direction = "improving"
+                                elif ls < ps - 2:
+                                    direction = "degrading"
+                                else:
+                                    direction = "stable"
+                            data["reliability"] = {
+                                "score": round(score, 1),
+                                "trend": {"direction": direction},
+                                "current": {
+                                    "verification_pass_rate": avg_vr,
+                                    "continuity_grade_avg": avg_ca,
+                                    "tool_success_rate": avg_tr,
+                                },
+                                "score_history": [
+                                    round(
+                                        s.get("verification_pass_rate", 1)
+                                        * 50
+                                        + (s.get("continuity_grade_avg", 100)
+                                           / 100) * 30
+                                        + s.get("tool_success_rate", 1) * 20,
+                                        1)
+                                    for s in sessions[-30:]
+                                ],
+                            }
+                except Exception:
+                    pass
+
+                # ── License ──────────────────────────────────────────────────
+                try:
+                    pp_path = cfg_dir / "passport.json"
+                    if pp_path.exists():
+                        pp = json.loads(pp_path.read_text(encoding="utf-8"))
+                        tier = pp.get("tier", "community")
+                        _labels = {"community": "Community",
+                                   "pro": "Pro", "power": "Power"}
+                        acts_raw = pp.get("activations", [])
+                        acts = (len(acts_raw) if isinstance(acts_raw, list)
+                                else int(acts_raw or 1))
+                        max_acts = int(pp.get("max_activations", 1))
+                        data["license"] = {
+                            "tier": tier,
+                            "tier_label": _labels.get(tier, tier.title()),
+                            "maturity_pct": 0,
+                            "activations": acts,
+                            "max_activations": max_acts,
+                            "genome_persistence": tier != "community",
+                        }
+                except Exception:
+                    pass
+
+                # ── Memory / Journal ─────────────────────────────────────────
+                try:
+                    jdir = cfg_dir / "journal"
+                    if jdir.exists():
+                        count = sum(
+                            1 for f in jdir.iterdir()
+                            if f.suffix == ".jsonl")
+                        meta_path = cfg_dir / "vectors" / "metadata.json"
+                        idx_chunks = 0
+                        if meta_path.exists():
+                            try:
+                                meta = json.loads(
+                                    meta_path.read_text(encoding="utf-8"))
+                                idx_chunks = (len(meta)
+                                              if isinstance(meta, list)
+                                              else meta.get("total_chunks", 0))
+                            except Exception:
+                                pass
+                        data["memory"] = {
+                            "journal_entries": count,
+                            "index_chunks": idx_chunks,
+                            "status": "Ready",
+                        }
+                except Exception:
+                    pass
+
+                # ── Performance (from perf_log.jsonl) ────────────────────────
+                try:
+                    perf_path = cfg_dir / "perf_log.jsonl"
+                    if perf_path.exists():
+                        lines = perf_path.read_text(
+                            encoding="utf-8").strip().splitlines()
+                        entries = []
+                        for ln in lines[-50:]:
+                            try:
+                                entries.append(json.loads(ln))
+                            except Exception:
+                                pass
+                        if entries:
+                            recent = entries[-10:]
+                            avg_tps = sum(
+                                e.get("tok_per_sec", 0)
+                                for e in recent) / len(recent)
+                            direction = "--"
+                            if len(entries) >= 10:
+                                prev = entries[-20:-10]
+                                last = entries[-10:]
+                                if prev:
+                                    p_avg = sum(
+                                        e.get("tok_per_sec", 0)
+                                        for e in prev) / len(prev)
+                                    l_avg = sum(
+                                        e.get("tok_per_sec", 0)
+                                        for e in last) / len(last)
+                                    if l_avg > p_avg * 1.05:
+                                        direction = "improving"
+                                    elif l_avg < p_avg * 0.95:
+                                        direction = "degrading"
+                                    else:
+                                        direction = "stable"
+                            data["performance"] = {
+                                "avg_tok_s": round(avg_tps, 1),
+                                "trend": direction,
+                            }
+                except Exception:
+                    pass
+
+                # ── Continuity (from reliability.json sessions) ───────────────
+                try:
+                    rel_path = cfg_dir / "reliability.json"
+                    if rel_path.exists() and "reliability" in data:
+                        sessions = json.loads(
+                            rel_path.read_text(
+                                encoding="utf-8")).get("sessions", [])
+                        if sessions:
+                            recent = sessions[-5:]
+                            avg_cg = sum(
+                                s.get("continuity_grade_avg", 100)
+                                for s in recent) / len(recent)
+                            if avg_cg >= 90:
+                                grade = "A"
+                            elif avg_cg >= 80:
+                                grade = "B"
+                            elif avg_cg >= 70:
+                                grade = "C"
+                            elif avg_cg >= 60:
+                                grade = "D"
+                            else:
+                                grade = "F"
+                            total_swaps = sum(
+                                s.get("rollback_count", 0)
+                                for s in sessions)
+                            data["continuity"] = {
+                                "score": round(avg_cg, 0),
+                                "grade": grade,
+                                "swaps": total_swaps,
+                                "enabled": True,
+                            }
+                except Exception:
+                    pass
+
+                # ── AutoForge (from config) ───────────────────────────────────
+                try:
+                    cfg_path = cfg_dir / "config.yaml"
+                    if cfg_path.exists():
+                        import yaml as _yaml
+                        cfg_raw = _yaml.safe_load(
+                            cfg_path.read_text(encoding="utf-8")) or {}
+                        enabled = cfg_raw.get("auto_commit", False)
+                        data["autoforge"] = {
+                            "enabled": enabled,
+                            "pending": 0,
+                            "session_commits": 0,
+                            "recent_commits": [],
+                        }
+                except Exception:
+                    pass
+
+                # ── License maturity (from billing session count) ─────────────
+                try:
+                    if "license" in data:
+                        bill_path = cfg_dir / "billing.json"
+                        genome_path = cfg_dir / "genome.json"
+                        import math as _math
+                        sc = 0
+                        if genome_path.exists():
+                            g = json.loads(
+                                genome_path.read_text(encoding="utf-8"))
+                            sc = g.get("session_count", 0)
+                        elif bill_path.exists():
+                            b = json.loads(
+                                bill_path.read_text(encoding="utf-8"))
+                            sc = b.get("lifetime_sessions", 0)
+                        if sc > 0:
+                            mat = 1.0 / (1.0 + _math.exp(
+                                -0.04 * (sc - 50)))
+                            data["license"]["maturity_pct"] = int(mat * 100)
+                except Exception:
+                    pass
+
+                # ── Shipwright ────────────────────────────────────────────────
+                try:
+                    import datetime as _dt
+                    # Get version from pyproject.toml (authoritative source)
+                    forge_ver = "--"
+                    for vpath in [
+                        Path(__file__).parent.parent.parent / "pyproject.toml",
+                        Path(__file__).parent.parent / "pyproject.toml",
+                    ]:
+                        if vpath.exists():
+                            import re as _re
+                            m = _re.search(
+                                r'^version\s*=\s*"([^"]+)"',
+                                vpath.read_text(encoding="utf-8"),
+                                _re.MULTILINE)
+                            if m:
+                                forge_ver = m.group(1)
+                                break
+
+                    last_date = "--"
+                    sw_path = cfg_dir / "shipwright" / "releases.json"
+                    if sw_path.exists():
+                        sw_raw = json.loads(
+                            sw_path.read_text(encoding="utf-8"))
+                        releases = sw_raw.get(
+                            "releases", sw_raw.get("history", []))
+                        # Filter out releases with bogus timestamps (before 2020)
+                        MIN_TS = 1577836800  # 2020-01-01
+                        valid = [r for r in releases
+                                 if (r.get("timestamp") or 0) > MIN_TS]
+                        last = valid[-1] if valid else None
+                        if last:
+                            ts = last.get("timestamp") or last.get("ts", 0)
+                            last_date = _dt.datetime.fromtimestamp(
+                                ts).strftime("%Y-%m-%d")
+
+                    data["shipwright"] = {
+                        "version": forge_ver,
+                        "unreleased_count": 0,
+                        "suggested_bump": "--",
+                        "next_version": "--",
+                        "last_release_date": last_date,
+                    }
+                except Exception:
+                    pass
+
+                if data and self._running:
+                    self._root.after(0, lambda d=data: self._apply_state_data(d))
+            except Exception:
+                pass
+
+        _t.Thread(target=_worker, daemon=True, name="static-data").start()
+
     # ── State file polling (drives animation + card updates) ──
 
     def _schedule_state_poll(self):
@@ -2867,9 +3240,15 @@ class ForgeLauncher:
             self._stat_labels["tokens"].configure(
                 text=f"{session.get('tokens', 0):,}")
         if "cost_saved" in self._stat_labels:
+            saved = session.get('cost_saved', 0)
+            if saved >= 0.01:
+                cost_str = f"${saved:.2f}"
+            elif saved > 0:
+                cost_str = f"${saved:.4f}"
+            else:
+                cost_str = "$0.00"
             self._stat_labels["cost_saved"].configure(
-                text=f"${session.get('cost_saved', 0):.4f}",
-                text_color=COLORS["green"])
+                text=cost_str, text_color=COLORS["green"])
 
         memory = data.get("memory", {})
         if "journal" in self._stat_labels:
@@ -2894,7 +3273,7 @@ class ForgeLauncher:
 
         # Continuity Grade
         cg = data.get("continuity", {})
-        if cg.get("enabled", False):
+        if cg:
             score = cg.get("score", 100)
             grade = cg.get("grade", "A")
             swaps = cg.get("swaps", 0)

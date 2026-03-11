@@ -23,6 +23,16 @@ def _make_engine(safety_level=2, rate_limiting=True):
 
 
 class TestRateLimiter:
+    """Verifies _check_rate_limit() enforces per-tool and per-turn call limits by safety level.
+
+    L0 (UNLEASHED): 100 calls to run_shell → never blocked. L1: generous limits, 15 read_file
+    calls pass. L2: run_shell max=5 (max(3, 10//2)), blocked on 6th call; read_file max=10.
+    L3: run_shell max=3 (max(3, 5//2)), blocked on 4th call.
+    rate_limiting=False in config → never blocked regardless of safety level.
+    Resetting _turn_tool_counts to {} allows calls again (simulates new turn).
+    Per-tool counts are independent: 5 read_file calls don't affect edit_file count.
+    """
+
     def test_safety_l0_never_blocked(self):
         engine = _make_engine(safety_level=0)
         for _ in range(100):

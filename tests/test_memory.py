@@ -18,6 +18,12 @@ def memory(tmp_path):
 # ── Session ID ──
 
 class TestSessionId:
+    """Verifies each EpisodicMemory instance gets a unique, valid 12-char hex session ID.
+
+    The session ID must be exactly 12 characters and parseable as hexadecimal.
+    Two separate instances must always generate different session IDs.
+    """
+
     def test_session_id_is_hex(self, memory):
         assert len(memory._session_id) == 12
         int(memory._session_id, 16)  # must not raise
@@ -35,6 +41,14 @@ class TestSessionId:
 # ── Record turn ──
 
 class TestRecordTurn:
+    """Verifies record_turn() creates correct JournalEntry objects and writes JSONL to disk.
+
+    Returns a JournalEntry with session_id, turn_number starting at 1, user_intent derived
+    from user_message, files_touched, and tokens_used. Turn number increments each call.
+    Each call appends one line to _journal_file; after 5 turns the file has 5 JSON lines.
+    Each JSON line must parse correctly and contain the session_id.
+    """
+
     def test_basic_recording(self, memory):
         entry = memory.record_turn(
             user_message="Fix the bug in main.py",
@@ -83,6 +97,13 @@ class TestRecordTurn:
 # ── Eviction buffer ──
 
 class TestEvictionBuffer:
+    """Verifies the eviction buffer records evicted context entries and drains them on the next turn.
+
+    record_eviction() appends to _eviction_buffer. The buffer is capped at 100 entries.
+    On the next record_turn() call, evicted_content is populated from the buffer and
+    the buffer is cleared back to 0.
+    """
+
     def test_record_eviction(self, memory):
         class MockEntry:
             role = "user"
@@ -121,6 +142,12 @@ class TestEvictionBuffer:
 # ── Recent entries ──
 
 class TestRecentEntries:
+    """Verifies get_recent_entries(n) returns up to n JournalEntry objects.
+
+    After 5 turns, get_recent_entries(3) returns exactly 3 entries, all JournalEntry instances.
+    get_recent_entries(100) with only 1 turn recorded returns >= 1 entry (not 0, not 100).
+    """
+
     def test_get_recent(self, memory):
         for i in range(5):
             memory.record_turn(
@@ -144,6 +171,8 @@ class TestRecentEntries:
 # ── Session entries ──
 
 class TestSessionEntries:
+    """Verifies get_session_entries() returns only entries from the current session ID."""
+
     def test_get_current_session(self, memory):
         memory.record_turn(
             user_message="test", assistant_response="ok",
@@ -157,6 +186,12 @@ class TestSessionEntries:
 # ── Swap summary ──
 
 class TestSwapSummary:
+    """Verifies generate_swap_summary() returns a non-empty string for sessions with turns.
+
+    After 3 turns with edit_file tool calls and file touches, the summary must be a non-empty
+    string. For an empty session (no turns), must still return a string (not crash).
+    """
+
     def test_generates_summary(self, memory):
         for i in range(3):
             memory.record_turn(
@@ -178,6 +213,13 @@ class TestSwapSummary:
 # ── Task state ──
 
 class TestTaskState:
+    """Verifies update_task() builds and maintains a TaskState with objective, files, and decisions.
+
+    update_task(objective=...) sets the task objective. Multiple update_task(file_modified=...)
+    calls accumulate files_modified. update_task(decision=...) appends to decisions list.
+    get_task_state() returns the current TaskState or None if never set.
+    """
+
     def test_update_objective(self, memory):
         memory.update_task(objective="Fix the login bug")
         ts = memory.get_task_state()
@@ -216,6 +258,12 @@ class TestTaskState:
 # ── Journal display ──
 
 class TestJournalDisplay:
+    """Verifies format_journal_display() returns a non-empty string for entries and handles empty input.
+
+    A list with one JournalEntry must produce a non-empty string. An empty list must return
+    '' or a message containing 'no journal' (case-insensitive).
+    """
+
     def test_format_with_entries(self, memory):
         entry = memory.record_turn(
             user_message="hello", assistant_response="hi there",
@@ -233,6 +281,13 @@ class TestJournalDisplay:
 # ── Audit dict ──
 
 class TestMemoryAuditDict:
+    """Verifies to_audit_dict() has correct schema_version, session_id, entries, and truncation.
+
+    schema_version==1, session_id matches memory._session_id, len(entries)==1 after one turn.
+    Long user_message/assistant_response (2000 chars) must be truncated to <= 500 chars in the
+    user_intent and assistant_response audit fields.
+    """
+
     def test_structure(self, memory):
         memory.record_turn(
             user_message="audit test", assistant_response="ok",

@@ -18,6 +18,16 @@ def bpos(tmp_path):
 # ── Tier system ──
 
 class TestTierSystem:
+    """Verifies the three BPoS tiers (community/pro/power) have correct feature gates.
+
+    Default tier is 'community'. Community: label='Community', genome_persistence=False,
+    seats=1, auto_commit=False, shipwright=False. All three tiers must be in TIERS dict.
+    Pro: genome_persistence=True, seats=3, auto_commit=True, shipwright=True.
+    Power: enterprise_mode=True, fleet_analytics=True, seats=10.
+    Community allows benchmark_suite but not genome_persistence or enterprise_mode.
+    Community is always considered activated (no license required).
+    """
+
     def test_default_tier_is_community(self, bpos):
         assert bpos.tier == "community"
 
@@ -59,6 +69,15 @@ class TestTierSystem:
 # ── Passport management ──
 
 class TestPassportManagement:
+    """Verifies passport activation, signature verification, seat limits, and deactivation.
+
+    A valid signed passport activates successfully, upgrades tier to 'pro', and adds
+    the machine_id to passport.activations. Invalid signature ('not_a_valid_ed25519_signature')
+    fails with 'signature' in the message. A passport with max_activations=1 and already 1
+    activation fails with 'limit' in the message. deactivate() removes the machine_id
+    from activations. deactivate() with no active passport returns ok=False.
+    """
+
     def _make_passport_data(self, bpos, tier="pro"):
         data = {
             "account_id": "acct_test_12345678",
@@ -85,7 +104,7 @@ class TestPassportManagement:
 
     def test_activate_invalid_signature(self, bpos):
         data = self._make_passport_data(bpos)
-        data["signature"] = "invalid_sig"
+        data["origin_signature"] = "not_a_valid_ed25519_signature"
         ok, msg = bpos.activate(data)
         assert ok is False
         assert "signature" in msg.lower()
@@ -114,6 +133,15 @@ class TestPassportManagement:
 # ── Genome ──
 
 class TestGenome:
+    """Verifies the genome (persistent behavioral identity) tracks sessions and matures over time.
+
+    Fresh genome: session_count==0, ami_failure_catalog_size==0.
+    get_genome_maturity(): 0 sessions → < 0.2, 50 sessions → 0.4–0.6, 200 sessions → > 0.9.
+    update_genome() with pro tier increments session_count and stores catalog size.
+    Community tier does NOT persist genome (session_count stays 0 after update).
+    collect_genome() reads from engine's subsystem audit dicts to build a GenomeSnapshot.
+    """
+
     def test_initial_genome_empty(self, bpos):
         assert bpos._genome.session_count == 0
         assert bpos._genome.ami_failure_catalog_size == 0
@@ -181,6 +209,15 @@ class TestGenome:
 # ── Behavioral fingerprinting ──
 
 class TestBehavioralFingerprint:
+    """Verifies behavioral fingerprinting tracks tool/command frequency and computes similarity.
+
+    record_tool_call() increments _fingerprint.tool_frequency[name].
+    record_command() increments _fingerprint.command_frequency[name].
+    compute_fingerprint_similarity() scores high (> 0.8) when top tools, model, safety level,
+    theme, and session duration all match. It scores low (< 0.5) when all differ.
+    Empty comparison dict returns 1.0 (no evidence of mismatch = maximum similarity).
+    """
+
     def test_record_tool_calls(self, bpos):
         bpos.record_tool_call("read_file")
         bpos.record_tool_call("read_file")
@@ -235,6 +272,12 @@ class TestBehavioralFingerprint:
 # ── Persistence ──
 
 class TestPersistence:
+    """Verifies genome and passport data survive process restarts via disk persistence.
+
+    After activating pro and recording a genome snapshot, a new BPoS from the same
+    data_dir must reload the same session_count and ami_failure_catalog_size.
+    """
+
     def test_genome_save_load_roundtrip(self, tmp_path):
         bpos1 = BPoS(data_dir=tmp_path, machine_id="machine1")
         # Activate pro tier
@@ -338,6 +381,13 @@ class TestPersistence:
 # ── Display ──
 
 class TestDisplay:
+    """Verifies format_status() and to_audit_dict() expose tier, genome maturity, and required keys.
+
+    format_status() for community tier must include 'Community' and 'Genome maturity'.
+    to_audit_dict() must have schema_version==1, tier=='community', and contain 'genome'
+    and 'genome_maturity' keys.
+    """
+
     def test_format_status_community(self, bpos):
         status = bpos.format_status()
         assert "Community" in status

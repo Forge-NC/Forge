@@ -247,17 +247,26 @@ class AutopilotMonitor:
 
     # ── Pre-repair snapshot ──
 
+    @staticmethod
+    def _git_flags() -> dict:
+        """Windows subprocess flags to suppress console window flashes."""
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):
+            return {"creationflags": subprocess.CREATE_NO_WINDOW}
+        return {}
+
     def _git_snapshot(self) -> bool:
         """Stash uncommitted working-tree changes before repair.
 
         Returns True if a stash was created (so we know to pop it on
         rollback). Returns False if the tree was clean (nothing to stash).
         """
+        flags = self._git_flags()
         try:
             status = subprocess.run(
                 ["git", "status", "--porcelain"],
                 cwd=self._cwd,
                 capture_output=True, text=True, timeout=10,
+                **flags,
             )
             if not status.stdout.strip():
                 log.debug("AutopilotMonitor: working tree clean, no stash needed")
@@ -269,6 +278,7 @@ class AutopilotMonitor:
                  f"autopilot-pre-repair-{ts}"],
                 cwd=self._cwd,
                 capture_output=True, text=True, timeout=15,
+                **flags,
             )
             if result.returncode == 0:
                 log.debug("AutopilotMonitor: stashed pre-repair state")
@@ -283,6 +293,7 @@ class AutopilotMonitor:
 
         Returns True on success.
         """
+        flags = self._git_flags()
         ok = True
         try:
             # Discard all working-tree changes made by the repair
@@ -290,11 +301,13 @@ class AutopilotMonitor:
                 ["git", "checkout", "--", "."],
                 cwd=self._cwd,
                 capture_output=True, text=True, timeout=15,
+                **flags,
             )
             subprocess.run(
                 ["git", "clean", "-fd"],
                 cwd=self._cwd,
                 capture_output=True, text=True, timeout=15,
+                **flags,
             )
             log.debug("AutopilotMonitor: discarded repair changes")
 
@@ -303,6 +316,7 @@ class AutopilotMonitor:
                     ["git", "stash", "pop"],
                     cwd=self._cwd,
                     capture_output=True, text=True, timeout=15,
+                    **flags,
                 )
                 if result.returncode != 0:
                     log.debug("AutopilotMonitor: stash pop failed: %s",
@@ -319,11 +333,13 @@ class AutopilotMonitor:
         """Discard the pre-repair snapshot after a successful repair."""
         if not self._pre_repair_stashed:
             return
+        flags = self._git_flags()
         try:
             subprocess.run(
                 ["git", "stash", "drop"],
                 cwd=self._cwd,
                 capture_output=True, text=True, timeout=10,
+                **flags,
             )
             log.debug("AutopilotMonitor: dropped pre-repair stash (repair OK)")
         except Exception:

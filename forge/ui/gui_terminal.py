@@ -363,13 +363,16 @@ class ForgeTerminalWindow:
         try:
             from forge.ui.dashboard import AnimState
             state_map = {
-                "idle": AnimState.IDLE,
-                "thinking": AnimState.THINKING,
-                "tool_exec": AnimState.TOOL_EXEC,
-                "indexing": AnimState.INDEXING,
-                "swapping": AnimState.SWAPPING,
-                "error": AnimState.ERROR,
-                "threat": AnimState.THREAT,
+                "boot":       AnimState.BOOT,
+                "idle":       AnimState.IDLE,
+                "thinking":   AnimState.THINKING,
+                "tool_exec":  AnimState.TOOL_EXEC,
+                "indexing":   AnimState.INDEXING,
+                "recovering": AnimState.INDEXING,
+                "swapping":   AnimState.SWAPPING,
+                "error":      AnimState.ERROR,
+                "threat":     AnimState.THREAT,
+                "pass":       AnimState.PASS,
             }
             new_state = state_map.get(state_name)
             if new_state:
@@ -451,13 +454,16 @@ class ForgeTerminalWindow:
             return
 
         state_display = {
-            "idle": ("idle", COLORS["gray"]),
-            "thinking": ("thinking...", COLORS["cyan"]),
+            "boot":      ("booting...",  COLORS["cyan"]),
+            "idle":      ("idle",        COLORS["gray"]),
+            "thinking":  ("thinking...", COLORS["cyan"]),
             "tool_exec": ("executing...", COLORS["green"]),
-            "indexing": ("indexing...", COLORS["magenta"]),
-            "swapping": ("swapping...", COLORS["yellow"]),
-            "error": ("error", COLORS["red"]),
-            "threat": ("THREAT", COLORS["red"]),
+            "indexing":  ("indexing...", COLORS["magenta"]),
+            "swapping":  ("swapping...", COLORS["yellow"]),
+            "recovering":("recovering...",COLORS["yellow"]),
+            "error":     ("error",       COLORS["red"]),
+            "threat":    ("THREAT",      COLORS["red"]),
+            "pass":      ("passed",      COLORS["green"]),
         }
 
         text, color = state_display.get(state, ("idle", COLORS["gray"]))

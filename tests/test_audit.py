@@ -116,6 +116,15 @@ def _make_mock_subsystems(tmp_path):
 
 
 class TestBuildPackage:
+    """Verifies AuditExporter.build_package() assembles all subsystem dicts into a complete package.
+
+    build_package() calls to_audit_dict() on every subsystem (forensics, memory, stats, billing,
+    crucible, continuity, plan_verifier) and assembles the results under canonical keys: session,
+    forensics, memory, billing, threats, continuity, verification. The 'session' block must
+    contain the model name, turn count, and working directory passed as arguments.
+    Every subsystem's to_audit_dict() must be called exactly once per build_package() call.
+    """
+
     def test_builds_successfully(self, tmp_path):
         subs = _make_mock_subsystems(tmp_path)
         exporter = AuditExporter(export_dir=tmp_path)
@@ -152,6 +161,17 @@ class TestBuildPackage:
 
 
 class TestExport:
+    """Verifies export() writes a valid zip file with the correct internal structure.
+
+    The zip must contain: manifest.json, audit.json, logs/tool_calls.jsonl,
+    logs/threats.jsonl, logs/journal.jsonl, verification/results.json.
+    The manifest must have schema_version==SCHEMA_VERSION, a 'file_hashes' dict,
+    and every hash value must start with 'sha512:' for tamper-evidence.
+    audit.json must parse as valid JSON with a 'session' key.
+    Default filename starts with 'forge_audit_' and ends with '.zip'.
+    A custom path override must be honored (output == the path passed).
+    """
+
     def test_creates_zip(self, tmp_path):
         subs = _make_mock_subsystems(tmp_path)
         exporter = AuditExporter(export_dir=tmp_path)
@@ -230,6 +250,14 @@ class TestExport:
 
 
 class TestRedaction:
+    """Verifies export(redact=True) strips private content before writing the zip.
+
+    Redaction targets: memory entries' user_intent and assistant_response become '[REDACTED]',
+    threat log matched_text becomes '[REDACTED]', and shell command strings become '[REDACTED]'.
+    The manifest.json must have redacted=True so recipients know the file was sanitized.
+    Redaction allows sharing audit bundles with third parties without leaking user code or messages.
+    """
+
     def test_redacts_user_intent(self, tmp_path):
         subs = _make_mock_subsystems(tmp_path)
         exporter = AuditExporter(export_dir=tmp_path)
@@ -284,6 +312,11 @@ class TestRedaction:
 
 
 class TestFormatSummary:
+    """Verifies format_summary() produces a human-readable text summary of the audit package.
+
+    The output must contain the session ID (from forensics audit dict) and the turn count.
+    """
+
     def test_contains_session_info(self, tmp_path):
         subs = _make_mock_subsystems(tmp_path)
         exporter = AuditExporter(export_dir=tmp_path)

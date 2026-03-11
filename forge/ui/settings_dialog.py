@@ -61,26 +61,22 @@ class ForgeSettingsDialog:
         self._effects = None
 
         # ── Window ──
+        from forge.ui.window_geo import WindowGeo as _WG
         self._win = ctk.CTkToplevel(parent)
         self._win.title("Forge Settings")
-        self._win.geometry("540x600")
         self._win.minsize(480, 500)
         self._win.configure(fg_color=COLORS["bg_dark"])
         self._win.transient(parent)
         self._win.grab_set()
         self._win.resizable(True, True)
         self._win.protocol("WM_DELETE_WINDOW", self._close)
+        _WG.restore("settings", self._win, "540x600")
+        _WG.track("settings", self._win)
 
         # Register for live theme hot-swap
         self._theme_cb = lambda cm: self._win.after(
             0, self._apply_theme, cm)
         add_theme_listener(self._theme_cb)
-
-        # Center on parent
-        self._win.update_idletasks()
-        px = parent.winfo_x() + (parent.winfo_width() - 540) // 2
-        py = parent.winfo_y() + (parent.winfo_height() - 600) // 2
-        self._win.geometry(f"+{max(0, px)}+{max(0, py)}")
 
         try:
             ico = Path(__file__).parent / "assets" / "forge.ico"
@@ -117,13 +113,14 @@ class ForgeSettingsDialog:
             corner_radius=6)
         self._tabs.pack(fill="both", expand=True, padx=8, pady=(4, 0))
 
-        for name in ["Safety", "Models", "Context", "Agent", "Voice", "UI", "Forge", "License", "Nightly", "Telemetry"]:
+        for name in ["Safety", "Models", "Context", "Agent", "Plugins", "Voice", "UI", "Forge", "License", "Nightly", "Telemetry"]:
             self._tabs.add(name)
 
         self._build_safety_tab()
         self._build_models_tab()
         self._build_context_tab()
         self._build_agent_tab()
+        self._build_plugins_tab()
         self._build_voice_tab()
         self._build_ui_tab()
         self._build_forge_tab()
@@ -308,6 +305,25 @@ class ForgeSettingsDialog:
             "Check for new signatures on startup "
             "(interval scales with safety level)")
 
+        # ── AI Assurance ──
+        ctk.CTkFrame(tab, fg_color=COLORS["border"], height=1
+                     ).pack(fill="x", padx=16, pady=(10, 6))
+        ctk.CTkLabel(tab, text="AI Assurance",
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["cyan"]
+                     ).pack(anchor="w", padx=16, pady=(4, 2))
+
+        self._add_switch(tab, "auto_assurance", "Auto-Assure on Session End")
+        self._add_desc(tab,
+            "Run /assure automatically when a session ends. "
+            "Results are signed and stored locally.")
+
+        self._add_switch(tab, "assurance_self_rate", "Self-Assessment Mode")
+        self._add_desc(tab,
+            "After each scenario, ask the model to rate its own confidence (0-10) "
+            "and explain any failures. Measures calibration — whether the model "
+            "knows what it doesn't know. Roughly doubles /assure run time.")
+
     def _build_models_tab(self):
         tab = self._scrollable_tab("Models")
 
@@ -433,6 +449,209 @@ class ForgeSettingsDialog:
         self._add_entry(tab, "dedup_window", "Dedup Window")
         self._add_desc(tab, "Number of recent tool calls to check for duplicates")
         self._add_switch(tab, "cache_enabled", "File Cache")
+
+    # ── Plugins tab ─────────────────────────────────────────────
+
+    def _build_plugins_tab(self):
+        tab = self._scrollable_tab("Plugins")
+
+        # Header
+        ctk.CTkLabel(tab, text="  Plugin Management",
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["cyan_dim"],
+                     anchor="w").pack(fill="x", padx=16, pady=(8, 2))
+        ctk.CTkLabel(tab, text="  Toggle plugins on/off. Changes take effect on next session.",
+                     font=ctk.CTkFont(*FONT_MONO_XS),
+                     text_color=COLORS["text_dim"],
+                     anchor="w").pack(fill="x", padx=16, pady=(0, 8))
+
+        # Get plugin manifest from engine
+        disabled_list = list(self._config.get("disabled_plugins", []))
+        disabled_set = set(disabled_list)
+        self._plugin_toggles: dict[str, ctk.BooleanVar] = {}
+
+        # Try to get full manifest from plugin manager
+        manifest = self._get_plugin_manifest()
+
+        if not manifest:
+            ctk.CTkLabel(tab, text="  No plugins discovered.",
+                         font=ctk.CTkFont(*FONT_MONO),
+                         text_color=COLORS["gray"],
+                         anchor="w").pack(fill="x", padx=16, pady=8)
+        else:
+            # Group by source
+            bundled = [p for p in manifest if p["source"] == "bundled"]
+            user = [p for p in manifest if p["source"] == "user"]
+
+            if bundled:
+                ctk.CTkLabel(tab, text="  Bundled",
+                             font=ctk.CTkFont(*FONT_MONO_BOLD),
+                             text_color=COLORS["cyan"],
+                             anchor="w").pack(fill="x", padx=16, pady=(8, 4))
+                for plugin in bundled:
+                    self._add_plugin_card(tab, plugin, disabled_set)
+
+            if user:
+                ctk.CTkLabel(tab, text="  User Plugins",
+                             font=ctk.CTkFont(*FONT_MONO_BOLD),
+                             text_color=COLORS["cyan"],
+                             anchor="w").pack(fill="x", padx=16, pady=(12, 4))
+                for plugin in user:
+                    self._add_plugin_card(tab, plugin, disabled_set)
+
+        # Plugin directory info
+        plugin_dir = Path.home() / ".forge" / "plugins"
+        rules_file = Path.home() / ".forge" / "common_sense_rules.yaml"
+
+        sep = ctk.CTkFrame(tab, fg_color=COLORS["border"], height=1,
+                           corner_radius=0)
+        sep.pack(fill="x", padx=16, pady=(12, 8))
+
+        ctk.CTkLabel(tab, text="  Paths",
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["cyan_dim"],
+                     anchor="w").pack(fill="x", padx=16, pady=(4, 2))
+
+        paths_info = (
+            f"  User plugins:  {plugin_dir}\n"
+            f"  Rulebook:      {rules_file}"
+        )
+        ctk.CTkLabel(tab, text=paths_info,
+                     font=ctk.CTkFont(*FONT_MONO_XS),
+                     text_color=COLORS["text_dim"],
+                     anchor="w", justify="left"
+                     ).pack(fill="x", padx=16, pady=(0, 4))
+
+        open_dir_btn = ctk.CTkButton(
+            tab, text="Open Plugin Directory", width=180, height=30,
+            fg_color=COLORS["bg_card"],
+            hover_color=COLORS["bg_panel"],
+            text_color=COLORS["white"],
+            font=ctk.CTkFont(*FONT_MONO_SM),
+            command=lambda: self._open_plugin_dir(plugin_dir))
+        open_dir_btn.pack(padx=16, pady=(4, 8), anchor="w")
+
+    def _add_plugin_card(self, parent, plugin: dict, disabled_set: set):
+        """Render a single plugin card with toggle, name, version, hooks."""
+        class_name = plugin["class_name"]
+        is_enabled = class_name not in disabled_set
+
+        # Card frame
+        card = ctk.CTkFrame(parent, fg_color=COLORS["bg_card"],
+                            corner_radius=6, border_width=1,
+                            border_color=COLORS["border"])
+        card.pack(fill="x", padx=16, pady=3)
+
+        # Top row: toggle + name + version + source badge
+        top = ctk.CTkFrame(card, fg_color="transparent")
+        top.pack(fill="x", padx=10, pady=(8, 2))
+
+        var = ctk.BooleanVar(value=is_enabled)
+        self._plugin_toggles[class_name] = var
+
+        sw = ctk.CTkSwitch(
+            top, variable=var, text="",
+            fg_color=COLORS["bg_dark"],
+            progress_color=COLORS["cyan"],
+            button_color=COLORS["white"],
+            button_hover_color=COLORS["cyan_glow"],
+            width=44)
+        sw.pack(side="left")
+
+        name_text = f"  {plugin['name']}"
+        ctk.CTkLabel(top, text=name_text,
+                     font=ctk.CTkFont(*FONT_MONO_BOLD),
+                     text_color=COLORS["white"],
+                     anchor="w").pack(side="left")
+
+        ver_text = f"  v{plugin['version']}"
+        ctk.CTkLabel(top, text=ver_text,
+                     font=ctk.CTkFont(*FONT_MONO_XS),
+                     text_color=COLORS["gray"],
+                     anchor="w").pack(side="left")
+
+        # Status badge (loaded / disabled)
+        if plugin["loaded"]:
+            badge_text = " ACTIVE "
+            badge_fg = COLORS["green"]
+        elif class_name in disabled_set:
+            badge_text = " DISABLED "
+            badge_fg = COLORS["gray"]
+        else:
+            badge_text = " INACTIVE "
+            badge_fg = COLORS.get("yellow", COLORS["gray"])
+
+        ctk.CTkLabel(top, text=badge_text,
+                     font=ctk.CTkFont(*FONT_MONO_XS),
+                     text_color=COLORS["bg_dark"],
+                     fg_color=badge_fg,
+                     corner_radius=4, height=20,
+                     ).pack(side="right", padx=(0, 4))
+
+        # Description row
+        if plugin["description"]:
+            ctk.CTkLabel(card, text=f"  {plugin['description']}",
+                         font=ctk.CTkFont(*FONT_MONO_XS),
+                         text_color=COLORS["text_dim"],
+                         anchor="w", wraplength=400, justify="left"
+                         ).pack(fill="x", padx=10, pady=(0, 2))
+
+        # Details row: author + hooks
+        details_parts = []
+        if plugin["author"] and plugin["author"] != "Unknown":
+            details_parts.append(f"by {plugin['author']}")
+        hooks = plugin.get("hooks", [])
+        if hooks:
+            details_parts.append(f"{len(hooks)} hooks")
+        patterns = plugin.get("event_patterns", [])
+        if patterns:
+            details_parts.append(f"events: {', '.join(patterns)}")
+
+        if details_parts:
+            ctk.CTkLabel(card, text=f"  {' · '.join(details_parts)}",
+                         font=ctk.CTkFont(*FONT_MONO_XS),
+                         text_color=COLORS["text_dim"],
+                         anchor="w"
+                         ).pack(fill="x", padx=10, pady=(0, 6))
+        else:
+            # Spacing at bottom of card
+            ctk.CTkFrame(card, fg_color="transparent",
+                         height=4).pack(fill="x")
+
+    def _get_plugin_manifest(self) -> list[dict]:
+        """Get plugin manifest from the engine's PluginManager, or scan fresh."""
+        # Try reading from engine's plugin_manager (if settings dialog has access)
+        parent = self._parent
+        engine = getattr(parent, "_engine", None) or getattr(parent, "engine", None)
+        if engine and hasattr(engine, "plugin_manager"):
+            pm = engine.plugin_manager
+            if hasattr(pm, "get_plugin_manifest"):
+                return pm.get_plugin_manifest()
+
+        # Fallback: do a fresh scan
+        try:
+            from forge.plugins import PluginManager
+            pm = PluginManager()
+            pm.discover()
+            return pm.get_plugin_manifest()
+        except Exception:
+            log.debug("Failed to scan plugins for settings", exc_info=True)
+            return []
+
+    def _open_plugin_dir(self, plugin_dir: Path):
+        """Open the user plugin directory in the system file manager."""
+        import subprocess
+        import sys as _sys
+        plugin_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            if _sys.platform == "win32":
+                subprocess.Popen(["explorer", str(plugin_dir)])
+            elif _sys.platform == "darwin":
+                subprocess.Popen(["open", str(plugin_dir)])
+            else:
+                subprocess.Popen(["xdg-open", str(plugin_dir)])
+        except Exception:
+            log.debug("Failed to open plugin directory", exc_info=True)
 
     def _build_voice_tab(self):
         tab = self._scrollable_tab("Voice")
@@ -724,6 +943,12 @@ class ForgeSettingsDialog:
             "Automatically commit file edits at each turn boundary. "
             "Operates on the current project's git repo, not Forge itself.")
 
+        self._add_switch(tab, "push_on_commit", "Push After Commit")
+        self._add_desc(tab,
+            "Push to origin after each auto-commit. "
+            "Requires git credentials for the remote. "
+            "Use /autocommit push on|off to toggle at runtime.")
+
         # Separator
         ctk.CTkFrame(tab, fg_color=COLORS["border"], height=1
                      ).pack(fill="x", padx=16, pady=(10, 6))
@@ -740,6 +965,12 @@ class ForgeSettingsDialog:
             "Use the AI model to classify ambiguous commit messages "
             "into categories (feature, fix, refactor, etc) for smarter "
             "version bumping.")
+
+        self._add_switch(tab, "push_on_ship", "Push After Release")
+        self._add_desc(tab,
+            "Push branch and tag to origin after /ship go. "
+            "Requires git credentials for the remote. "
+            "Use /ship push on|off to toggle at runtime.")
 
     # ── License tab (BPoS / Passport) ──
 
@@ -1160,6 +1391,14 @@ class ForgeSettingsDialog:
             raw = self._nightly_process_entry.get().strip()
             items = [s.strip() for s in raw.split(",") if s.strip()]
             self._config.set("nightly_auto_close_list", items)
+
+        # Handle plugin toggles → disabled_plugins list
+        if hasattr(self, "_plugin_toggles"):
+            disabled = [
+                class_name for class_name, var in self._plugin_toggles.items()
+                if not var.get()
+            ]
+            self._config.set("disabled_plugins", disabled)
 
         self._config.save()
 

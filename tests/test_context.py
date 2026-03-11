@@ -25,6 +25,13 @@ def _make_ctx(max_tokens=100):
 # ---------------------------------------------------------------------------
 
 class TestAddEntry:
+    """Verifies ContextWindow.add() creates entries with correct fields.
+
+    add() returns a ContextEntry with the given role, content, and tag.
+    token_count is computed by the tokenizer_fn (words in this test).
+    entry_count increments for each add. Optional pinned=True is stored on the entry.
+    """
+
     def test_basic_add(self):
         ctx = _make_ctx()
         entry = ctx.add("user", "hello world")
@@ -53,6 +60,12 @@ class TestAddEntry:
 # ---------------------------------------------------------------------------
 
 class TestTokenCounting:
+    """Verifies token counting, remaining_tokens, and custom tokenizer support.
+
+    total_tokens sums all entry token counts. remaining_tokens == max_tokens - total_tokens.
+    Default tokenizer: len(text) // 4. Custom tokenizer_fn is used when provided.
+    """
+
     def test_total_tokens(self):
         ctx = _make_ctx()
         ctx.add("user", "one two three")  # 3 tokens
@@ -81,6 +94,12 @@ class TestTokenCounting:
 # ---------------------------------------------------------------------------
 
 class TestUsageTracking:
+    """Verifies usage_pct, edge case of max_tokens=0, and status() dict structure.
+
+    25 tokens in a 100-token window → usage_pct == 25.0. max_tokens=0 → usage_pct == 100.0.
+    status() must include total_tokens, max_tokens, entry_count, by_tag, and by_role breakdowns.
+    """
+
     def test_usage_pct(self):
         ctx = _make_ctx(max_tokens=100)
         ctx.add("user", " ".join(["w"] * 25))  # 25 tokens
@@ -107,6 +126,14 @@ class TestUsageTracking:
 # ---------------------------------------------------------------------------
 
 class TestFileDedup:
+    """Verifies re-reading the same file replaces the old entry rather than duplicating it.
+
+    Adding a file_read entry for the same file_path replaces the old one: entry_count stays 1,
+    token count updates to reflect new content length. Different file paths are not deduplicated.
+    The dedup applies for both tag='file_read' and tag='tool:read_file'.
+    After replacement, get_messages() returns the new content.
+    """
+
     def test_rereading_same_file_replaces(self):
         ctx = _make_ctx(max_tokens=200)
         ctx.add("tool", "old content of foo", tag="file_read", file_path="/foo.py")
@@ -138,6 +165,13 @@ class TestFileDedup:
 # ---------------------------------------------------------------------------
 
 class TestEvictionOrder:
+    """Verifies the eviction priority order: quarantine → recall → reference → working → core.
+
+    When space is needed, quarantine entries are evicted first. If no quarantine, recall goes.
+    If no recall, reference goes. Working is evicted only when all lower-priority partitions
+    are exhausted. Core is never evicted (it's the last resort before ContextFullError).
+    """
+
     def test_quarantine_evicted_first(self):
         ctx = _make_ctx(max_tokens=30)
         ctx.add("user", "a b c d e", partition="working")       # 5
@@ -176,6 +210,13 @@ class TestEvictionOrder:
 # ---------------------------------------------------------------------------
 
 class TestPinnedSurviveEviction:
+    """Verifies pinned entries survive eviction regardless of their partition.
+
+    A pinned recall entry is not evicted when recall entries are being cleared.
+    pin(idx) and unpin(idx) toggle the pinned flag correctly.
+    pin/unpin on an out-of-bounds index return False without crashing.
+    """
+
     def test_pinned_entry_not_evicted(self):
         ctx = _make_ctx(max_tokens=20)
         pinned = ctx.add("user", "a b c d e", pinned=True, partition="recall")  # 5
@@ -203,6 +244,13 @@ class TestPinnedSurviveEviction:
 # ---------------------------------------------------------------------------
 
 class TestContextFullError:
+    """Verifies ContextFullError is raised only when there are truly no evictable entries.
+
+    If all entries are pinned or in the core partition and the new entry doesn't fit,
+    raise ContextFullError matching 'Context full'. If eviction succeeds (recall entries
+    are freed), the add must succeed with no error and total_tokens <= max_tokens.
+    """
+
     def test_raises_when_no_eviction_candidates(self):
         ctx = _make_ctx(max_tokens=10)
         ctx.add("system", "a b c d e", pinned=True, partition="core")  # 5 pinned/core
@@ -224,6 +272,14 @@ class TestContextFullError:
 # ---------------------------------------------------------------------------
 
 class TestPartitions:
+    """Verifies automatic partition assignment based on role and tag.
+
+    system role → core. pinned=True → core. tag='tool:*' → reference.
+    tag='recall' → recall. Plain user message → working.
+    explicit partition= overrides automatic detection.
+    get_partition_stats() returns a dict with all non-empty partition names.
+    """
+
     def test_auto_partition_system(self):
         ctx = _make_ctx()
         e = ctx.add("system", "you are helpful")
@@ -270,6 +326,12 @@ class TestPartitions:
 # ---------------------------------------------------------------------------
 
 class TestQuarantineAdd:
+    """Verifies add_quarantine() wraps content with a QUARANTINED marker and handles full context.
+
+    The returned entry has partition='quarantine' and 'QUARANTINED' in its content.
+    When the context has no space (all pinned/core), add_quarantine() returns None instead of raising.
+    """
+
     def test_add_quarantine(self):
         ctx = _make_ctx(max_tokens=500)
         entry = ctx.add_quarantine("suspicious stuff", file_path="/bad.md")
@@ -289,6 +351,12 @@ class TestQuarantineAdd:
 # ---------------------------------------------------------------------------
 
 class TestSaveLoadSession:
+    """Verifies context state (entries, tokens, metadata) survives a save/load cycle.
+
+    After saving to a JSON file and loading into a new ContextWindow, entry count,
+    content, tags, file_path, and pinned state must all match the original.
+    """
+
     def test_save_and_load(self, tmp_path):
         ctx = _make_ctx(max_tokens=500)
         ctx.add("user", "hello world")
@@ -323,6 +391,12 @@ class TestSaveLoadSession:
 # ---------------------------------------------------------------------------
 
 class TestClearKeepsPinned:
+    """Verifies clear() removes unpinned entries and returns the count removed, keeping pinned ones.
+
+    3 entries: 1 pinned + 2 unpinned → clear() returns 2, entry_count becomes 1.
+    The remaining entry is the pinned one.
+    """
+
     def test_clear(self):
         ctx = _make_ctx(max_tokens=500)
         ctx.add("user", "ephemeral")
@@ -339,6 +413,13 @@ class TestClearKeepsPinned:
 # ---------------------------------------------------------------------------
 
 class TestDropEntry:
+    """Verifies drop(idx) removes and returns the entry at that index, or returns None for bad indices.
+
+    drop(0) on a 2-entry context returns the first entry and leaves entry_count==1.
+    drop(5) and drop(-1) return None without crashing.
+    Token count decreases by the dropped entry's token count.
+    """
+
     def test_drop_valid_index(self):
         ctx = _make_ctx()
         ctx.add("user", "aaa")
@@ -367,6 +448,14 @@ class TestDropEntry:
 # ---------------------------------------------------------------------------
 
 class TestInjectRecall:
+    """Verifies inject_recall() adds a recall-partition entry, evicting older recall entries when full.
+
+    Returns an entry with partition='recall', tag='recall', and the given source as file_path.
+    When adding a 15-token recall would overflow a 20-token context already holding 10 tokens of
+    recall, the oldest recall entry is evicted first (freeing 5 tokens). Returns None when even
+    evicting all recalls isn't enough to fit the new entry.
+    """
+
     def test_inject_recall_basic(self):
         ctx = _make_ctx(max_tokens=500)
         entry = ctx.inject_recall("recalled memory", source="/mem.json")
@@ -399,6 +488,14 @@ class TestInjectRecall:
 # ---------------------------------------------------------------------------
 
 class TestEdgeCases:
+    """Verifies get_messages(), list_entries(), get_working_memory(), truncate_to(), entry hashing, and eviction callbacks.
+
+    get_messages() returns dicts with role and content. list_entries() includes role, tag, and preview.
+    get_working_memory(count=2) returns <= 4 entries all with role user or assistant.
+    truncate_to(1) removes 2 of 3 entries and returns them. Same-content entries produce the same _hash.
+    Eviction callback receives the evicted entries when eviction occurs.
+    """
+
     def test_get_messages(self):
         ctx = _make_ctx()
         ctx.add("user", "hello")

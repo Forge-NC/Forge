@@ -732,6 +732,24 @@ def main():
     _cortex(cortex_q, "state", "initializing")
     _cortex(cortex_q, "status", "Starting up...")
 
+    # Rebuild + push threat signatures (origin machine only — FTP creds required)
+    if config.get("nightly_rebuild_signatures", True):
+        _cortex(cortex_q, "status", "Rebuilding threat signatures...")
+        try:
+            sig_script = REPO_ROOT / "scripts" / "build_signatures.py"
+            if sig_script.exists():
+                import subprocess as _sp2
+                result = _sp2.run(
+                    [sys.executable, str(sig_script), "--upload"],
+                    capture_output=True, text=True, timeout=120, cwd=str(REPO_ROOT),
+                )
+                if result.returncode == 0:
+                    log.info("Threat signatures rebuilt and pushed to server.")
+                else:
+                    log.warning("Signature rebuild failed:\n%s", result.stderr[:500])
+        except Exception as _sig_err:
+            log.debug("Signature rebuild skipped: %s", _sig_err)
+
     # Resource check
     if not args.skip_resource_check:
         _cortex(cortex_q, "state", "resource_check")

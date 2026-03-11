@@ -84,6 +84,20 @@ DEFAULTS = {
     # Enterprise
     "enterprise_mode": False,          # flips safety defaults for governance
 
+    # Event bus
+    "event_log_enabled": False,           # write every event to ~/.forge/events/session_{id}.jsonl
+
+    # Behavioral fingerprinting (Phase 2)
+    "behavioral_fingerprint": True,       # run 30-probe suite at session start (background)
+
+    # Proof of Inference (Phase 3)
+    "challenge_url": "https://dirt-star.com/Forge/challenge_server.php",
+
+    # AI Assurance (Phase 4)
+    "assurance_url": "https://dirt-star.com/Forge/assurance_verify.php",
+    "auto_assurance": False,          # run /assure automatically on session.end
+    "assurance_self_rate": False,     # ask model to rate own confidence + explain failures
+
     # Telemetry (opt-in, disabled by default)
     "telemetry_enabled": False,           # send redacted session data on exit
     "telemetry_url": "",                  # custom endpoint (leave blank for default)
@@ -133,15 +147,21 @@ DEFAULTS = {
     "nightly_auto_ceiling": False,              # auto binary-search for max stable turns
     "adaptive_expand_limits": False,            # if false, server can only reduce scope
     "nightly_schedule_time": "03:00",           # time for scheduled nightly runs (HH:MM)
+    "nightly_rebuild_signatures": True,         # rebuild + push threat signatures each night (origin machine)
 
     # Shipwright (AI release management)
     "shipwright_llm_classify": False,           # use LLM for ambiguous commit classification
+    "push_on_ship": False,                      # push branch + tag to origin after /ship go
 
     # AutoForge (smart auto-commit)
     "auto_commit": False,                       # auto-commit file edits each turn
+    "push_on_commit": False,                    # push to origin after each auto-commit
 
     # License / BPoS (Behavioral Proof of Stake)
     "license_tier": "community",                # community, pro, power
+
+    # Plugins
+    "disabled_plugins": [],                     # list of plugin class names to skip on load
 
     # Multi-backend LLM provider
     "backend_provider": "ollama",               # ollama, openai, anthropic
@@ -271,6 +291,19 @@ enterprise_mode: false
 # telemetry_enabled: false
 # telemetry_url: ""
 # telemetry_redact: true
+
+# ── AutoForge (smart auto-commit) ──
+# Automatically stages and commits file edits at each turn boundary.
+# Operates on whatever git repo the current working directory belongs to.
+# auto_commit: false          # enable auto-commit
+# push_on_commit: false       # push to origin after each auto-commit
+#                             # requires git credentials for the remote
+
+# ── Shipwright (AI release management) ──
+# Classifies commits, bumps semantic version, tags and optionally pushes releases.
+# shipwright_llm_classify: false   # use AI to classify ambiguous commit messages
+# push_on_ship: false              # push branch + tag to origin after /ship go
+#                                  # requires git credentials for the remote
 """
 
 
@@ -508,6 +541,12 @@ _VALIDATORS = {
     "effects_enabled": lambda v: isinstance(v, bool),
     "router_enabled": lambda v: isinstance(v, bool),
     "enterprise_mode": lambda v: isinstance(v, bool),
+    "event_log_enabled": lambda v: isinstance(v, bool),
+    "behavioral_fingerprint": lambda v: isinstance(v, bool),
+    "challenge_url": lambda v: isinstance(v, str),
+    "assurance_url": lambda v: isinstance(v, str),
+    "auto_assurance": lambda v: isinstance(v, bool),
+    "assurance_self_rate": lambda v: isinstance(v, bool),
     "telemetry_enabled": lambda v: isinstance(v, bool),
     "telemetry_url": lambda v: isinstance(v, str),
     "telemetry_redact": lambda v: isinstance(v, bool),
@@ -564,12 +603,16 @@ _VALIDATORS = {
     "adaptive_expand_limits": lambda v: isinstance(v, bool),
     "nightly_schedule_time": lambda v: isinstance(v, str) and len(v) == 5,
     "shipwright_llm_classify": lambda v: isinstance(v, bool),
+    "push_on_ship": lambda v: isinstance(v, bool),
+    "nightly_rebuild_signatures": lambda v: isinstance(v, bool),
     "auto_commit": lambda v: isinstance(v, bool),
+    "push_on_commit": lambda v: isinstance(v, bool),
     "license_tier": lambda v: isinstance(v, str) and v in ("community", "pro", "power", "origin"),
     "backend_provider": lambda v: isinstance(v, str) and v in ("ollama", "openai", "anthropic"),
     "openai_api_key": lambda v: isinstance(v, str),
     "anthropic_api_key": lambda v: isinstance(v, str),
     "openai_base_url": lambda v: isinstance(v, str),
+    "disabled_plugins": lambda v: isinstance(v, list) and all(isinstance(s, str) for s in v),
 }
 
 

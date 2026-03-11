@@ -10,6 +10,15 @@ def _make_plan():
 
 
 class TestPlanModeCleanup:
+    """Verifies PlanMode.reject() clears state and _run_plan_mode() calls reject() on all error paths.
+
+    reject() sets _current_plan=None, _armed=False, and appends the rejected plan to _history.
+    get_plan_prompt() disarms after generating the prompt. reject() with no current plan is a
+    safe no-op (no crash, empty history). arm/plan_prompt/reject cycle: should_plan()→True after arm,
+    False after get_plan_prompt(), _armed=False after reject(). Source inspection: _run_plan_mode
+    must call reject() on >= 3 early error return paths.
+    """
+
     def test_reject_clears_current_plan(self):
         pm = PlanMode(mode="manual")
         pm._current_plan = _make_plan()

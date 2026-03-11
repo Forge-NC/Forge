@@ -54,6 +54,14 @@ def reporter(mock_config, mock_forensics, tmp_path):
 # ── CrashFingerprint Tests ──
 
 class TestCrashFingerprint:
+    """Verifies CrashFingerprint produces stable, deduplicated hashes with message normalization.
+
+    Same (exc_type, file, func, msg) → same 16-char hex hash. Different exc_type → different hash.
+    normalize_message() strips numbers, Windows/Unix file paths → '<PATH>', hex addresses → '<ADDR>'.
+    from_exception() extracts exc_type and normalized_msg from a real exception.
+    No forge/ frame in traceback → forge_frame='unknown'.
+    """
+
     def test_same_exception_same_hash(self):
         """Two identical exceptions produce the same fingerprint hash."""
         fp1 = CrashFingerprint("KeyError", "engine.py", "run", "'missing_key'")
@@ -123,6 +131,15 @@ class TestCrashFingerprint:
 # ── Should-Report Tests ──
 
 class TestShouldReport:
+    """Verifies _should_report() correctly gates reports based on config, limits, and cooldown.
+
+    disabled → False. Enabled within limits → True. session_filed >= cap → False.
+    daily cap full (10 entries today) → False. Same fingerprint within cooldown_hours → False.
+    Same fingerprint 25h ago (past 24h cooldown) → True. Transient exceptions
+    (ConnectionError, TimeoutError) → always False. No forge/ frame ('unknown') → False.
+    is_manual=True bypasses all gates even when session_filed=100.
+    """
+
     def test_disabled_skips(self, mock_forensics, tmp_path):
         """Reports are skipped when bug_reporter_enabled is False."""
         config = MagicMock()
@@ -200,6 +217,15 @@ class TestShouldReport:
 # ── Issue Body Tests ──
 
 class TestIssueBody:
+    """Verifies _format_issue_body() produces a safe, well-structured GitHub issue body.
+
+    Body stays under 8000 characters even with 100-line traceback + 15 breadcrumbs.
+    Body contains the fingerprint hash. Breadcrumb table is present with action names.
+    No directive-style patterns that would trigger Crucible (SYSTEM:, IMPORTANT:, You must, Execute).
+    Ghost reports include a 'Ghost Detection Details' section with ghost_details keys.
+    Manual reports include a 'User Description' section with the user's text.
+    """
+
     def test_under_8000_chars(self, reporter):
         """Issue body stays under 8000 character limit."""
         report = BugReport(
@@ -295,6 +321,14 @@ class TestIssueBody:
 # ── Ghost Detection Tests ──
 
 class TestGhostDetection:
+    """Verifies check_session_ghosts() detects silent failure patterns above thresholds.
+
+    3+ embed failures → 'ghost_embed' report. Low tool success rate (3 ok, 8 fail) →
+    'ghost_tool' report. 3+ ContextFullErrors → 'ghost_context'. 3+ LLM errors →
+    'ghost_llm'. Clean session with no ghost events → []. Ghost detection disabled
+    via config → [] even with 5 embed failures.
+    """
+
     def test_embed_failures(self, reporter):
         """Embed failures above threshold create a ghost report."""
         for _ in range(3):
@@ -357,6 +391,12 @@ class TestGhostDetection:
 # ── Persistence Tests ──
 
 class TestPersistence:
+    """Verifies BugReporter reported data survives save/load cycles with staleness pruning.
+
+    _save_reported() + _load_reported() restores reported dict with correct issue_url.
+    Entries older than 90 days are pruned on load; recent entries are retained.
+    """
+
     def test_save_load_roundtrip(self, reporter):
         """Reported data survives save→load cycle."""
         reporter._reported["abc123"] = {
@@ -397,6 +437,14 @@ class TestPersistence:
 # ── File Issue Tests (mocked) ──
 
 class TestFileIssue:
+    """Verifies _file_issue() creates GitHub issues via 'gh' CLI with correct error handling.
+
+    Success: auth check OK + create OK → returns URL string, session_filed increments,
+    fingerprint hash added to _reported. Auth failure (returncode=1) → returns None,
+    session_filed stays 0. gh not installed (FileNotFoundError) → returns None.
+    gh issue create fails (returncode=1) → returns None.
+    """
+
     @patch("forge.bug_reporter.subprocess.run")
     def test_files_issue_success(self, mock_run, reporter):
         """Successful gh issue create returns URL and updates reported."""
@@ -477,6 +525,12 @@ class TestFileIssue:
 # ── Manual Report Tests ──
 
 class TestManualReport:
+    """Verifies file_manual_report() bypasses quality gates and includes user description.
+
+    With session_filed=100 (over cap), manual report still succeeds.
+    The user's description text appears in the 'gh issue create --body' argument.
+    """
+
     @patch("forge.bug_reporter.subprocess.run")
     def test_manual_report_bypasses_quality_gate(self, mock_run, reporter):
         """Manual reports bypass all quality gates."""
@@ -521,6 +575,12 @@ class TestManualReport:
 # ── Capture Tests ──
 
 class TestCapture:
+    """Verifies capture() behavior: returns None when reporter is disabled.
+
+    capture() with bug_reporter_enabled=False → always returns None (no report created).
+    Note: forge/ frame detection means captures from test files may legitimately return None.
+    """
+
     def test_capture_adds_to_pending(self, reporter):
         """capture() adds a BugReport to the pending queue."""
         try:
@@ -555,6 +615,12 @@ class TestCapture:
 # ── Module-Level Convenience Tests ──
 
 class TestModuleConvenience:
+    """Verifies module-level init/get functions and safe no-op behavior before initialization.
+
+    init_reporter() sets the global _reporter; get_reporter() returns it.
+    capture_crash() and capture_ghost() before init (reporter=None) are safe no-ops.
+    """
+
     def test_init_and_get(self, mock_config, mock_forensics):
         """init_reporter sets the global, get_reporter returns it."""
         r = init_reporter(mock_config, mock_forensics)
@@ -585,6 +651,8 @@ class TestModuleConvenience:
 # ── Audit Dict Tests ──
 
 class TestAuditDict:
+    """Verifies to_audit_dict() and stats() return expected keys for audit packages and dashboards."""
+
     def test_to_audit_dict(self, reporter):
         """to_audit_dict returns expected keys."""
         d = reporter.to_audit_dict()
@@ -605,6 +673,8 @@ class TestAuditDict:
 # ── Flush Tests ──
 
 class TestFlush:
+    """Verifies flush() files all pending reports and clears the queue, or returns [] if empty."""
+
     @patch("forge.bug_reporter.subprocess.run")
     def test_flush_files_pending(self, mock_run, reporter):
         """flush() files all pending reports and clears the queue."""

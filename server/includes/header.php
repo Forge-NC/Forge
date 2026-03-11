@@ -34,6 +34,8 @@ $_nav_key_param = isset($_GET['key']) ? '?key=' . urlencode($_GET['key']) : '';
         <div class="nav-links">
             <a href="/Forge/"<?php echo $page_id === 'home' ? ' class="active"' : ''; ?>>Home</a>
             <a href="docs.php"<?php echo $page_id === 'docs' ? ' class="active"' : ''; ?>>Docs</a>
+            <a href="matrix.php"<?php echo $page_id === 'matrix' ? ' class="active"' : ''; ?>>Matrix</a>
+            <a href="scoreboard.php"<?php echo $page_id === 'scoreboard' ? ' class="active"' : ''; ?>>Scoreboard</a>
             <a href="status.php"<?php echo $page_id === 'status' ? ' class="active"' : ''; ?>>Status</a>
             <a href="support.php"<?php echo $page_id === 'support' ? ' class="active"' : ''; ?>>Support</a>
             <?php if ($_nav_is_owner): ?>

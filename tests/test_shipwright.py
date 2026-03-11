@@ -35,6 +35,15 @@ def sw(tmp_project):
 # ── Version management ──
 
 class TestVersionManagement:
+    """Verifies Shipwright reads, writes, and bumps semantic versions across project files.
+
+    get_current_version() reads from pyproject.toml. Missing file returns '0.0.0'.
+    set_version() updates both pyproject.toml and forge/__init__.py, returning 2 modified files.
+    bump_version(): major '1.2.3' → '2.0.0', minor → '1.3.0', patch → '1.2.4', none → unchanged.
+    _SEMVER_RE matches '1.2.3', '0.9.0', pre-release '1.0.0-alpha', build metadata '1.0.0+build.42'.
+    It does NOT match 'not-a-version' or '1.2' (missing patch component).
+    """
+
     def test_get_current_version(self, sw, tmp_project):
         assert sw.get_current_version() == "1.2.3"
 
@@ -76,6 +85,15 @@ class TestVersionManagement:
 # ── Commit classification ──
 
 class TestCommitClassification:
+    """Verifies classify_commits() maps conventional commit prefixes to categories and bump types.
+
+    'feat:' → category='feature', bump_type='minor'. 'fix:' → 'fix'/'patch'.
+    'BREAKING CHANGE' → 'breaking'/'major'. 'docs:' → 'docs'/'none'.
+    'test:' → 'test'/'none'. 'security:' → 'security'/'patch'.
+    'refactor:' → 'refactor'/'patch'. 'Implement ...' (imperative) → 'feature'/'minor'.
+    Unknown message → bump_type='patch' (safe default).
+    """
+
     def test_feature_commit(self, sw):
         commits = [ClassifiedCommit(sha="abc", message="feat: add new tool", author="dev", date="2026-03-03")]
         sw.classify_commits(commits)
@@ -133,6 +151,12 @@ class TestCommitClassification:
 # ── Version computation ──
 
 class TestVersionComputation:
+    """Verifies compute_next_version() picks the highest bump level across all commits.
+
+    mix of patch+minor → minor wins, next version is bumped by minor.
+    Empty commits → bump='none', version unchanged. Breaking change + patch → major wins.
+    """
+
     def test_highest_bump_wins(self, sw):
         commits = [
             ClassifiedCommit(sha="a", message="fix: bug", author="d", date="2026-01-01",
@@ -164,6 +188,12 @@ class TestVersionComputation:
 # ── Changelog generation ──
 
 class TestChangelogGeneration:
+    """Verifies generate_changelog() produces properly structured Markdown with all commit categories.
+
+    Output must include '## [version]', '### Features', '### Bug Fixes', and the commit messages.
+    Empty commit list still produces a minimal '## [version]' header.
+    """
+
     def test_generates_markdown(self, sw):
         commits = [
             ClassifiedCommit(sha="abc123", message="Add voice commands", author="d", date="2026-01-01",
@@ -186,6 +216,12 @@ class TestChangelogGeneration:
 # ── History persistence ──
 
 class TestHistoryPersistence:
+    """Verifies release history is saved to disk and reloaded correctly by a new Shipwright instance.
+
+    After appending a ReleaseInfo and calling _save_history(), a new Shipwright pointed at
+    the same data_dir must load exactly 1 history entry with the correct version.
+    """
+
     def test_save_load_roundtrip(self, tmp_project):
         from forge.shipwright import ReleaseInfo
         data_dir = tmp_project / ".hist_test"
@@ -204,6 +240,13 @@ class TestHistoryPersistence:
 # ── Status display ──
 
 class TestStatusDisplay:
+    """Verifies format_status() shows the current version, format_history() handles empty, and to_audit_dict() is correct.
+
+    format_status() must include the current version string '1.2.3'.
+    format_history() for a fresh instance must include 'No releases'.
+    to_audit_dict() must have schema_version==1 and current_version=='1.2.3'.
+    """
+
     def test_format_status_no_git(self, sw):
         status = sw.format_status()
         assert "1.2.3" in status
@@ -220,3 +263,144 @@ class TestStatusDisplay:
         audit = sw.to_audit_dict()
         assert audit["schema_version"] == 1
         assert audit["current_version"] == "1.2.3"
+
+
+# ── Push after release ──
+
+class TestPushAfterRelease:
+    """Verifies push_after_release controls whether git push is called during release().
+
+    Default: _push_after_release=False. Explicitly setting push_after_release=True sets it True.
+    When configured True: release() calls _git('push', ...) twice (branch + tag) with 'origin' in args.
+    When disabled: no push calls. When push fails with RuntimeError: result['push_error'] captures
+    the error message ('Permission denied') rather than raising.
+    """
+
+    def test_push_after_release_false_by_default(self, sw):
+        assert sw._push_after_release is False
+
+    def test_push_after_release_true_when_set(self, tmp_project):
+        data_dir = tmp_project / ".sw_push_test"
+        data_dir.mkdir()
+        sw = Shipwright(project_dir=str(tmp_project), data_dir=data_dir,
+                        push_after_release=True)
+        assert sw._push_after_release is True
+
+    def test_push_called_on_release_when_configured(self, tmp_project):
+        """push_after_release=True must call git push for branch and tag."""
+        import subprocess
+        from unittest.mock import patch, call
+
+        data_dir = tmp_project / ".sw_push_call_test"
+        data_dir.mkdir()
+
+        # Set up a minimal git repo with a commit so release() has something to work with
+        env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1",
+               "HOME": str(tmp_path_for := tmp_project),
+               "GIT_TERMINAL_PROMPT": "0"}
+        subprocess.run(["git", "init"], cwd=str(tmp_project),
+                       capture_output=True, env=env)
+        subprocess.run(["git", "config", "core.fsmonitor", "false"],
+                       cwd=str(tmp_project), capture_output=True, env=env)
+        subprocess.run(["git", "config", "user.email", "t@t.com"],
+                       cwd=str(tmp_project), capture_output=True, env=env)
+        subprocess.run(["git", "config", "user.name", "T"],
+                       cwd=str(tmp_project), capture_output=True, env=env)
+        subprocess.run(["git", "add", "."], cwd=str(tmp_project),
+                       capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "feat: initial"],
+                       cwd=str(tmp_project), capture_output=True, env=env)
+
+        sw = Shipwright(project_dir=str(tmp_project), data_dir=data_dir,
+                        push_after_release=True)
+
+        push_calls = []
+
+        original_git = sw._git
+        def mock_git(*args, **kwargs):
+            if args[0] == "push":
+                push_calls.append(list(args))
+                return ""
+            return original_git(*args, **kwargs)
+
+        sw._git = mock_git
+        result = sw.release(dry_run=False)
+
+        if result["status"] == "released":
+            assert len(push_calls) == 2  # branch push + tag push
+            assert any("origin" in c for c in push_calls)
+
+    def test_push_not_called_when_disabled(self, tmp_project):
+        """push_after_release=False must not call git push."""
+        import subprocess
+
+        data_dir = tmp_project / ".sw_nopush_test"
+        data_dir.mkdir()
+
+        env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1",
+               "HOME": str(tmp_project), "GIT_TERMINAL_PROMPT": "0"}
+        subprocess.run(["git", "init"], cwd=str(tmp_project),
+                       capture_output=True, env=env)
+        subprocess.run(["git", "config", "core.fsmonitor", "false"],
+                       cwd=str(tmp_project), capture_output=True, env=env)
+        subprocess.run(["git", "config", "user.email", "t@t.com"],
+                       cwd=str(tmp_project), capture_output=True, env=env)
+        subprocess.run(["git", "config", "user.name", "T"],
+                       cwd=str(tmp_project), capture_output=True, env=env)
+        subprocess.run(["git", "add", "."], cwd=str(tmp_project),
+                       capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "feat: initial"],
+                       cwd=str(tmp_project), capture_output=True, env=env)
+
+        sw = Shipwright(project_dir=str(tmp_project), data_dir=data_dir,
+                        push_after_release=False)
+
+        push_calls = []
+        original_git = sw._git
+        def mock_git(*args, **kwargs):
+            if args[0] == "push":
+                push_calls.append(list(args))
+                return ""
+            return original_git(*args, **kwargs)
+
+        sw._git = mock_git
+        sw.release(dry_run=False)
+        assert push_calls == []
+
+    def test_push_error_captured_in_result(self, tmp_project):
+        """A git push failure must be captured in result['push_error'], not raised."""
+        import subprocess
+
+        data_dir = tmp_project / ".sw_pusherr_test"
+        data_dir.mkdir()
+
+        env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1",
+               "HOME": str(tmp_project), "GIT_TERMINAL_PROMPT": "0"}
+        subprocess.run(["git", "init"], cwd=str(tmp_project),
+                       capture_output=True, env=env)
+        subprocess.run(["git", "config", "core.fsmonitor", "false"],
+                       cwd=str(tmp_project), capture_output=True, env=env)
+        subprocess.run(["git", "config", "user.email", "t@t.com"],
+                       cwd=str(tmp_project), capture_output=True, env=env)
+        subprocess.run(["git", "config", "user.name", "T"],
+                       cwd=str(tmp_project), capture_output=True, env=env)
+        subprocess.run(["git", "add", "."], cwd=str(tmp_project),
+                       capture_output=True, env=env)
+        subprocess.run(["git", "commit", "-m", "feat: initial"],
+                       cwd=str(tmp_project), capture_output=True, env=env)
+
+        sw = Shipwright(project_dir=str(tmp_project), data_dir=data_dir,
+                        push_after_release=True)
+
+        original_git = sw._git
+        def mock_git(*args, **kwargs):
+            if args[0] == "push":
+                raise RuntimeError("remote: Permission denied")
+            return original_git(*args, **kwargs)
+
+        sw._git = mock_git
+        result = sw.release(dry_run=False)
+
+        if result["status"] == "released":
+            assert "push_error" in result
+            assert "Permission denied" in result["push_error"]

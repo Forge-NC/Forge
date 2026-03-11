@@ -368,7 +368,7 @@ Tests:
 8. forge/plugins/bundled/cortex_plugin.py
 9. forge/engine.py — add remaining emits (file, threat, context, model switch)
 10. tests/test_plugin_events.py
-11. Run full test suite — all 903+ tests must pass
+11. Run full test suite — all 1,318+ tests must pass
 
 ---
 

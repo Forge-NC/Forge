@@ -5,7 +5,15 @@ from forge.index import CodebaseIndex, CodeChunk
 
 
 class TestFunctionBoundaryChunking:
-    """Test _chunk_by_functions handles various Python patterns."""
+    """Verifies _chunk_by_functions correctly detects Python function/method boundaries.
+
+    3 top-level functions → >=3 chunks with file_path='test.py'. Class with methods +
+    standalone function → >=2 chunks. async def and decorated functions handled.
+    Decorator lines included in chunk content. Indented class methods detected as
+    boundaries. No functions → [] (triggers fixed-size fallback). Single function → []
+    (need >=2 boundaries). Nested outer/inner functions → >=2 chunks.
+    start_line >= 1 and end_line >= start_line. file_hash and language propagated to all chunks.
+    """
 
     def _chunk(self, source: str) -> list[CodeChunk]:
         """Helper: chunk a Python source string."""
@@ -168,7 +176,11 @@ def b():
 
 
 class TestChunkFileDispatch:
-    """Test that _chunk_file routes Python to function-boundary chunking."""
+    """Verifies _chunk_file routes Python to function-boundary chunking and other langs to fixed-size.
+
+    Python file >50 lines with 10 functions → >=2 function-boundary chunks.
+    Non-Python file (data.js) → fixed-size chunks all with language='js'.
+    """
 
     def test_python_uses_function_chunking(self):
         """Python file with functions should use function-boundary chunking."""
@@ -200,7 +212,10 @@ class TestChunkFileDispatch:
 
 
 class TestConfigValidatorsComplete:
-    """Verify all DEFAULTS keys have validators."""
+    """Verifies every key in config DEFAULTS has a corresponding entry in _VALIDATORS.
+
+    Any DEFAULTS key missing from _VALIDATORS would cause a crash on config load.
+    """
 
     def test_all_defaults_have_validators(self):
         from forge.config import DEFAULTS, _VALIDATORS

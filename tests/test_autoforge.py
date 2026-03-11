@@ -62,6 +62,14 @@ def af(git_project):
 # ── Basic operations ──
 
 class TestBasicOperations:
+    """Verifies AutoForge enable/disable state, edit recording, and git repo detection.
+
+    Default state is disabled. enable() sets enabled=True. disable() resets it.
+    enable() on a directory without a git repo leaves enabled=False (no-op).
+    record_edit() silently ignores files outside project_dir. Files inside project_dir
+    are accepted when enabled. record_edit() is a no-op when disabled.
+    """
+
     def test_enable_disable(self, git_project):
         af = AutoForge(project_dir=str(git_project),
                        git_env=_git_env(git_project))
@@ -75,6 +83,19 @@ class TestBasicOperations:
         af = AutoForge(project_dir=str(tmp_path))
         af.enable()
         assert not af.enabled  # No git repo
+
+    def test_record_edit_skips_out_of_repo_file(self, af, git_project, tmp_path):
+        # A file on the desktop or any path outside project_dir must be silently ignored
+        outside_file = tmp_path.parent / "random_list.txt"
+        outside_file.write_text("hello\n", encoding="utf-8")
+        af.record_edit(str(outside_file))
+        assert len(af._pending) == 0
+
+    def test_record_edit_accepts_in_repo_file(self, af, git_project):
+        inside_file = git_project / "inside.py"
+        inside_file.write_text("x = 1\n", encoding="utf-8")
+        af.record_edit(str(inside_file))
+        assert len(af._pending) == 1
 
     def test_record_edit_when_disabled(self, git_project):
         af = AutoForge(project_dir=str(git_project),
@@ -93,6 +114,16 @@ class TestBasicOperations:
 # ── Committing ──
 
 class TestCommitting:
+    """Verifies AutoForge correctly batches edits and commits to git.
+
+    A single recorded edit produces a commit with one file and a non-empty SHA.
+    Five files in one batch produce a commit with '5 files' in the message.
+    commit_pending() with nothing pending returns None.
+    advance_turn() commits pending edits for that turn.
+    on_session_end() commits remaining edits with 'session end' in the message.
+    Duplicate file paths in the same batch are deduplicated before committing.
+    """
+
     def test_commit_single_file(self, af, git_project):
         test_file = git_project / "new_file.py"
         test_file.write_text("x = 1\n", encoding="utf-8")
@@ -146,6 +177,12 @@ class TestCommitting:
 # ── Message generation ──
 
 class TestMessageGeneration:
+    """Verifies commit messages include the filename for single-file commits and the action verb.
+
+    A single file edit commit includes the filename in the message.
+    A 'create' action produces a message with 'add' (or equivalent) verb.
+    """
+
     def test_single_file_message(self, af, git_project):
         f = git_project / "single.py"
         f.write_text("pass\n", encoding="utf-8")
@@ -164,6 +201,12 @@ class TestMessageGeneration:
 # ── Status display ──
 
 class TestStatusDisplay:
+    """Verifies format_status() and to_audit_dict() correctly reflect enabled/disabled state.
+
+    Disabled → 'disabled' in status string. Enabled → 'enabled' in status string.
+    to_audit_dict() has schema_version==1 and enabled==True when enabled.
+    """
+
     def test_format_status_disabled(self, git_project):
         af = AutoForge(project_dir=str(git_project),
                        git_env=_git_env(git_project))
@@ -183,6 +226,12 @@ class TestStatusDisplay:
 # ── Hook script generation ──
 
 class TestHookScript:
+    """Verifies generate_hook_script() produces syntactically valid Python containing the project path.
+
+    The output must parse without errors via ast.parse(). The project_dir string must appear
+    verbatim in the generated script so it hooks back to the correct project.
+    """
+
     def test_generates_valid_python(self):
         script = generate_hook_script("/tmp/project")
         # Should be valid Python

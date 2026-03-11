@@ -20,6 +20,15 @@ def _make_forensics(tmp_path):
 # ---------------------------------------------------------------------------
 
 class TestRecordEvent:
+    """Verifies SessionForensics correctly records events and updates all aggregation counters.
+
+    record() appends a ForensicEvent and updates per-category aggregates:
+    file_read → _files_read[path] count; file_write → _files_written[path] count + _files_created
+    if created=True; file_edit → _files_edited[path]; shell → _shell_commands list;
+    tool → _tool_calls[name] count; threat → _threats list; context_swap → _context_swaps count.
+    risk_level is stored on the event. Missing details defaults to {}.
+    """
+
     def test_basic_record(self, tmp_path):
         sf = _make_forensics(tmp_path)
         sf.record("file_read", "Read main.py",
@@ -100,6 +109,12 @@ class TestRecordEvent:
 # ---------------------------------------------------------------------------
 
 class TestRecordTurn:
+    """Verifies record_turn() accumulates turn count and token totals correctly.
+
+    Each call increments _turns by 1 and adds tokens_in/tokens_out to their respective totals.
+    Three turns of (100,50), (200,100), (300,150) give _turns==3, _total_tokens_in==600, _total_tokens_out==300.
+    """
+
     def test_single_turn(self, tmp_path):
         sf = _make_forensics(tmp_path)
         sf.record_turn(tokens_in=500, tokens_out=200)
@@ -122,6 +137,15 @@ class TestRecordTurn:
 # ---------------------------------------------------------------------------
 
 class TestGenerateReport:
+    """Verifies generate_report() produces a complete Markdown forensics report.
+
+    The report must start with '# Forge Session Forensics Report' and include sections:
+    Session ID, Duration, Risk Events (with 'No risk events detected' when clean or threat details
+    when threats exist), Files Touched, Files Created, Shell Commands (with actual commands),
+    Tool Usage (with tool names), Event Timeline, and Context Management.
+    save_report() must write the report to a file that exists and contains 'Forge Session Forensics'.
+    """
+
     def test_report_is_markdown(self, tmp_path):
         sf = _make_forensics(tmp_path)
         sf.record_turn(100, 50)
@@ -203,6 +227,14 @@ class TestGenerateReport:
 # ---------------------------------------------------------------------------
 
 class TestFormatSummary:
+    """Verifies format_summary() returns a terminal-formatted string with session metrics.
+
+    The summary must include the session_id and the token count (1000 or '1,000').
+    A clean session (no threats) must have 'clean' in the output.
+    A session with 1 threat must show '1' in the output for the threat count.
+    Tests skip if forge.ui.terminal is not importable (optional dependency).
+    """
+
     def test_summary_contains_key_info(self, tmp_path):
         sf = _make_forensics(tmp_path)
         sf.record_turn(1000, 500)
@@ -247,7 +279,13 @@ class TestFormatSummary:
 # ---------------------------------------------------------------------------
 
 class TestCategories:
-    """Ensure all expected categories are handled without errors."""
+    """Verifies all 10 supported event categories are handled without errors and update the correct aggregates.
+
+    One entry each from file_read, file_write (created=False), file_write (created=True), file_edit,
+    shell, tool, threat, context_swap, eviction, and error must produce: _files_read with 1 entry,
+    _files_written with 2 entries, _files_edited with 1 entry, _shell_commands with 1 entry,
+    _threats with 1 entry, _context_swaps==1, /c.py in _files_created.
+    """
 
     def test_all_categories(self, tmp_path):
         sf = _make_forensics(tmp_path)
@@ -278,6 +316,12 @@ class TestCategories:
 
 
 class TestForensicEventDataclass:
+    """Verifies the ForensicEvent dataclass stores fields correctly and applies defaults.
+
+    All required fields (timestamp, category, action) must be stored as-is.
+    details defaults to {} and risk_level defaults to 0 when not provided.
+    """
+
     def test_event_creation(self):
         event = ForensicEvent(
             timestamp=time.time(),

@@ -50,6 +50,18 @@ def _make_mock_backend(response_text):
 # ── Live execution bridge ──
 
 class TestRunScenarioLive:
+    """Verifies run_scenario_live() executes scenarios against a live (mocked) LLM backend.
+
+    Successful refactor: response with correct code block → passed=True, model set,
+    files_modified contains 'main.py', quality_score>0, tokens_out=50 (from done chunk).
+    Wrong file: response modifies other.py, not main.py → passed=False, file_scope_accuracy=0.0.
+    Refusal response (no code blocks) → passed=False, quality_score<0.5.
+    Backend error chunk → passed=False, error contains the error text.
+    Exception in backend.chat → passed=False, error contains exception message.
+    backend_type recorded as the class name ('MagicMock'). Custom system_prompt is
+    passed to backend.chat in the messages list.
+    """
+
     def test_successful_refactor(self, runner, simple_scenario):
         response = "```main.py\ncount = 1\nprint(count)\n```"
         backend = _make_mock_backend(response)
@@ -112,6 +124,12 @@ class TestRunScenarioLive:
 
 
 class TestRunSuiteLive:
+    """Verifies run_suite_live() runs all scenarios in a named suite directory.
+
+    A suite with 2 JSON scenario files → SuiteResult with 2 results and model set
+    from the backend.
+    """
+
     def test_runs_all_scenarios(self, runner, tmp_path):
         # Create a suite directory with 2 scenarios
         suite_dir = tmp_path / "scenarios" / "test_suite"
@@ -138,6 +156,13 @@ class TestRunSuiteLive:
 # ── Code block extraction ──
 
 class TestCodeBlockExtraction:
+    """Verifies _extract_code_blocks() parses fenced code blocks with filenames from LLM responses.
+
+    Extracts single file (main.py), multiple files (a.py + b.js), and nested paths
+    (src/utils/helper.py — also creates parent dirs in work_dir). Plain prose with no
+    code blocks → []. Unlabeled fenced blocks (no filename) → [] (ignored).
+    """
+
     def test_extracts_python(self):
         response = "Here's the fix:\n```main.py\ncount = 1\n```\nDone."
         modified = BenchmarkRunner._extract_code_blocks(
@@ -174,6 +199,13 @@ class TestCodeBlockExtraction:
 # ── Response scoring ──
 
 class TestBenchmarkResponseScoring:
+    """Verifies _score_benchmark_response() correctly scores LLM outputs against scenario expectations.
+
+    Perfect response (correct code + correct file) → score >= 0.7.
+    Refusal ("I cannot modify files") with empty file list → score < 0.3.
+    Empty response → score < 0.3. Partial match (code block but wrong file) → 0.2 < score < 0.7.
+    """
+
     def test_perfect_response(self, simple_scenario):
         response = "```main.py\ncount = 1\nprint(count)\n```"
         score = BenchmarkRunner._score_benchmark_response(
@@ -202,6 +234,13 @@ class TestBenchmarkResponseScoring:
 # ── Benchmark report ──
 
 class TestBenchmarkReport:
+    """Verifies build_comparison_report() generates valid HTML with model names and Chart.js.
+
+    Single model with 2 results → HTML contains '<html', model name 'model-a', and
+    'Chart.js'/'chart.js' (for score visualization). Two models → both 'm1' and 'm2'
+    appear in the report. save_report() writes the HTML to disk verbatim.
+    """
+
     def test_generates_html(self):
         from forge.benchmark_report import build_comparison_report
         results = [{

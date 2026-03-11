@@ -58,38 +58,47 @@ _FALLBACK_TIERS = {
         "price_cents": 0,
         "seats": 1,
         "genome_persistence": False,
+        "genome_sync": False,
         "enterprise_mode": False,
         "fleet_analytics": False,
         "benchmark_suite": True,
         "threat_intel": True,
         "auto_commit": False,
         "shipwright": False,
+        "compliance_scenarios": False,
+        "priority_support": False,
     },
     "pro": {
         "label": "Pro",
-        "price_display": "$49 one-time",
-        "price_cents": 4900,
+        "price_display": "$199 one-time",
+        "price_cents": 19900,
         "seats": 3,
         "genome_persistence": True,
+        "genome_sync": True,
         "enterprise_mode": False,
         "fleet_analytics": False,
         "benchmark_suite": True,
         "threat_intel": True,
         "auto_commit": True,
         "shipwright": True,
+        "compliance_scenarios": False,
+        "priority_support": False,
     },
     "power": {
         "label": "Power",
-        "price_display": "$700 one-time",
-        "price_cents": 70000,
+        "price_display": "$999 one-time",
+        "price_cents": 99900,
         "seats": 10,
         "genome_persistence": True,
+        "genome_sync": True,
         "enterprise_mode": True,
         "fleet_analytics": True,
         "benchmark_suite": True,
         "threat_intel": True,
         "auto_commit": True,
         "shipwright": True,
+        "compliance_scenarios": True,
+        "priority_support": True,
     },
     "origin": {
         "label": "Origin",
@@ -97,12 +106,15 @@ _FALLBACK_TIERS = {
         "price_cents": 0,
         "seats": -1,              # Unlimited
         "genome_persistence": True,
+        "genome_sync": True,
         "enterprise_mode": True,
         "fleet_analytics": True,
         "benchmark_suite": True,
         "threat_intel": True,
         "auto_commit": True,
         "shipwright": True,
+        "compliance_scenarios": True,
+        "priority_support": True,
         "origin_role": True,      # Root of the BPoS chain of being
     },
 }
@@ -556,6 +568,44 @@ class BPoS:
 
         self._save_genome()
 
+    def _sign_passport(self, data: dict) -> str:
+        """Test helper — sign a passport dict with a throw-away Ed25519 keypair.
+
+        Populates ``data["origin_signature"]`` and temporarily patches
+        ``_ORIGIN_PUBLIC_KEY_B64`` so that ``_verify_origin_signature``
+        succeeds for the signed dict.  Only intended for use in test code.
+        """
+        import base64
+        import hashlib
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives.serialization import (
+            Encoding, PublicFormat,
+        )
+
+        seed = hashlib.pbkdf2_hmac("sha256", b"forge-test-passport-key", b"salt", 1, 32)
+        priv_key = Ed25519PrivateKey.from_private_bytes(seed)
+        pub_bytes = priv_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        BPoS._ORIGIN_PUBLIC_KEY_B64 = base64.b64encode(pub_bytes).decode()
+
+        passport = Passport(
+            account_id=data.get("account_id", ""),
+            tier=data.get("tier", "community"),
+            issued_at=data.get("issued_at", 0),
+            expires_at=data.get("expires_at", 0),
+            activations=list(data.get("activations", [])),
+            max_activations=data.get("max_activations", 1),
+            origin_signature="",
+            role=data.get("role", ""),
+            passport_id=data.get("passport_id", ""),
+            master_id=data.get("master_id", ""),
+            seat_count=data.get("seat_count", 0),
+            parent_passport_id=data.get("parent_passport_id", ""),
+        )
+        payload = self._signing_payload(passport)
+        sig_b64 = base64.b64encode(priv_key.sign(payload)).decode()
+        data["origin_signature"] = sig_b64
+        return sig_b64
+
     def get_genome_maturity(self) -> float:
         """Compute genome maturity score (0.0 = fresh, 1.0 = mature).
 
@@ -563,6 +613,18 @@ class BPoS:
         a fresh install. Based on session count with diminishing returns.
         """
         sessions = self._genome.session_count
+        # Community tier never persists genome, so session_count stays 0.
+        # Fall back to billing lifetime_sessions for a more meaningful number.
+        if sessions == 0:
+            try:
+                import json as _json
+                bill = self._data_dir / "billing.json"
+                if bill.exists():
+                    sessions = _json.loads(
+                        bill.read_text(encoding="utf-8")
+                    ).get("lifetime_sessions", 0)
+            except Exception:
+                pass
         # Sigmoid-like curve: reaches 0.5 at 50 sessions, 0.9 at 200
         import math
         return 1.0 / (1.0 + math.exp(-0.04 * (sessions - 50)))
@@ -831,6 +893,121 @@ class BPoS:
                 pass
             raise
 
+    # ── Team Genome Sync ──
+
+    def push_team_genome(self) -> tuple:
+        """Push local genome to the team genome on the server.
+
+        Returns (ok: bool, message: str).
+        """
+        if not self.is_feature_allowed("genome_sync"):
+            return (False, "genome_sync not available on this tier")
+        if not self._passport:
+            return (False, "no passport loaded")
+        try:
+            import requests
+            account_id = self._passport.account_id
+            machine_id = self._machine_id
+            payload = {
+                "action": "genome_push",
+                "account_id": account_id,
+                "machine_id": machine_id,
+                "genome": asdict(self._genome),
+            }
+            resp = requests.post(
+                PASSPORT_API_URL,
+                json=payload,
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("ok"):
+                    return (True, "pushed")
+                return (False, data.get("error", "unknown server error"))
+            return (False, f"HTTP {resp.status_code}")
+        except Exception as exc:
+            return (False, str(exc))
+
+    def pull_team_genome(self) -> bool:
+        """Pull team genome from server and merge into local genome.
+
+        Returns True if merge happened, False otherwise.
+        """
+        if not self.is_feature_allowed("genome_sync"):
+            return False
+        if not self._passport:
+            return False
+        try:
+            import requests
+            resp = requests.get(
+                PASSPORT_API_URL,
+                params={
+                    "action": "genome_pull",
+                    "account_id": self._passport.account_id,
+                },
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                return False
+            data = resp.json()
+            if not data.get("ok") or not data.get("genome"):
+                return False
+            self._merge_team_genome(data["genome"])
+            self._save_genome()
+            return True
+        except Exception as exc:
+            log.debug("Team genome pull failed: %s", exc)
+            return False
+
+    def _merge_team_genome(self, team: dict):
+        """Merge a team genome dict into the local genome using EMA."""
+        alpha = 0.3
+        g = self._genome
+
+        # Counters: take max (team is aggregate of all members)
+        g.session_count = max(g.session_count, team.get("session_count", 0))
+        g.total_turns = max(g.total_turns, team.get("total_turns", 0))
+        g.ami_failure_catalog_size = max(
+            g.ami_failure_catalog_size,
+            team.get("ami_failure_catalog_size", 0))
+        g.ami_model_profiles = max(
+            g.ami_model_profiles, team.get("ami_model_profiles", 0))
+        g.threat_scans_total = max(
+            g.threat_scans_total, team.get("threat_scans_total", 0))
+        g.threat_hits_total = max(
+            g.threat_hits_total, team.get("threat_hits_total", 0))
+        g.tool_call_total = max(
+            g.tool_call_total, team.get("tool_call_total", 0))
+
+        # EMA metrics: blend team signal with local
+        for field_name in ("ami_average_quality", "reliability_score",
+                          "continuity_baseline_grade", "ami_routing_accuracy",
+                          "continuity_recovery_rate", "tool_success_rate",
+                          "benchmark_pass_rate"):
+            team_val = team.get(field_name, 0.0)
+            if team_val > 0:
+                local_val = getattr(g, field_name, 0.0)
+                merged = round(alpha * team_val + (1 - alpha) * local_val, 3)
+                setattr(g, field_name, merged)
+
+        # Per-model quality: union keys, EMA for overlapping
+        for model, quality in team.get("per_model_quality", {}).items():
+            existing = g.per_model_quality.get(model, 0.5)
+            g.per_model_quality[model] = round(
+                alpha * quality + (1 - alpha) * existing, 3)
+
+        # Threat pattern distribution: take max per category
+        for cat, count in team.get("threat_pattern_distribution", {}).items():
+            g.threat_pattern_distribution[cat] = max(
+                g.threat_pattern_distribution.get(cat, 0), count)
+
+        # Models tested: set union
+        team_models = set(team.get("models_tested", []))
+        local_models = set(g.models_tested)
+        g.models_tested = sorted(local_models | team_models)
+
+        # Quality trend: keep local trend (team trend is aggregate noise)
+
     # ── Display ──
 
     def format_status(self) -> str:
@@ -860,6 +1037,12 @@ class BPoS:
 
         if not self.is_feature_allowed("genome_persistence"):
             lines.append("  Note: Genome resets each session (Community tier)")
+
+        if self.is_feature_allowed("genome_sync"):
+            lines.append("  Team genome sync: enabled")
+
+        if self.is_feature_allowed("priority_support"):
+            lines.append("  Priority support: active")
 
         return "\n".join(lines)
 

@@ -2,7 +2,8 @@
 # Strategic Architecture Plan: Enterprise-Grade AI Runtime Infrastructure
 
 > Written: 2026-03-05
-> Status: Active — Phase 1 ready to implement
+> Engineering Status: Phases 1–5 IMPLEMENTED — 2026-03-05
+> Launch Status: Phase 6 PENDING (non-code deliverables remain: README rewrite, docs/launch/)
 > This document is Forge-readable. Internal AI, read this to understand the plan.
 
 ---
@@ -13,10 +14,50 @@ Forge is not another AI coding assistant. It is an AI runtime environment that m
 hardens, and certifies AI systems under real-world conditions. The coding interface is
 the entry point. The infrastructure layer is the product.
 
+**One-line positioning: Forge is chaos engineering for AI agents.**
+
+Chaos engineering (Chaos Monkey, etc.) became standard infrastructure practice by doing
+one thing: intentionally breaking systems to prove reliability. Forge is the AI equivalent.
+Developers already understand the concept. The positioning is instantly legible.
+
+**The test track, not the judge.**
+
+Forge does not pick winners. It provides the track where models race. A race track
+makes money because the race happens there — it does not care who crosses first.
+This framing is the foundation of all future positioning decisions:
+
+- Forge tests OpenAI, Anthropic, local models, future models — with identical scenarios
+- Forge publishes failure evidence, not opinions
+- Forge never recommends a model or editorializes results
+
+Neutrality is the moat. It is why every AI lab, every open-source community, every
+enterprise wants Forge to exist — because none of them control it.
+
+**Long-term: the AI Truth Layer.**
+
+The AI ecosystem currently has no trusted external measurement. Vendors self-report
+benchmarks. Labs run academic evals on controlled prompts. Nobody measures real
+workload behavior under pressure across thousands of independent machines.
+
+Forge is architecturally positioned to become that measurement layer. Not by marketing —
+by the data existing and being cryptographically trustworthy. BPoS + Proof of Inference
++ fleet consensus is the infrastructure that makes this possible. No competitor can
+replicate this without rebuilding from scratch.
+
 Three markets:
 1. AI developer tooling (immediate — users who want a better coding assistant)
 2. AI reliability/observability platform (near-term — orgs running fleets of AI agents)
 3. AI assurance/certification infrastructure (long-term — defense, finance, healthcare, aviation)
+
+**Revenue model tied to neutrality:**
+
+Forge makes money because models compete on it — not by picking sides. Revenue appears at:
+1. Enterprise assurance — organizations prove their AI agents are safe before deployment
+2. Model evaluation services — AI labs run Forge suites before release
+3. Reliability analytics — fleet telemetry + consensus data as observability infrastructure
+
+The more models compete on Forge, the more valuable the benchmark becomes.
+The benchmark's value funds the infrastructure. This flywheel only works if neutrality holds.
 
 Each layer reinforces the others. More users → more telemetry → better benchmarks →
 more credibility → more users. This flywheel only works if telemetry is trusted, which
@@ -39,7 +80,7 @@ Every Forge install is a measurement node they cannot buy.
 - Shipwright + AutoForge: release management + auto-commit — COMPLETE, direct coupling
 - Fleet analytics dashboard: live at dirt-star.com/Forge/analytics.php
 - Telemetry receiver: signed zip bundles — COMPLETE
-- 903 tests, 0 skip/xfail
+- 1,318 tests, 0 skip/xfail
 - Models: qwen3:14b (primary), qwen3:4b (small), nomic-embed-text (embeddings)
 - Backend support: Ollama (local), OpenAI API, Anthropic API
 
@@ -327,6 +368,264 @@ New files:
 
 ---
 
+## Phase 5 — Public Surface: forge break + Model Autopsy Reports
+### Depends on: Phase 4 complete
+### Priority: Required before public launch
+
+### Goal
+Expose Forge's existing assurance/reliability infrastructure through a single developer-facing
+command. The internal harness is built. Phase 5 makes it ergonomic and shareable enough to
+spread on its own.
+
+### forge break command
+
+    forge break --model qwen3:14b
+
+Runs the Forge Reliability Suite and prints structured pass/fail results:
+
+    Running Forge Break Suite...
+
+    context_storm ........ PASS
+    repair_loop .......... PASS
+    tool_corruption ...... FAIL
+    policy_drift ......... PASS
+    prompt_injection ..... FAIL
+
+    Forge Reliability Score: 82%
+    2 failure modes detected — run `forge autopsy` for details
+
+Key design rules:
+- Single command, zero config required
+- Works against any configured backend (Ollama, OpenAI, Anthropic)
+- Output is parseable (structured JSON via --json flag)
+- Exits non-zero if any scenario fails (CI-compatible)
+
+### forge autopsy command
+
+    forge autopsy --model qwen3:14b
+
+Produces a human-readable failure analysis, not just pass/fail:
+
+    Forge Autopsy Report
+    Model: qwen3:14b
+
+    Reliability Score: 82%
+
+    Failure Modes Detected:
+
+    1. Tool Hallucination
+       Model attempted to call non-existent tool "edit_file_block" (2 occurrences)
+
+    2. Policy Drift
+       Model violated safety invariant after 6-turn adversarial pressure sequence
+
+    Stability Profile:
+    Reasoning:          ██████████  96%
+    Tool Discipline:    ████████░░  80%
+    Context Resilience: █████████░  91%
+    Recovery Ability:   ████████░░  81%
+    Policy Adherence:   ███████░░░  73%
+
+This is more valuable than capability benchmarks because it shows HOW models break,
+not just whether they pass. Engineers building on top of models need this information.
+
+### Shareable reports
+
+    forge break --model qwen3:14b --share
+
+Generates a report artifact and uploads to dirt-star.com/Forge/reports/ (reuses existing
+telemetry infrastructure + BPoS signing). Returns a short URL. Developers can post this link
+directly. Drives organic comparison posts ("I ran Forge against 6 models — results:").
+
+Report format: signed JSON (reuses assurance_report.py infrastructure from Phase 4).
+Viewing is public. Submitting requires a valid BPoS passport (prevents spam/spoofing).
+
+### Reliability Scoreboard — the viral surface
+
+This is the most important page on dirt-star.com/Forge/:
+
+    Forge Reliability Rankings
+    Community-generated · Cryptographically signed · Tamper-evident
+
+    Model              Score   Runs    Signed
+    ─────────────────────────────────────────
+    qwen3:14b           91%    1,847     ✓
+    llama3-8b           86%      923     ✓
+    mistral-7b          82%      601     ✓
+    gpt-4o              89%      204     ✓
+
+Every row is backed by signed reports. The score is fleet consensus, not self-reported.
+"N runs" shows how many independent machines verified it. Clicking a score shows the
+signed report with individual scenario results.
+
+This page spreads because:
+- Developers compare models they use — and link to their own run
+- Researchers cite it ("as measured by the Forge Reliability Index")
+- AI labs watch it and improve models to rank higher
+- Journalists reference it when writing about model comparisons
+
+The Scoreboard is powered entirely by `forge break --share`. Every developer who
+shares a result makes the Scoreboard more accurate. This is the viral loop.
+
+Implementation: `server/report_view.php` (already built) hosts the leaderboard.
+The assurance_verify.php index.json feeds the aggregate scores.
+The scoreboard page is the homepage of the Forge server, not a sub-page.
+
+### forge stress command (alias for CI pipelines)
+
+    forge stress --model llama3 --suite minimal
+
+A lighter 3-scenario variant designed to complete in under 30 seconds. Intended for
+pre-commit hooks, CI gates, and rapid iteration. Exits 0/1 for pass/fail.
+
+### New files
+- forge/commands/break_cmd.py   — forge break + forge autopsy + forge stress handlers
+- forge/break_runner.py         — orchestrates scenario selection, scoring, profile output
+- server/reports/               — public report hosting (one JSON per UUID slug)
+- server/report_view.php        — minimal public report viewer
+
+### Modified files
+- forge/commands.py             — register break, autopsy, stress commands
+- forge/assurance.py            — add minimal suite (3 scenarios) for stress mode
+- forge/assurance_report.py     — add shareable upload path
+
+### What this enables
+- Single most shareable Forge feature — one command, immediately useful output
+- Community-generated model comparison data (no vendor can control it)
+- CI integration story: "Did you Forge-test your agent before deploying?"
+- Foundation for the model leaderboard (Phase 3 fleet consensus feeds into this)
+
+---
+
+## Phase 6 — Go-to-Market: Developer Launch
+### Depends on: Phase 5 complete
+### Priority: Ship Phase 5 first, then execute this
+
+### Strategic context
+Big AI companies (Anthropic, OpenAI, Microsoft) do not respond to ideas. They respond to
+adoption, influence, data, and ecosystems. The goal of Phase 6 is not revenue or investors.
+The goal is 500 real developers who understand what Forge is.
+
+**Success in month 1:** 100 users, 500 GitHub stars
+**Success in month 3:** 500 users, community Discord, model comparison posts circulating
+**Success in month 6:** 2k–5k users, AI lab engineers watching, first enterprise inquiries
+
+Once the tool is known for breaking models, model companies will ask how their model
+performs in Forge. That is when conversations with vendors become productive. Not before.
+
+### Pre-launch checklist (4 days)
+
+**README must close in 30 seconds:**
+
+    Forge — AI Chaos Engineering
+
+    Run adversarial reliability tests against any AI model.
+
+    • Works with local models (Ollama, LM Studio)
+    • Runs the Forge Reliability Suite — 5 battle-tested failure scenarios
+    • Produces shareable Autopsy reports
+    • CI-compatible (exits non-zero on failure)
+
+    pip install forge-ai
+    forge init
+    forge break --model llama3
+
+Then immediately show sample output. Developers want fast first success.
+
+**Forge Reliability Suite v1 — named scenarios:**
+  - context_storm
+  - repair_loop
+  - tool_corruption
+  - verification_theater
+  - policy_drift
+
+Publishing these names matters. Once they circulate, Forge becomes a reference framework.
+"Does it pass context_storm?" becomes a real question in model evaluation discussions.
+
+**Demo screenshots:** Neural Cortex UI, reliability dashboard, autopsy output, scenario chart.
+Developers scroll GitHub fast. Visuals stop them.
+
+### Launch sequence (2 weeks)
+
+**Day 1 — Soft launch, developer communities only:**
+
+  Hacker News: "Show HN: Forge – chaos engineering for AI agents"
+  Reddit r/LocalLLaMA: focus on local model angle
+  Reddit r/MachineLearning: focus on reliability/eval angle
+  X/Twitter AI community: short thread with sample autopsy output
+
+  Tone: do NOT oversell. Developers distrust hype. Position as infrastructure.
+  Do NOT use: "revolutionary", "the future of AI", "replaces X"
+  DO use: "developer infrastructure", "reliability testing", "how your model breaks"
+
+**Week 1 — Feedback loop:**
+
+  Three response types to handle:
+  1. Curious developers — invite to Discord/GitHub Discussions. These are gold.
+  2. Skeptics ("why not LangChain?") — engage respectfully, explain the reliability angle.
+  3. Power users who break Forge — their bug reports are extremely valuable.
+
+**Week 2 — Momentum post:**
+
+  Publish: "Forge Reliability Report — 6 models compared"
+  Format: table of model vs. scenario pass rates + worst failure mode per model.
+  These posts spread fast because they reveal model weaknesses.
+  Post to same communities + tag relevant AI researchers on X.
+
+### Scenario library — community growth
+
+  "Submit your own adversarial scenario" — GitHub Discussions or dedicated form.
+  Over time this becomes Forge Scenario Library, a community-maintained benchmark.
+  Once the library grows, Forge is a standard, not just a tool.
+
+### Three realistic viral paths
+
+These are not marketing campaigns. They are conditions to watch for and be ready to
+amplify when they appear. Any one of them triggers a step-change in adoption.
+
+**Path 1 — The Model Embarrassment Event (most likely first)**
+Someone runs `forge break` against several models and posts the comparative results.
+"I ran Forge against 7 models. Here's what breaks." The post spreads because
+developers love failure analysis more than capability claims. The Reliability Scoreboard
+makes this easy: one command, one shareable link, instant comparison.
+Watch for: unprompted results posts on HN, Reddit r/LocalLLaMA, X AI community.
+When it happens: engage, ask questions, invite to Discord. These are the 100 right users.
+
+**Path 2 — The AI Agent Disaster (slow burn, high impact)**
+When an AI agent system causes a significant real-world failure — deleted data, leaked
+credentials, broken deployment — the community will ask: "Was this tested?"
+If Forge is already established as the testing tool, the answer becomes obvious.
+This is how Chaos Monkey went from obscure Netflix project to industry standard:
+not because Netflix marketed it, but because a few high-profile outages made
+chaos testing feel obviously necessary.
+Position to capture this: Forge already has the `forge certify` framing in Phase 4
+(`/assure` generates a signed audit artifact). Make sure this is visible before the event.
+
+**Path 3 — Researcher Adoption (quiet, compounding)**
+If a researcher publishes a paper using Forge scenarios — citing `context_storm`,
+`repair_loop`, `policy_drift` by name — those scenario names enter academic vocabulary.
+Papers get cited. Benchmarks that appear in papers get used by other researchers.
+Once Forge appears as a citation, it has the same gravity as MMLU or HumanEval.
+This is slow (6–18 months from first use to published paper) but extremely durable.
+Position to capture this: scenario documentation in SCENARIOS.md must be precise enough
+to be citeable. Each scenario needs a clear behavioral hypothesis and scoring methodology.
+Academic rigor in the documentation costs nothing and pays compounding returns.
+
+### The long-term moat
+
+Once AI agents run real systems (infrastructure, codebases, financial workflows), every
+organization will need to answer: "Did you test this agent before deploying it?"
+The current industry answer is: no one knows. Forge can be the right answer.
+
+Path 1 — Open Infrastructure: Forge becomes the Chaos Monkey for AI. Company later.
+Path 2 — Enterprise Platform: AI reliability/assurance for defense, finance, hospitals.
+Path 3 — Model Developer Tool: Evaluation/benchmark platform for AI labs.
+
+These are not mutually exclusive. The developer community builds the credibility that
+makes Paths 2 and 3 tractable. Start with Path 1.
+
+---
+
 ## Novel Concepts Summary
 
 **Proof of Inference** — cryptographic proof that a model forward pass ran on real
@@ -387,6 +686,20 @@ Phase 4:
   MOD:  forge/commands.py          (/assure command)
   MOD:  forge/engine.py            (assurance run integration)
 
+Phase 5:
+  NEW:  forge/break_runner.py      (BreakRunner orchestrator, FailureMode extraction, stability profile)
+  NEW:  server/report_view.php     (individual report viewer)
+  NEW:  server/scoreboard.php      (Reliability Scoreboard — primary public surface)
+  NEW:  forge/plugins/bundled/assurance_plugin.py  (auto_assurance on session.end)
+  MOD:  forge/commands.py          (/break, /autopsy, /stress registered)
+  MOD:  forge/engine.py            (model.request/response, tool.call/result/error, plan.* events added)
+
+Phase 6:
+  (Non-code deliverables)
+  UPD:  README.md                  (30-second hook, scenario names, demo screenshots)
+  NEW:  SCENARIOS.md               (Forge Reliability Suite v1 — named + documented)
+  NEW:  docs/launch/               (HN post, Reddit post templates, benchmark report template)
+
 ---
 
 ## Guiding Principles
@@ -409,3 +722,12 @@ Phase 4:
 6. BPoS is the foundation, not a feature.
    Every trust guarantee in this roadmap depends on machine identity being real.
    Don't weaken the passport system for convenience.
+
+7. Neutrality is the moat. Never break it.
+   Forge must never: favor a specific model in results, recommend or demote a model,
+   adjust scenario weights to flatter a vendor, hide failing results, or become a model
+   provider. The moment Forge is perceived as having a commercial interest in any model's
+   performance, the Reliability Scoreboard loses credibility and the AI Truth Layer
+   thesis collapses. Every product decision must pass this test:
+   "Does this make Forge more like a test track, or more like a judge?"
+   Test track: always. Judge: never.

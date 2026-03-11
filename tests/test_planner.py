@@ -9,6 +9,14 @@ from forge.planner import PlanMode, Plan, PlanStep, parse_plan
 # ---------------------------------------------------------------------------
 
 class TestParsePlan:
+    """Verifies parse_plan() extracts structured steps from free-form numbered text.
+
+    Supports '1. text', '1) text', and 'Step 1: text' formats. Extracts 4 steps with
+    correct numbers and titles. Summary is extracted from the leading prose before steps.
+    Indented continuation lines are stored in step.detail. Empty input and un-numbered
+    text both produce 0 steps. raw_text is preserved verbatim.
+    """
+
     def test_numbered_list(self):
         text = """Here is the plan:
 1. Read main.py to understand structure
@@ -73,6 +81,13 @@ Step 3: Refactor"""
 # ---------------------------------------------------------------------------
 
 class TestPlanData:
+    """Verifies Plan dataclass progress tracking and current_step selection.
+
+    2/4 steps done → progress_pct()==50.0, total_steps==4, completed_steps==2.
+    current_step is the first pending step (number==2). All done → current_step is None.
+    Empty plan → progress_pct()==100.0 (nothing to do = complete).
+    """
+
     def test_plan_progress(self):
         plan = Plan(steps=[
             PlanStep(number=1, title="A", status="done"),
@@ -108,6 +123,15 @@ class TestPlanData:
 # ---------------------------------------------------------------------------
 
 class TestPlanModeController:
+    """Verifies PlanMode controls when planning activates and manages plan lifecycle.
+
+    mode='off' → should_plan always False unless arm()ed. mode='manual' → only when armed.
+    mode='always' → always True. mode='auto' → True when complexity_score >= auto_threshold.
+    arm() overrides the threshold check in auto mode. get_plan_prompt() consumes the arm flag.
+    reject() clears current_plan and adds to history. approve(step_by_step=True) sets both flags.
+    mark_step_in_progress/done/skip update step status and result. complete() archives the plan.
+    """
+
     def test_off_mode_does_not_plan(self):
         pm = PlanMode(mode="off")
         assert not pm.should_plan("do stuff")
@@ -184,6 +208,12 @@ class TestPlanModeController:
 # ---------------------------------------------------------------------------
 
 class TestFormat:
+    """Verifies format_plan() and format_progress() produce correct human-readable output.
+
+    format_plan() must include 'EXECUTION PLAN' and all step titles.
+    format_progress() must show progress fraction after 2/4 steps are done.
+    """
+
     def test_format_plan_contains_steps(self):
         pm = PlanMode()
         pm.receive_plan("1. Read code\n2. Write tests")

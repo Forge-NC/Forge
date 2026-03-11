@@ -182,7 +182,12 @@ ATTACK_FILES = [
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestFalsePositiveRate:
-    """Scan all benign files and measure false positive rate."""
+    """Measures Crucible false positive rates against 30 benign files across multiple languages.
+
+    CRITICAL FP rate must be < 5% (target: ~0 flags on clean code). WARNING+ FP rate
+    must be < 10%. The benign corpus includes Python, JS, Go, Rust, SQL, CSS, JSON,
+    YAML, Dockerfile, and Markdown files with no intentional secrets or injections.
+    """
 
     def test_fp_rate_below_5_percent(self):
         c = _crucible()
@@ -218,7 +223,14 @@ class TestFalsePositiveRate:
 
 
 class TestFalseNegativeRate:
-    """Scan all attack files and measure false negative rate."""
+    """Measures Crucible false negative rates against 10 known attack vectors.
+
+    FN rate must be < 10% (at most 1 missed attack out of 10). The attack corpus covers
+    prompt injection (role override, SYSTEM: prefix, 'ignore instructions', hidden
+    directives, tool call injection, comment injection), hidden content (zero-width spaces,
+    BiDi override), and data exfiltration patterns. Critical role-override and
+    system-spoofing attacks must be detected at WARNING+ level.
+    """
 
     def test_fn_rate_below_10_percent(self):
         c = _crucible()
@@ -254,7 +266,11 @@ class TestFalseNegativeRate:
 
 
 class TestDetectionLatency:
-    """Measure average scan time per file."""
+    """Measures Crucible scan latency across all 40 test files (30 benign + 10 attack).
+
+    Average per-file latency must be < 50ms. No single file may exceed 100ms.
+    This ensures Crucible doesn't become a bottleneck in the agent loop.
+    """
 
     def test_average_latency_below_50ms(self):
         c = _crucible()

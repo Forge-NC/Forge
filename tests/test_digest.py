@@ -71,6 +71,8 @@ def sample_project(tmp_path):
 # ── Initialization ──
 
 class TestInit:
+    """Verifies CodebaseDigester creates its persist dir and starts with no digest."""
+
     def test_creates_persist_dir(self, tmp_path):
         d = tmp_path / "new_digest"
         CodebaseDigester(persist_dir=d)
@@ -83,6 +85,14 @@ class TestInit:
 # ── Scanning ──
 
 class TestScan:
+    """Verifies scan() traverses the project, extracts symbols, skips excluded dirs, and calls callbacks.
+
+    A project with main.py + utils.js + src/config.py must yield >= 3 files and > 0 symbols.
+    node_modules/ directory must be excluded. Python language detected. Symbol extraction
+    finds at least App, run, helper. Non-existent root raises ValueError. callback(path, n, total)
+    is called at least once. force=True rescans with same file count.
+    """
+
     def test_scans_project(self, digester, sample_project):
         result = digester.scan(str(sample_project))
         assert isinstance(result, ProjectDigest)
@@ -124,6 +134,8 @@ class TestScan:
 # ── Get file ──
 
 class TestGetFile:
+    """Verifies get_file() finds FileDigest by basename for scanned files and returns None for unknowns."""
+
     def test_get_existing_file(self, digester, sample_project):
         digester.scan(str(sample_project))
         fd = digester.get_file("main.py")
@@ -144,6 +156,13 @@ class TestGetFile:
 # ── Symbol search ──
 
 class TestSearchSymbols:
+    """Verifies search_symbols() finds symbols by name, supports partial match, kind filter, and limit.
+
+    Exact 'App' match → result with name=='App'. Partial 'help' → finds 'helper'.
+    kind='class' filter → all results have kind=='class'. 'zzzznonexistent' → [].
+    limit=2 → len(results) <= 2. Results have a 'name' key in their dict.
+    """
+
     def test_exact_match(self, digester, sample_project):
         digester.scan(str(sample_project))
         results = digester.search_symbols("App")
@@ -186,6 +205,12 @@ class TestSearchSymbols:
 # ── Read symbol source ──
 
 class TestReadSymbolSource:
+    """Verifies read_symbol_source() returns source text for known symbols and an error/empty for unknowns.
+
+    A known symbol like 'App' in main.py must return text containing 'App'. An unknown file path
+    must return an error message or empty string (not raise). Multiple symbols returns non-empty text.
+    """
+
     def test_reads_known_symbol(self, digester, sample_project):
         digester.scan(str(sample_project))
         source = digester.read_symbol_source("main.py", ["App"])
@@ -205,6 +230,12 @@ class TestReadSymbolSource:
 # ── Generate summary ──
 
 class TestGenerateSummary:
+    """Verifies generate_summary() returns a non-empty string bounded by max_tokens, and '' when no digest.
+
+    A scanned project produces a non-empty string. max_tokens=100 produces a shorter or equal string
+    than max_tokens=10000. When no scan has been performed, returns '' or a 'no digest' message.
+    """
+
     def test_generates_text(self, digester, sample_project):
         digester.scan(str(sample_project))
         summary = digester.generate_summary()
@@ -225,6 +256,12 @@ class TestGenerateSummary:
 # ── Cache persistence ──
 
 class TestCachePersistence:
+    """Verifies scan results are written to digest.json and reloaded by a new CodebaseDigester instance.
+
+    After scanning, persist_dir/digest.json must exist. A second CodebaseDigester with the same
+    persist_dir must load the cached digest with the same total_files count.
+    """
+
     def test_cache_written(self, digester, sample_project):
         digester.scan(str(sample_project))
         cache_file = digester._persist_dir / "digest.json"
@@ -246,6 +283,12 @@ class TestCachePersistence:
 # ── Directory structure ──
 
 class TestDirectoryStructure:
+    """Verifies the ProjectDigest tracks directories and per-file SHA-256 hashes.
+
+    result.directories must be non-empty after scanning a project with subdirectories.
+    Every FileDigest in result.files must have a 64-char sha256 hex string (SHA-256 output).
+    """
+
     def test_directories_tracked(self, digester, sample_project):
         result = digester.scan(str(sample_project))
         assert len(result.directories) > 0

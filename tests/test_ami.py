@@ -63,20 +63,35 @@ def ami(mock_tools, mock_llm, tmp_path):
 # ══════════════════════════════════════════════════════════════
 
 class TestRefusalDetection:
-    """Test refusal pattern recognition."""
+    """Verifies the refusal scorer correctly identifies when the model refuses to act.
+
+    A refusal is any response where the model declines to use its available tools and
+    instead defers, apologizes, or instructs the user to do the work themselves
+    ('I cannot directly modify files...', 'Here is a script you can run yourself').
+    High refusal scores (> 0.7) cause AMI to escalate to retry_constrained mode.
+    """
 
     def test_clear_refusal_high_score(self, scorer):
+        """Classic 'I apologize, as a text-based AI I cannot directly...' response.
+        With tools available this is an unambiguous refusal — must score > 0.7
+        so AMI triggers constrained retry instead of accepting the response."""
         response = ("I apologize for any confusion. As a text-based AI, "
                      "I cannot directly make changes to files on your system.")
         score = scorer.score_refusal(response, has_tools=True)
         assert score > 0.7, f"Expected >0.7, got {score}"
 
     def test_active_response_low_score(self, scorer):
+        """A response that actively uses tools must NOT be classified as a refusal.
+        'Let me edit that file for you. I'll use edit_file' shows intent to act — must
+        score < 0.2 so AMI doesn't incorrectly retry an already-good response."""
         response = "Let me edit that file for you. I'll use edit_file to fix the typo."
         score = scorer.score_refusal(response, has_tools=True)
         assert score < 0.2, f"Expected <0.2, got {score}"
 
     def test_delegation_moderate_score(self, scorer):
+        """Passive delegation — 'Here's a script, save it and run it yourself' — is a
+        partial refusal. The model isn't outright refusing but is offloading the work
+        back to the user instead of calling edit_file. Must score > 0.4 to trigger review."""
         response = ("Here's the script you can run. Save this to a file "
                      "and execute it in your terminal. You should manually "
                      "open a terminal and run the following command.")
@@ -90,12 +105,19 @@ class TestRefusalDetection:
         assert scorer.score_refusal("ok", has_tools=True) == 0.0
 
     def test_no_tools_reduces_impact(self, scorer):
+        """When tools aren't available, refusing to modify files is reasonable behavior,
+        not a bug. Confirms the scorer is context-aware: refusal severity must be lower
+        when has_tools=False than when tools are available and being ignored."""
         response = "I cannot directly modify files on your system."
         with_tools = scorer.score_refusal(response, has_tools=True)
         without_tools = scorer.score_refusal(response, has_tools=False)
         assert with_tools >= without_tools
 
     def test_multiple_moderate_patterns_compound(self, scorer):
+        """Individual weak refusal signals compound to a clear refusal when stacked.
+        'Manually save', 'open a terminal', 'copy and paste', 'Replace YOUR_TOKEN'
+        each score low alone, but together they signal the model is dumping work on
+        the user and must compound to > 0.5 — catching polite-but-useless responses."""
         response = ("You can manually save the script. Open a terminal "
                      "and run it yourself. Please copy and paste the code. "
                      "Replace YOUR_TOKEN with your actual token.")
@@ -104,7 +126,12 @@ class TestRefusalDetection:
 
 
 class TestRepetitionDetection:
-    """Test inter-response repetition scoring."""
+    """Verifies the repetition scorer catches when the model is recycling previous responses.
+
+    Repeated responses signal the model is stuck in a loop — a key quality failure mode.
+    Scored via Jaccard-like overlap against the last 5 responses. High repetition (> 0.5)
+    triggers retry_reset, which clears context and starts the turn fresh.
+    """
 
     def test_identical_responses_high(self, scorer):
         response = "I cannot help with that. Please try again later."
@@ -127,6 +154,9 @@ class TestRepetitionDetection:
         assert score == 0.0
 
     def test_partial_overlap_moderate(self, scorer):
+        """Two responses that share an opening sentence but diverge afterward score moderate.
+        This catches 'copy-paste with a different ending' patterns without penalizing
+        natural similarity in topic or phrasing. Score must land between 0.1 and 0.8."""
         response = ("I'll check the configuration file for errors. "
                      "Let me read it and analyze the settings.")
         recent = ["I'll check the configuration file for errors. "
@@ -136,7 +166,13 @@ class TestRepetitionDetection:
 
 
 class TestProgressDetection:
-    """Test progress scoring."""
+    """Verifies the progress scorer rewards movement toward the user's goal.
+
+    Progress is measured by: new file paths appearing in the response, completion
+    signals ('Done', 'Fixed', 'Updated'), and divergence from previous responses.
+    A model that keeps explaining the same approach without taking action scores low.
+    Low progress combined with other failures triggers a retry.
+    """
 
     def test_new_file_paths_good_progress(self, scorer):
         response = "I found the issue in config.py and utils/helpers.py."
@@ -144,6 +180,10 @@ class TestProgressDetection:
         assert score > 0.5, f"Expected >0.5 for new paths, got {score}"
 
     def test_rehash_low_progress(self, scorer):
+        """Two responses that share a long identical preamble and only differ in
+        a few closing words are essentially the same response. Detects the pattern
+        of the model repeatedly offering the same non-solution with slightly different
+        wording — common in loops. Must score < 0.4."""
         shared_start = ("I apologize for the confusion but I cannot directly "
                         "modify files on your system so here is a script that "
                         "you can use to")
@@ -162,9 +202,18 @@ class TestProgressDetection:
 
 
 class TestToolCompliance:
-    """Test tool usage compliance scoring."""
+    """Verifies the compliance scorer correctly penalizes printing code instead of calling tools.
+
+    When the user asks to 'edit a file' and the model prints a markdown code block,
+    that is a compliance failure — the model has tools and didn't use them (score < 0.2).
+    When the model correctly calls edit_file, score is 1.0. Compliance has the highest
+    weight in the composite quality score; it's the primary signal that drives retries.
+    """
 
     def test_user_asks_edit_model_prints_code(self, scorer):
+        """User asks to edit a file. Model responds with a markdown code block and
+        'Save this and run it' — zero tool calls, maximum non-compliance. The scorer
+        must catch this as a compliance failure (< 0.2) to trigger constrained retry."""
         response = "```python\ndef fix():\n    pass\n```\nSave this and run it."
         score = scorer.score_tool_compliance(
             response, [], "edit the config file", has_tools=True)
@@ -188,7 +237,11 @@ class TestToolCompliance:
 
 
 class TestVerbosity:
-    """Test verbosity scoring."""
+    """Verifies verbosity scoring penalizes walls of text when tool calls were made.
+
+    500 words with 0 tool calls → score > 0.6 (over-verbose, no action taken).
+    3 words with 3 tool calls → score < 0.2 (efficient, action-oriented). Empty → 0.0.
+    """
 
     def test_high_verbosity_no_tools(self, scorer):
         response = " ".join(["word"] * 500)
@@ -205,7 +258,13 @@ class TestVerbosity:
 
 
 class TestCompositeScore:
-    """Test the full composite quality assessment."""
+    """Verifies the full composite quality pipeline: assess() combines all sub-scores into a decision.
+
+    assess() weights refusal, repetition, progress, tool compliance, and verbosity into
+    a 0–1 quality score plus a recommended_action. A correct tool-using response should
+    score >= 0.7 with action='accept'. A clear refusal should score < 0.5 and recommend
+    'retry_constrained' or 'retry_parse'. The 'issues' list names which sub-scores failed.
+    """
 
     def test_good_response_high_score(self, scorer):
         tool_calls = [{"function": {"name": "edit_file", "arguments": {}}}]
@@ -246,7 +305,14 @@ class TestCompositeScore:
 # ══════════════════════════════════════════════════════════════
 
 class TestRetryLogic:
-    """Test retry decision making."""
+    """Verifies AMI's retry decision logic maps quality profiles to the right recovery mode.
+
+    should_retry() returns one of: 'retry_constrained', 'retry_reset', 'retry_parse', or None.
+      - High refusal or low tool compliance → retry_constrained (structured JSON decoding)
+      - High repetition → retry_reset (clear context, start turn fresh)
+      - General low quality → retry_parse (re-parse and re-score the same response)
+      - Budget exhausted (3 retries) → None (accept response as-is, stop retrying)
+    """
 
     def test_high_quality_no_retry(self, ami):
         quality = ResponseQuality(
@@ -280,6 +346,9 @@ class TestRetryLogic:
         assert result == "retry_reset"
 
     def test_budget_exhausted_no_retry(self, ami):
+        """Even with a catastrophic quality profile (score=0.2, refusal=0.9, compliance=0.0),
+        once the retry budget of 3 is consumed, should_retry must return None.
+        Prevents infinite retry loops when the model is completely stuck."""
         ami._retry_count = 3  # Budget is 3
         quality = ResponseQuality(
             score=0.2, refusal_score=0.9, repetition_score=0.0,
@@ -315,7 +384,13 @@ class TestRetryLogic:
 # ══════════════════════════════════════════════════════════════
 
 class TestModelProbing:
-    """Test model capability detection."""
+    """Verifies AMI's model capability detection, result caching, and persistence.
+
+    On first use, AMI probes the model by sending a synthetic tool call and checking
+    whether the model responds with native tool syntax or plain text. Results are cached
+    per model name (probe_model_capabilities returns the same object on repeat calls).
+    force=True bypasses the cache and re-probes. Results survive to disk via _save_state().
+    """
 
     def test_probe_caches_results(self, ami, mock_llm):
         mock_llm.chat.return_value = iter([
@@ -381,7 +456,13 @@ class TestModelProbing:
 # ══════════════════════════════════════════════════════════════
 
 class TestConstrainedDecoding:
-    """Test constrained decoding schema and parsing."""
+    """Verifies constrained decoding: schema generation and JSON output parsing.
+
+    When a model can't reliably use native tool call format, AMI switches to constrained
+    decoding: it generates a JSON schema enumerating only registered tool names, forces
+    the model to output JSON matching that schema, then parses the JSON into tool calls.
+    Unregistered tool names and malformed JSON must be rejected silently (return []).
+    """
 
     def test_schema_covers_all_tools(self, ami, mock_tools):
         schema = ami.build_tool_call_schema()
@@ -428,7 +509,13 @@ class TestConstrainedDecoding:
 # ══════════════════════════════════════════════════════════════
 
 class TestIntegration:
-    """Test AMI end-to-end workflows."""
+    """End-to-end AMI workflow tests: quality check → retry decision → history tracking → audit.
+
+    These tests run the full pipeline. Covers: failure catalog growth from poor turns,
+    average quality computation across multiple turns, bounded history (max 50 turn records,
+    max 5 recent responses held in memory), audit dict schema compliance for external
+    reporting, and correct behavior when the engine initializes AMI without an LLM backend.
+    """
 
     def test_full_quality_check_flow(self, ami):
         quality = ami.assess_quality(
@@ -507,7 +594,16 @@ class TestIntegration:
 # ══════════════════════════════════════════════════════════════
 
 class TestRedTeam:
-    """Test AMI against adversarial scenarios."""
+    """Adversarial scenarios that verify AMI's defenses have no false positives or gaps.
+
+    Key scenarios tested:
+      - Malicious responses ('I'll hack your system') must NOT be classified as refusals
+      - Retry budget (3) can never be exceeded no matter how many retries are executed
+      - reset() must completely clear failure catalog, turn history, and model capabilities
+      - Turn history must be capped at 50 entries regardless of how long the session runs
+      - KV cache optimization (OLLAMA_FLASH_ATTENTION + OLLAMA_KV_CACHE_TYPE) must be
+        idempotent — a second call with vars already set must report zero changes
+    """
 
     def test_malicious_not_refusal(self, scorer):
         """Model saying 'I'll hack your system' is NOT a refusal."""
@@ -516,6 +612,9 @@ class TestRedTeam:
         assert score < 0.3, f"Malicious response incorrectly flagged as refusal"
 
     def test_retry_budget_never_exceeded(self, ami, mock_llm):
+        """Executes 10 retries to force _retry_count well past the budget of 3.
+        Even with a worst-possible quality profile (score=0.1, refusal=0.9, compliance=0.0),
+        should_retry must return None once the budget is exhausted — no infinite loops."""
         mock_llm.chat.return_value = iter([
             {"type": "token", "content": "ok"},
             {"type": "done", "eval_count": 5, "prompt_eval_count": 10},
@@ -584,7 +683,14 @@ class TestRedTeam:
 # ══════════════════════════════════════════════════════════════
 
 class TestAdaptivePrompting:
-    """Test dynamic prompt modification."""
+    """Verifies AMI dynamically modifies the system prompt based on model failures.
+
+    When a model doesn't support native tools, AMI injects a 'Tool Call Format' section
+    so the model knows how to call tools via JSON text output.
+    When the failure catalog contains 3+ refusal patterns, AMI adds a 'HAVE tools / Do NOT
+    refuse' reminder to fight persistent refusal behavior. With no capability data, the
+    prompt is returned unchanged to avoid unnecessary prompt bloat.
+    """
 
     def test_no_caps_returns_unchanged(self, ami):
         prompt = "You are a helpful assistant."
@@ -624,7 +730,13 @@ class TestAdaptivePrompting:
 # ══════════════════════════════════════════════════════════════
 
 class TestPersistence:
-    """Test state save/load."""
+    """Verifies AMI state (failure catalog + model capabilities) survives process restarts.
+
+    After _save_state(), a new AMI instance pointed at the same data_dir must restore
+    the exact failure catalog entries and model capability flags. A missing state file
+    must silently start with empty state. A corrupt (non-JSON) state file must also
+    produce empty state rather than raising an exception.
+    """
 
     def test_save_and_load(self, tmp_path):
         ami1 = AdaptiveModelIntelligence(

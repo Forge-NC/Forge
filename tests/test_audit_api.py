@@ -14,6 +14,14 @@ import pytest
 # ── Forensics ──
 
 class TestForensicsAuditDict:
+    """Verifies SessionForensics.to_audit_dict() structure, content, and JSON-serializability.
+
+    Empty session → schema_version=1, events=[], summary.context_swaps=0.
+    With events: 4 recorded events → 4 in audit list; summary correctly aggregates
+    files_read (dict), tool_calls (dict), context_swaps count, and threats list.
+    All audit dicts must pass json.dumps() without error.
+    """
+
     def test_empty_session(self, tmp_path):
         from forge.forensics import SessionForensics
         f = SessionForensics(persist_dir=tmp_path)
@@ -43,6 +51,12 @@ class TestForensicsAuditDict:
 # ── Memory ──
 
 class TestMemoryAuditDict:
+    """Verifies EpisodicMemory.to_audit_dict() structure and entry content.
+
+    Empty memory → schema_version=1, entries=[]. After record_turn(), the audit
+    entries list contains one entry with the correct user_intent string.
+    """
+
     def test_empty_session(self, tmp_path):
         from forge.memory import EpisodicMemory
         m = EpisodicMemory(persist_dir=tmp_path)
@@ -65,6 +79,14 @@ class TestMemoryAuditDict:
 # ── Billing ──
 
 class TestBillingAuditDict:
+    """Verifies BillingMeter.to_audit_dict() structure and usage aggregation.
+
+    Empty meter → schema_version=1, session_tokens=0, 'comparisons' key present.
+    After record_turn(1000, 500, cache_hit_tokens=200): session_tokens=1500,
+    session_input=1000, session_output=500, and 'Claude Opus (with re-reads)' appears
+    in comparisons. All output must be JSON-serializable.
+    """
+
     def test_empty_session(self, tmp_path):
         from forge.billing import BillingMeter
         b = BillingMeter(persist_path=tmp_path / "billing.json")
@@ -89,6 +111,15 @@ class TestBillingAuditDict:
 # ── Crucible ──
 
 class TestCrucibleAuditDict:
+    """Verifies Crucible.to_audit_dict() structure and threat log serialization.
+
+    Empty crucible → schema_version=1, total_scans=0, threat_log=[], canary_leaked=False.
+    After one scan of clean code → total_scans=1, threats_found=0.
+    Manually added threat → threat_log[0] has level_name='WARNING', category='test',
+    and context_before/after are excluded (they're not needed in audit packages).
+    All output must be JSON-serializable.
+    """
+
     def test_empty_session(self):
         from forge.crucible import Crucible
         c = Crucible(enabled=True)
@@ -128,6 +159,13 @@ class TestCrucibleAuditDict:
 # ── Continuity ──
 
 class TestContinuityAuditDict:
+    """Verifies ContinuityMonitor.to_audit_dict() defaults and snapshot history.
+
+    Empty monitor → schema_version=1, current_grade='A', current_score=100.0, history=[].
+    After appending a ContinuitySnapshot(score=85.0, grade='B'): current_grade='B',
+    history contains one entry with score=85.0.
+    """
+
     def test_empty_state(self):
         from forge.continuity import ContinuityMonitor
         c = ContinuityMonitor(enabled=True)
@@ -158,6 +196,13 @@ class TestContinuityAuditDict:
 # ── PlanVerifier ──
 
 class TestPlanVerifierAuditDict:
+    """Verifies PlanVerifier.to_audit_dict() structure and result list.
+
+    mode='off' with no results → schema_version=1, mode='off', results=[].
+    With two VerificationResult entries (one passed, one failed) → mode='report',
+    results list has 2 entries with correct passed flags.
+    """
+
     def test_empty_state(self):
         from forge.plan_verifier import PlanVerifier
         pv = PlanVerifier(mode="off")
@@ -188,6 +233,13 @@ class TestPlanVerifierAuditDict:
 # ── Stats ──
 
 class TestStatsAuditDict:
+    """Verifies StatsCollector.to_audit_dict() structure and tool analytics.
+
+    Empty collector → schema_version=1, perf_samples=[], tool_analytics.total_calls=0.
+    After record_llm_call + 3 tool calls (2x read_file, 1x edit_file):
+    perf_samples has 1 entry, total_calls=3, by_tool['read_file']=2.
+    """
+
     def test_empty_state(self, tmp_path):
         from forge.stats import StatsCollector
         s = StatsCollector(persist_dir=tmp_path)

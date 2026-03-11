@@ -102,9 +102,10 @@ class Shipwright:
     """AI-powered release management."""
 
     def __init__(self, project_dir: str = None, llm_backend=None,
-                 data_dir: Path = None):
+                 data_dir: Path = None, push_after_release: bool = False):
         self._project_dir = Path(project_dir or os.getcwd())
         self._llm = llm_backend
+        self._push_after_release = push_after_release
         self._data_dir = data_dir or (Path.home() / ".forge" / "shipwright")
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._history_path = self._data_dir / "releases.json"
@@ -176,11 +177,15 @@ class Shipwright:
 
     def _git(self, *args, check: bool = True) -> str:
         """Run a git command in the project directory."""
+        flags = {}
+        if os.name == "nt":
+            flags["creationflags"] = subprocess.CREATE_NO_WINDOW
         result = subprocess.run(
             ["git"] + list(args),
             cwd=str(self._project_dir),
             capture_output=True, text=True, timeout=30,
             env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            **flags,
         )
         if check and result.returncode != 0:
             raise RuntimeError(f"git {args[0]} failed: {result.stderr.strip()}")
@@ -445,7 +450,7 @@ class Shipwright:
         self._history.append(release)
         self._save_history()
 
-        return {
+        result = {
             "status": "released",
             "current": current,
             "next": next_ver,
@@ -455,6 +460,24 @@ class Shipwright:
             "changelog": changelog,
             "files_modified": modified,
         }
+
+        # Push branch + tag to origin if configured.
+        # Security: the remote (GitHub) enforces push authorization —
+        # only machines with valid credentials can push. Forge just
+        # attempts it and surfaces the error if rejected.
+        if self._push_after_release:
+            try:
+                branch = self._git(
+                    "branch", "--show-current", check=False).strip() or "main"
+                self._git("push", "origin", branch)
+                self._git("push", "origin", tag)
+                result["pushed"] = True
+                log.info("Pushed %s and %s to origin", branch, tag)
+            except RuntimeError as ex:
+                result["push_error"] = str(ex)
+                log.warning("Push after release failed: %s", ex)
+
+        return result
 
     # ── Status display ──
 
