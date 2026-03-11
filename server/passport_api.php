@@ -11,6 +11,8 @@
  *   GET  ?action=list_masters       (owner only)  List all Masters
  *   GET  ?action=my_fleet           (master)      Master's own puppets
  *   GET  ?action=tiers              (public)      Tier definitions
+ *   POST ?action=genome_push        (auth)        Push genome to team aggregate
+ *   GET  ?action=genome_pull        (auth)        Pull team aggregate genome
  */
 
 require_once __DIR__ . '/auth.php';
@@ -288,6 +290,14 @@ switch ($action) {
 
     case 'my_fleet':
         handle_my_fleet($auth);
+        break;
+
+    case 'genome_push':
+        handle_genome_push($auth);
+        break;
+
+    case 'genome_pull':
+        handle_genome_pull($auth);
         break;
 
     default:
@@ -789,4 +799,150 @@ function handle_my_fleet(array $auth) {
         'seats_used'    => count(array_filter($puppets, function($p) { return ($p['status'] ?? '') === 'active'; })),
         'puppets'       => $puppets,
     ]);
+}
+
+
+// ── Team Genome Sync ─────────────────────────────────────────────────────────
+
+/**
+ * Resolve master account from auth context.
+ * Returns account_id string or null.
+ */
+function resolve_genome_account(array $auth) {
+    global $MASTERS_DIR;
+
+    $auth_account = $auth['account_id'] ?? null;
+    $auth_role = $auth['role'] ?? 'tester';
+
+    // Owner can specify account_id explicitly
+    if ($auth_role === 'owner' && isset($_GET['account_id'])) {
+        $auth_account = sanitize_account_id($_GET['account_id']);
+    }
+
+    if (!$auth_account) {
+        return null;
+    }
+
+    // Verify tier allows genome_sync
+    $master_file = "$MASTERS_DIR/$auth_account.json";
+    $master = load_json($master_file);
+    if (!$master) {
+        return null;
+    }
+
+    $tier = $master['passport']['tier'] ?? 'community';
+    $tiers = load_tiers();
+    $tier_config = $tiers[$tier] ?? [];
+    if (empty($tier_config['genome_sync'])) {
+        json_error('genome_sync not available on tier: ' . $tier, 403);
+    }
+
+    return $auth_account;
+}
+
+/**
+ * POST ?action=genome_push
+ * Push local genome metrics to the team aggregate.
+ * Input: {genome: {session_count, avg_quality, ...}}
+ */
+function handle_genome_push(array $auth) {
+    $account_id = resolve_genome_account($auth);
+    if (!$account_id) {
+        json_error('Cannot determine account for genome sync', 403);
+    }
+
+    $input = get_post_data();
+    $local = $input['genome'] ?? null;
+    if (!is_array($local)) {
+        json_error('Missing genome data in request body');
+    }
+
+    $genome_dir = __DIR__ . '/data/genomes';
+    if (!is_dir($genome_dir)) {
+        mkdir($genome_dir, 0755, true);
+    }
+    $genome_file = $genome_dir . '/' . sanitize_account_id($account_id) . '.json';
+
+    // File-locked read-merge-write
+    $fp = fopen($genome_file, 'c+');
+    if (!$fp) {
+        json_error('Failed to open genome file', 500);
+    }
+    flock($fp, LOCK_EX);
+
+    $existing_raw = stream_get_contents($fp);
+    $team = ($existing_raw && strlen($existing_raw) > 2) ? json_decode($existing_raw, true) : [];
+    if (!is_array($team)) {
+        $team = [];
+    }
+
+    // EMA merge: alpha * incoming + (1 - alpha) * existing
+    $alpha = 0.3;
+    $ema_keys = ['avg_quality', 'reliability_score', 'ami_average_quality'];
+    foreach ($ema_keys as $k) {
+        if (isset($local[$k])) {
+            $old = isset($team[$k]) ? (float)$team[$k] : (float)$local[$k];
+            $team[$k] = $alpha * (float)$local[$k] + (1.0 - $alpha) * $old;
+        }
+    }
+
+    // Counters: max(team, local)
+    $counter_keys = ['session_count', 'threat_scans_total', 'ami_failure_catalog_size',
+                     'ami_model_profiles', 'total_turns'];
+    foreach ($counter_keys as $k) {
+        if (isset($local[$k])) {
+            $team[$k] = max((int)($team[$k] ?? 0), (int)$local[$k]);
+        }
+    }
+
+    // Models tested: union
+    $team_models = $team['models_tested'] ?? [];
+    $local_models = $local['models_tested'] ?? [];
+    if (is_array($local_models)) {
+        $team['models_tested'] = array_values(array_unique(array_merge(
+            is_array($team_models) ? $team_models : [],
+            $local_models
+        )));
+    }
+
+    // Threat patterns: max per category
+    $team_threats = $team['threat_pattern_counts'] ?? [];
+    $local_threats = $local['threat_pattern_counts'] ?? [];
+    if (is_array($local_threats)) {
+        foreach ($local_threats as $cat => $count) {
+            $team_threats[$cat] = max((int)($team_threats[$cat] ?? 0), (int)$count);
+        }
+        $team['threat_pattern_counts'] = $team_threats;
+    }
+
+    $team['last_push_at'] = time();
+    $team['last_push_by'] = $auth['machine_id'] ?? 'unknown';
+
+    // Write back under lock
+    ftruncate($fp, 0);
+    rewind($fp);
+    fwrite($fp, json_encode($team, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    flock($fp, LOCK_UN);
+    fclose($fp);
+
+    json_response(['ok' => true, 'message' => 'Genome merged into team aggregate']);
+}
+
+/**
+ * GET ?action=genome_pull
+ * Pull the team aggregate genome for merging into local.
+ */
+function handle_genome_pull(array $auth) {
+    $account_id = resolve_genome_account($auth);
+    if (!$account_id) {
+        json_error('Cannot determine account for genome sync', 403);
+    }
+
+    $genome_file = __DIR__ . '/data/genomes/' . sanitize_account_id($account_id) . '.json';
+    $team = load_json($genome_file);
+    if (!$team) {
+        $team = [];
+    }
+
+    json_response(['ok' => true, 'genome' => $team]);
 }

@@ -135,7 +135,9 @@ class OllamaBackend:
         if batch_mode:
             self._unload_model(self.model)
             import time as _time
-            _time.sleep(0.5)
+            # AMD/ROCm needs longer to release VRAM than NVIDIA/CUDA.
+            # 2s is safe for both; 0.5s caused persistent 500 errors on ROCm.
+            _time.sleep(2.0)
 
         BATCH_SIZE = 10  # Small batches to avoid context overflow on embed models
         all_embeddings: list[list[float]] = []
@@ -185,22 +187,32 @@ class OllamaBackend:
                     continue
 
                 if r.status_code == 500:
-                    # VRAM OOM — unload main model and retry once
-                    log.info("Embed 500 error on batch %d/%d, "
-                             "unloading main model and retrying",
-                             batch_idx + 1, total_batches)
-                    self._unload_model(self.model)
+                    # VRAM OOM — retry with exponential backoff.
+                    # AMD/ROCm needs significantly longer than NVIDIA/CUDA to
+                    # release VRAM after an unload; a single 1s retry is not
+                    # enough and causes persistent 500 OOM on ROCm hardware.
                     import time as _time2
-                    _time2.sleep(1)
-                    r = self._session.post(
-                        f"{self.base_url}/api/embed",
-                        json={
-                            "model": embed_model,
-                            "input": batch,
-                            "keep_alive": batch_keep_alive,
-                        },
-                        timeout=max(self.timeout, 300),
-                    )
+                    self._unload_model(self.model)
+                    for _retry in range(3):
+                        _wait = 2 ** (_retry + 1)  # 2s, 4s, 8s
+                        log.info(
+                            "Embed 500 (VRAM OOM) on batch %d/%d, "
+                            "retry %d/3 in %ds",
+                            batch_idx + 1, total_batches, _retry + 1, _wait)
+                        _time2.sleep(_wait)
+                        r = self._session.post(
+                            f"{self.base_url}/api/embed",
+                            json={
+                                "model": embed_model,
+                                "input": batch,
+                                "keep_alive": batch_keep_alive,
+                            },
+                            timeout=max(self.timeout, 300),
+                        )
+                        if r.status_code == 200:
+                            break
+                        if r.status_code != 500:
+                            break  # Different error — let checks below handle it
 
                 if r.status_code == 400:
                     # Input too long for context — fall back to one-at-a-time
@@ -239,9 +251,17 @@ class OllamaBackend:
                     continue
 
                 if r.status_code != 200:
-                    log.warning("Embed request failed: %s %s",
-                                r.status_code, r.text[:200])
-                    return []
+                    # Don't abort the entire call — substitute empty vectors
+                    # so the caller receives exactly len(texts) results.
+                    # index.py replaces empty vectors with zero-vectors,
+                    # keeping the index aligned and letting other batches land.
+                    log.warning(
+                        "Embed batch %d/%d failed (%d) — substituting "
+                        "empty vectors for %d chunks",
+                        batch_idx + 1, total_batches,
+                        r.status_code, len(batch))
+                    all_embeddings.extend([[] for _ in batch])
+                    continue
 
                 data = r.json()
                 # New Ollama: "embeddings" (plural, list of vectors)

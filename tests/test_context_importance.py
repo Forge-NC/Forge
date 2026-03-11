@@ -9,6 +9,13 @@ from forge.context import ContextWindow, ContextEntry
 # ── Importance field defaults ──
 
 class TestImportanceDefaults:
+    """Verifies ContextWindow.add() assigns default importance scores by role.
+
+    system+pinned → 0.9. user → 0.7. assistant → 0.6. tool result → 0.4.
+    system role overrides tag-based recall importance (role=system → 0.9 regardless).
+    Explicit importance kwarg overrides all defaults.
+    """
+
     def test_system_message_high_importance(self):
         ctx = ContextWindow(max_tokens=10000)
         entry = ctx.add("system", "You are helpful.", pinned=True)
@@ -57,6 +64,14 @@ class TestImportanceDefaults:
 # ── Importance-weighted eviction ──
 
 class TestImportanceEviction:
+    """Verifies importance-weighted eviction order within and across partitions.
+
+    Within same partition: low-importance (0.1) entry evicted before high-importance (0.9).
+    Across partitions: quarantine evicted before working regardless of importance scores
+    (even with quarantine at 0.99 and working at 0.01). Pinned entry with importance=0.0
+    survives eviction. _try_evict sorts by importance: 0.1 evicted, 0.5 and 0.9 remain.
+    """
+
     def test_low_importance_evicted_first(self):
         """Within same partition, low importance entries are evicted first."""
         ctx = ContextWindow(max_tokens=30)
@@ -111,6 +126,12 @@ class TestImportanceEviction:
 # ── Persistence ──
 
 class TestImportancePersistence:
+    """Verifies importance scores are serialized and restored correctly in session JSON.
+
+    save_session() + load_session() round-trip preserves exact float importance values.
+    Sessions saved before importance field was added load with default importance=0.5.
+    """
+
     def test_save_load_preserves_importance(self, tmp_path):
         ctx = ContextWindow(max_tokens=10000)
         ctx.add("user", "hello", importance=0.85)

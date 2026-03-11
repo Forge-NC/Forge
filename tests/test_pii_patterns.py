@@ -11,6 +11,8 @@ def crucible():
 
 
 class TestAWSAccessKey:
+    """Verifies the AWS access key pattern matches AKIA... credentials and rejects short strings."""
+
     def test_positive_match(self, crucible):
         content = 'aws_key = "AKIAIOSFODNN7EXAMPLE"'
         threats = crucible.scan_content("test.py", content)
@@ -23,6 +25,8 @@ class TestAWSAccessKey:
 
 
 class TestGitHubToken:
+    """Verifies GitHub token detection for both 'ghp_' and 'github_pat_' prefixes; rejects short strings."""
+
     def test_ghp_token(self, crucible):
         content = 'token = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcd"'
         threats = crucible.scan_content("test.py", content)
@@ -40,6 +44,8 @@ class TestGitHubToken:
 
 
 class TestOpenAIKey:
+    """Verifies OpenAI 'sk-' API key detection matches long keys and rejects under-20-char stubs."""
+
     def test_positive_match(self, crucible):
         content = 'api_key = "sk-ABCDEFGHIJKLMNOPQRSTuvwxyz1234567890abcdefgh"'
         threats = crucible.scan_content("test.py", content)
@@ -52,6 +58,12 @@ class TestOpenAIKey:
 
 
 class TestSSHPrivateKey:
+    """Verifies SSH private key detection for RSA and OpenSSH formats at CRITICAL severity.
+
+    'BEGIN RSA PRIVATE KEY' and 'BEGIN OPENSSH PRIVATE KEY' both match at ThreatLevel.CRITICAL.
+    'BEGIN PUBLIC KEY' does NOT match (public keys are not secrets).
+    """
+
     def test_rsa_key(self, crucible):
         content = '-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAK...'
         threats = crucible.scan_content("test.txt", content)
@@ -71,6 +83,12 @@ class TestSSHPrivateKey:
 
 
 class TestGenericSecret:
+    """Verifies the generic secret assignment pattern catches password/api_key assignments with long values.
+
+    'password = "SuperSecretPassword123456"' and 'api_key: abcdef...' (26 chars) both match.
+    Values under 16 characters don't match (too short to be a real secret).
+    """
+
     def test_password_assignment(self, crucible):
         content = 'password = "SuperSecretPassword123456"'
         threats = crucible.scan_content("test.py", content)
@@ -88,6 +106,8 @@ class TestGenericSecret:
 
 
 class TestMultipleSecrets:
+    """Verifies a file containing multiple secret types triggers all relevant patterns simultaneously."""
+
     def test_combined_scan(self, crucible):
         content = (
             'AWS_KEY = "AKIAIOSFODNN7EXAMPLE"\n'

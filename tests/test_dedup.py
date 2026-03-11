@@ -9,6 +9,11 @@ from forge.dedup import ToolDedup
 # ---------------------------------------------------------------------------
 
 class TestUniqueCallsPass:
+    """Verifies ToolDedup allows genuinely different tool calls through.
+
+    Different tool names, different argument paths, and the very first call all return None.
+    """
+
     def test_different_tools(self):
         d = ToolDedup(threshold=0.92)
         assert d.check("read_file", {"path": "a.py"}) is None
@@ -29,6 +34,14 @@ class TestUniqueCallsPass:
 # ---------------------------------------------------------------------------
 
 class TestDuplicateDetection:
+    """Verifies ToolDedup correctly identifies identical and near-duplicate tool calls.
+
+    Identical args → duplicate=True, similarity==1.0. Nearly identical long strings
+    (one punctuation difference) at threshold=0.90 → duplicate=True, similarity >= 0.90.
+    Different content ('Short note about X' vs 'Completely different...') at threshold=0.95
+    → not a duplicate (None). At threshold=0.99 an extra 'offset' key makes calls different.
+    """
+
     def test_identical_args(self):
         d = ToolDedup(threshold=0.92)
         d.check("write_notes", {"topic": "arch", "content": "The system is modular"})
@@ -75,6 +88,12 @@ class TestDuplicateDetection:
 # ---------------------------------------------------------------------------
 
 class TestConfiguration:
+    """Verifies ToolDedup respects enabled flag, clamps threshold, and evicts old window entries.
+
+    enabled=False → never suppresses any call. threshold > 1.0 clamped to 1.0; < 0.0 clamped
+    to 0.0. window_size=2: after 3 calls the 1st entry is evicted, so re-calling 'first' returns None.
+    """
+
     def test_disabled(self):
         d = ToolDedup(enabled=False)
         d.check("write_notes", {"content": "same"})
@@ -103,6 +122,13 @@ class TestConfiguration:
 # ---------------------------------------------------------------------------
 
 class TestResetAndStats:
+    """Verifies reset() clears the dedup window and stats() reports accurate counters.
+
+    reset() allows an identical call to pass again (window cleared). stats() returns
+    total_checked==3, total_suppressed==1 after one duplicate. Initial stats all zero.
+    format_status() shows the threshold percentage ('92%') and enabled state ('ON').
+    """
+
     def test_reset_clears_window(self):
         d = ToolDedup(threshold=0.92)
         d.check("write_notes", {"content": "hello"})
@@ -140,6 +166,12 @@ class TestResetAndStats:
 # ---------------------------------------------------------------------------
 
 class TestSimilarityEdgeCases:
+    """Verifies edge cases: empty args count as identical, non-serializable args don't crash.
+
+    Identical empty args ({}) → duplicate detected. Args containing lambdas (non-JSON-serializable)
+    must not raise an exception regardless of whether they match.
+    """
+
     def test_empty_args(self):
         d = ToolDedup(threshold=0.92)
         d.check("tool", {})
@@ -161,6 +193,14 @@ class TestSimilarityEdgeCases:
 # ---------------------------------------------------------------------------
 
 class TestCrossTurnDedup:
+    """Verifies soft_reset() preserves prior-turn calls for cross-turn dedup at a stricter 0.98 threshold.
+
+    After soft_reset(), an identical call from the previous turn is caught (cross_turn=True).
+    Different args across turns are not blocked. Two soft_resets evict the oldest turn's data.
+    Full reset() clears both current and previous turn. Cross-turn threshold is 0.98 (stricter than
+    the configured threshold), so a 0.92-threshold instance won't block near-identical cross-turn calls.
+    """
+
     def test_soft_reset_preserves_previous_turn(self):
         """After soft_reset, identical calls from previous turn are caught."""
         d = ToolDedup(threshold=0.92)

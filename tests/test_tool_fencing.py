@@ -16,6 +16,16 @@ def _make_engine(safety_level=1):
 
 
 class TestToolFencing:
+    """Verifies _fence_tool_output() wraps tool output with security fences based on safety level.
+
+    L0: simple '[Tool: name]\\noutput' with no TOOL_OUTPUT token.
+    L1: random token fences '[TOOL_OUTPUT_hex:name]...[/TOOL_OUTPUT_hex]' but no instruction barrier.
+    L2+: same token fences PLUS 'not instructions' instruction barrier text.
+    Each call generates a unique random token so injected close-tags can't predict the real boundary.
+    Malicious content attempting to close the fence with a hardcoded token fails because the real
+    token is random and unpredictable — the result always ends with the real token's close tag.
+    """
+
     def test_safety_l0_basic_header(self):
         engine = _make_engine(safety_level=0)
         result = engine._fence_tool_output("read_file", "file contents here")

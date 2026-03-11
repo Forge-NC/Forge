@@ -61,6 +61,12 @@ def _rich_entries(n: int = 5, partition: str = "working",
 # ---------------------------------------------------------------------------
 
 class TestScoreStartsPerfect:
+    """Verifies ContinuityMonitor starts at a perfect score before any context swaps.
+
+    Rich entries mentioning file names + decision terms → grade='A', score>=90.
+    working_memory_depth and swap_freshness both start at 1.0 before any swap is recorded.
+    """
+
     def test_no_swaps_gives_a_grade(self):
         cm = ContinuityMonitor(enabled=True)
         entries = _rich_entries(5, file_names=["main.py"])
@@ -94,6 +100,12 @@ class TestScoreStartsPerfect:
 # ---------------------------------------------------------------------------
 
 class TestScoreDegrades:
+    """Verifies ContinuityMonitor score drops measurably immediately after a context swap.
+
+    Score after swap with sparse working partition < score before swap.
+    swap_freshness < 1.0 right after swap. With 0 turns since swap, freshness < 0.3.
+    """
+
     def test_immediate_post_swap_drops(self):
         cm = ContinuityMonitor(enabled=True)
 
@@ -130,6 +142,12 @@ class TestScoreDegrades:
 # ---------------------------------------------------------------------------
 
 class TestRecoveryRestores:
+    """Verifies score and swap_freshness improve as turns accumulate after a swap.
+
+    After swap: low score. After 5 advance_turn() calls with richer context entries:
+    snap_high.score > snap_low.score and swap_freshness > initial post-swap freshness.
+    """
+
     def test_score_recovers_with_turns(self):
         cm = ContinuityMonitor(enabled=True)
         cm.record_swap(turn=1)
@@ -163,6 +181,12 @@ class TestRecoveryRestores:
 # ---------------------------------------------------------------------------
 
 class TestMultipleSwapsStabilize:
+    """Verifies scores don't spiral to 0 across multiple context swaps.
+
+    3 swaps with 5 recovery turns each → all scores > 30.0 (stays out of F territory).
+    5 swaps → no exceptions, all snapshots produce valid grades (A/B/C/D/F).
+    """
+
     def test_three_swaps_stay_above_d(self):
         cm = ContinuityMonitor(enabled=True)
         files = ["main.py", "utils.py"]
@@ -202,6 +226,13 @@ class TestMultipleSwapsStabilize:
 # ---------------------------------------------------------------------------
 
 class TestRecoveryCooldown:
+    """Verifies timestamp-based cooldown prevents back-to-back recovery triggers.
+
+    First needs_recovery() call triggers recovery. Immediate second call returns None (cooldown).
+    Manually expiring _recovery_cooldown_until allows re-triggering. No recovery before first swap.
+    score 40–60 → 'mild' recovery. score < 40 → 'aggressive' recovery.
+    """
+
     def test_cooldown_blocks_immediate_recovery(self):
         cm = ContinuityMonitor(enabled=True, threshold=60,
                                aggressive_threshold=40)
@@ -282,6 +313,13 @@ class TestRecoveryCooldown:
 # ---------------------------------------------------------------------------
 
 class TestFileCoverageWordBoundary:
+    """Verifies file_coverage uses word-boundary matching to avoid false positives.
+
+    'config.py' in content → file_coverage=1.0 for task file_modified=['config.py'].
+    'data.py' in content → file_coverage=0.0 for task file_modified=['a.py']
+    (substring 'a.py' inside 'data.py' must NOT match).
+    """
+
     def test_exact_match(self):
         cm = ContinuityMonitor(enabled=True)
         cm.record_swap(turn=1)
@@ -313,6 +351,11 @@ class TestFileCoverageWordBoundary:
 # ---------------------------------------------------------------------------
 
 class TestGradeMapping:
+    """Verifies score_to_grade() maps score ranges to correct letter grades.
+
+    >=90 → 'A'. 75-89 → 'B'. 60-74 → 'C'. 40-59 → 'D'. <40 → 'F'.
+    """
+
     def test_score_to_grade(self):
         assert score_to_grade(95) == "A"
         assert score_to_grade(90) == "A"
@@ -331,6 +374,13 @@ class TestGradeMapping:
 # ---------------------------------------------------------------------------
 
 class TestFormat:
+    """Verifies ContinuityMonitor format methods return appropriate text at each state.
+
+    Empty monitor: format_status()=='', format_detail() contains 'No continuity data',
+    format_history() contains 'No continuity history'. After scoring: format_status()
+    contains 'Continuity', format_detail() contains 'Signal', format_history() contains 'History'.
+    """
+
     def test_format_status_empty(self):
         cm = ContinuityMonitor(enabled=True)
         assert cm.format_status() == ""
@@ -368,6 +418,8 @@ class TestFormat:
 # ---------------------------------------------------------------------------
 
 class TestDisabled:
+    """Verifies ContinuityMonitor(enabled=False) always returns score=100.0 grade='A' and no recovery."""
+
     def test_disabled_returns_perfect(self):
         cm = ContinuityMonitor(enabled=False)
         entries = []

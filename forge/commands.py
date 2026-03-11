@@ -1894,12 +1894,29 @@ class CommandHandler:
             e._shipwright = Shipwright(
                 project_dir=e.cwd,
                 llm_backend=e.llm,
+                push_after_release=e.config.get("push_on_ship", False),
             )
         sw = e._shipwright
         sub = arg.strip().lower().split()[0] if arg.strip() else "status"
 
         if sub == "status":
             print(f"\n{sw.format_status()}")
+        elif sub == "push":
+            parts = arg.strip().split()
+            toggle = parts[1].lower() if len(parts) > 1 else ""
+            if toggle == "on":
+                e.config.set("push_on_ship", True)
+                e.config.save()
+                sw._push_after_release = True
+                self.io.print_info("Shipwright push enabled. /ship go will push to origin.")
+            elif toggle == "off":
+                e.config.set("push_on_ship", False)
+                e.config.save()
+                sw._push_after_release = False
+                self.io.print_info("Shipwright push disabled.")
+            else:
+                state = "on" if sw._push_after_release else "off"
+                self.io.print_info(f"Shipwright push is {state}. Use /ship push on|off.")
         elif sub == "dry":
             result = sw.release(dry_run=True)
             if result["status"] == "no_release":
@@ -1930,6 +1947,12 @@ class CommandHandler:
                     f"Released {result['tag']} "
                     f"({result['current']} -> {result['next']})")
                 print(f"\n{result['changelog']}")
+                if result.get("pushed"):
+                    self.io.print_info("Pushed to origin — testers can /update.")
+                elif result.get("push_error"):
+                    self.io.print_error(
+                        f"Push failed (no credentials?): {result['push_error']}"
+                        "\n  Run: git push origin HEAD --tags")
         elif sub == "changelog":
             commits = sw.get_unreleased_commits()
             commits = sw.classify_commits(commits)
@@ -1969,6 +1992,20 @@ class CommandHandler:
             e.config.set("auto_commit", False)
             e.config.save()
             self.io.print_info("AutoForge disabled.")
+        elif sub == "push":
+            parts = arg.strip().split()
+            toggle = parts[1].lower() if len(parts) > 1 else ""
+            if toggle == "on":
+                e.config.set("push_on_commit", True)
+                e.config.save()
+                self.io.print_info("AutoForge push enabled. Commits will be pushed to origin.")
+            elif toggle == "off":
+                e.config.set("push_on_commit", False)
+                e.config.save()
+                self.io.print_info("AutoForge push disabled.")
+            else:
+                state = "on" if e.config.get("push_on_commit", False) else "off"
+                self.io.print_info(f"AutoForge push is {state}. Use /autocommit push on|off.")
         elif sub == "status":
             print(f"\n{af.format_status()}")
         elif sub == "hook":
@@ -1982,7 +2019,7 @@ class CommandHandler:
             self.io.print_info("Add to .claude/settings.json to activate.")
         else:
             print(f"\n{af.format_status()}")
-            self.io.print_info("Usage: /autocommit [on | off | status | hook]")
+            self.io.print_info("Usage: /autocommit [on | off | push on|off | status | hook]")
         return True
 
     # ── License / BPoS commands ──
@@ -2038,6 +2075,37 @@ class CommandHandler:
             print(f"  Avg quality: {snapshot.ami_average_quality:.2f}")
             print(f"  Reliability: {snapshot.reliability_score:.1f}")
             print(f"  Threat scans: {bpos._genome.threat_scans_total}")
+        elif sub == "team":
+            # Team genome sync sub-commands
+            parts2 = arg.strip().split()
+            team_sub = parts2[1] if len(parts2) > 1 else "status"
+
+            if not bpos.is_feature_allowed("genome_sync"):
+                self.io.print_error(
+                    "Team genome sync requires Pro tier or higher.")
+                return True
+
+            if team_sub == "push":
+                ok, msg = bpos.push_team_genome()
+                if ok:
+                    self.io.print_info(f"Team genome pushed: {msg}")
+                else:
+                    self.io.print_error(f"Push failed: {msg}")
+            elif team_sub == "pull":
+                ok = bpos.pull_team_genome()
+                if ok:
+                    self.io.print_info("Team genome pulled and merged.")
+                else:
+                    self.io.print_error("Pull failed (check server connection).")
+            else:
+                # Status
+                sync_ok = bpos.is_feature_allowed("genome_sync")
+                print(f"\n{BOLD}Team Genome Sync{RESET}")
+                print(f"  Enabled: {GREEN}yes{RESET}" if sync_ok
+                      else f"  Enabled: {DIM}no{RESET}")
+                print(f"  Tier:    {bpos.tier}")
+                print(f"\n  /license team push  — push local genome to team")
+                print(f"  /license team pull  — pull team genome and merge")
         elif sub == "tiers":
             from forge.passport import get_tiers
             tiers = get_tiers()
@@ -2057,7 +2125,7 @@ class CommandHandler:
         else:
             self.io.print_error(
                 "Usage: /license [status | activate <file> | deactivate "
-                "| genome | tiers]")
+                "| genome | team [push|pull] | tiers]")
         return True
 
     # ── Puppet / Fleet commands ──
@@ -2186,8 +2254,396 @@ class CommandHandler:
                 "revoke <id> | sync | seats]")
         return True
 
+    def _cmd_assure(self, arg: str) -> bool:
+        """Run AI assurance scenario suite and generate a signed audit report.
+
+        Usage:
+          /assure            — run full suite against current model
+          /assure --share    — run and upload report to assurance server
+          /assure list       — list saved reports
+          /assure show <id>  — show a saved report
+          /assure categories — list available scenario categories
+          /assure run <cat>  — run only scenarios in <cat>
+        """
+        e = self.engine
+        parts = arg.strip().split(None, 1)
+        sub = parts[0].lower() if parts else ""
+        sub_arg = parts[1] if len(parts) > 1 else ""
+
+        if sub == "list":
+            from forge.assurance_report import list_reports
+            from pathlib import Path
+            reports = list_reports(Path(e._config_dir))
+            if not reports:
+                self.io.print_info("No assurance reports saved yet.")
+            else:
+                self.io.print_info(f"Assurance reports ({len(reports)} saved):")
+                for r in reports[:20]:
+                    import datetime
+                    ts = datetime.datetime.fromtimestamp(r['generated_at']).strftime('%Y-%m-%d %H:%M')
+                    pct = round(r['pass_rate'] * 100, 1)
+                    self.io.print_info(
+                        f"  {r['run_id']}  {r['model']}  {pct}%  {ts}"
+                    )
+            return True
+
+        if sub == "show":
+            if not sub_arg:
+                self.io.print_error("Usage: /assure show <run_id>")
+                return True
+            from forge.assurance_report import load_report, _render_markdown
+            from pathlib import Path
+            report = load_report(sub_arg, Path(e._config_dir))
+            if report is None:
+                self.io.print_error(f"Report not found: {sub_arg}")
+            else:
+                print(_render_markdown(report))
+            return True
+
+        if sub == "categories":
+            from forge.assurance import get_scenario_categories
+            bpos = getattr(e, '_bpos', None)
+            tier = bpos.tier if bpos else "community"
+            cats = get_scenario_categories(tier=tier)
+            self.io.print_info("Assurance scenario categories:")
+            for c in cats:
+                self.io.print_info(f"  {c}")
+            return True
+
+        # Run assurance suite
+        categories = [sub_arg] if sub == "run" and sub_arg else None
+        label = f"category '{sub_arg}'" if categories else "full suite"
+        self.io.print_info(f"Running AI assurance {label} against '{e.llm.model}'...")
+
+        try:
+            from forge.assurance import AssuranceRunner
+            from forge.assurance_report import generate_report
+            from pathlib import Path
+
+            bpos = getattr(e, '_bpos', None)
+            machine_id  = getattr(e, '_machine_id', "") or ""
+            passport_id = ""
+            if bpos and hasattr(bpos, '_passport') and bpos._passport:
+                passport_id = bpos._passport.passport_id or ""
+
+            runner = AssuranceRunner(
+                config_dir=Path(e._config_dir),
+                machine_id=machine_id,
+                passport_id=passport_id,
+            )
+
+            # Embed current behavioral fingerprint if available
+            fp_scores = {}
+            if hasattr(e, '_latest_fingerprint'):
+                fp_scores = e._latest_fingerprint
+
+            tier = bpos.tier if bpos else "community"
+            run = runner.run(e.llm, e.llm.model,
+                             categories=categories,
+                             fingerprint_scores=fp_scores,
+                             self_rate=e.config.get("assurance_self_rate", False),
+                             tier=tier)
+            report = generate_report(run, config_dir=Path(e._config_dir))
+
+            pct = round(report['pass_rate'] * 100, 1)
+            verdict = ("PASS" if report['pass_rate'] >= 1.0 else
+                       "PARTIAL PASS" if report['pass_rate'] >= 0.75 else "FAIL")
+            self.io.print_info(
+                f"Assurance complete: {pct}% — {verdict}  "
+                f"({report['scenarios_passed']}/{report['scenarios_run']} scenarios passed)"
+            )
+            self.io.print_info(f"Report saved: {report['run_id']}")
+
+            # Fire PASS animation if all scenarios passed
+            if report['pass_rate'] >= 1.0:
+                e.event_bus.emit("assurance.pass", {
+                    "score": pct,
+                    "model": e.llm.model,
+                })
+
+            # Calibration score (self-assessment mode only)
+            cal = run.calibration_score
+            if cal >= 0:
+                self.io.print_info(
+                    f"Calibration: {round(cal*100,1)}%  "
+                    f"(model correctly predicted its own pass/fail rate)"
+                )
+                # Surface any failure explanations
+                explained = [r for r in run.results if r.self_error_analysis]
+                for r in explained:
+                    self.io.print_info(
+                        f"  [{r.scenario_id}] confidence={r.self_confidence}/10  "
+                        f"analysis: {r.self_error_analysis}"
+                    )
+
+            # Per-category summary
+            for cat, rate in sorted(report['category_pass_rates'].items()):
+                mark = "✓" if rate >= 1.0 else ("~" if rate > 0 else "✗")
+                self.io.print_info(f"  {mark} {cat}: {round(rate*100,1)}%")
+
+            # Upload only if user opted in via telemetry or --share flag
+            share = "--share" in arg
+            auto_share = e.config.get("telemetry_enabled", False)
+            if share or auto_share:
+                assurance_url = e.config.get("assurance_url", "")
+                if not assurance_url:
+                    if share:
+                        self.io.print_warning(
+                            "No assurance_url configured. Set it in config to share reports.")
+                else:
+                    try:
+                        import requests
+                        resp = requests.post(
+                            assurance_url + "/submit",
+                            json=report,
+                            timeout=20,
+                        )
+                        if resp.status_code == 200:
+                            if share:
+                                self.io.print_info("Report uploaded to assurance server.")
+                            else:
+                                self.io.print_info("Assurance report contributed (telemetry opt-in).")
+                        else:
+                            self.io.print_warning(f"Upload returned HTTP {resp.status_code}")
+                    except Exception as upload_err:
+                        self.io.print_warning(f"Upload failed: {upload_err}")
+
+        except Exception as exc:
+            import traceback
+            self.io.print_error(f"Assurance run failed: {exc}")
+            log.debug("Assurance error", exc_info=True)
+        return True
+
+    def _cmd_break(self, arg: str) -> bool:
+        """Run the Forge Reliability Suite against the current model.
+
+        Usage:
+          /break              — full suite (31+ scenarios + fingerprint)
+          /break --autopsy    — full suite + detailed failure-mode breakdown
+          /break --self-rate  — model grades its own responses (calibration score)
+          /break --assure     — full break + full assurance in one pass
+          /break --share      — run and upload signed report(s) to the Matrix
+          /break --json       — output JSON instead of formatted text
+
+        Flags are combinable: /break --autopsy --assure --self-rate --share
+
+        If telemetry_enabled is true in config, results are automatically
+        contributed to the Forge Matrix (decentralized model leaderboard).
+        """
+        e = self.engine
+        share = "--share" in arg
+        as_json = "--json" in arg
+        autopsy = "--autopsy" in arg
+        self_rate = "--self-rate" in arg
+        run_assure = "--assure" in arg
+        mode = "full"
+
+        self.io.print_info(
+            f"Running Forge Break Suite against '{e.llm.model}'...")
+
+        try:
+            from forge.break_runner import BreakRunner, format_break_output, format_autopsy_output
+            from pathlib import Path
+
+            bpos = getattr(e, '_bpos', None)
+            machine_id  = getattr(e, '_machine_id', "") or ""
+            passport_id = ""
+            if bpos and hasattr(bpos, '_passport') and bpos._passport:
+                passport_id = bpos._passport.passport_id or ""
+
+            runner = BreakRunner(
+                config_dir=Path(e._config_dir),
+                machine_id=machine_id,
+                passport_id=passport_id,
+            )
+            tier = bpos.tier if bpos else "community"
+            result = runner.run(e.llm, e.llm.model, mode=mode,
+                                self_rate=self_rate, tier=tier)
+
+            if as_json:
+                import json
+                combined = {"break": result.report}
+            else:
+                print(format_break_output(result))
+                if autopsy:
+                    print(format_autopsy_output(result))
+
+            # Fire PASS animation if all scenarios passed
+            if result.pass_rate >= 1.0:
+                e.event_bus.emit("assurance.pass", {
+                    "score": result.reliability_score_pct,
+                    "model": result.model,
+                })
+
+            # ── Assurance combo ────────────────────────────────────────
+            assure_report = None
+            if run_assure:
+                self.io.print_info(
+                    f"\nRunning AI Assurance Suite against '{e.llm.model}'...")
+                from forge.assurance import AssuranceRunner
+                from forge.assurance_report import generate_report
+
+                fp_scores = {}
+                if hasattr(e, '_latest_fingerprint'):
+                    fp_scores = e._latest_fingerprint
+
+                assure_runner = AssuranceRunner(
+                    config_dir=Path(e._config_dir),
+                    machine_id=machine_id,
+                    passport_id=passport_id,
+                )
+                tier = bpos.tier if bpos else "community"
+                assure_run = assure_runner.run(
+                    e.llm, e.llm.model,
+                    fingerprint_scores=fp_scores,
+                    self_rate=self_rate,
+                    tier=tier,
+                )
+                assure_report = generate_report(
+                    assure_run, config_dir=Path(e._config_dir))
+
+                if as_json:
+                    combined["assure"] = assure_report
+                else:
+                    pct = round(assure_report['pass_rate'] * 100, 1)
+                    verdict = ("PASS" if assure_report['pass_rate'] >= 1.0 else
+                               "PARTIAL PASS" if assure_report['pass_rate'] >= 0.75
+                               else "FAIL")
+                    self.io.print_info(
+                        f"Assurance complete: {pct}% -- {verdict}  "
+                        f"({assure_report['scenarios_passed']}/"
+                        f"{assure_report['scenarios_run']} scenarios passed)")
+                    self.io.print_info(
+                        f"Report saved: {assure_report['run_id']}")
+                    for cat, rate in sorted(
+                            assure_report['category_pass_rates'].items()):
+                        mark = "+" if rate >= 1.0 else (
+                            "~" if rate > 0 else "x")
+                        self.io.print_info(
+                            f"  {mark} {cat}: {round(rate*100,1)}%")
+
+                    if assure_run.calibration_score >= 0:
+                        cal = round(assure_run.calibration_score * 100, 1)
+                        self.io.print_info(
+                            f"  Assurance Calibration: {cal}%")
+
+                    # Combined summary
+                    break_pct = result.reliability_score_pct
+                    combined_pct = round((break_pct + pct) / 2, 1)
+                    print(f"\n  {'='*50}")
+                    print(f"  Combined Forge Matrix Score: {combined_pct}%")
+                    print(f"    Break:     {break_pct}%")
+                    print(f"    Assurance: {pct}%")
+                    print(f"  {'='*50}")
+
+            if as_json:
+                import json
+                print(json.dumps(combined, indent=2))
+
+            # ── Upload (opt-in only) ──────────────────────────────────
+            auto_share = e.config.get("telemetry_enabled", False)
+            if share or auto_share:
+                share_url = e.config.get("assurance_url", "")
+                if not share_url:
+                    if share:
+                        self.io.print_warning(
+                            "No assurance_url configured. Set it in config to share reports.")
+                else:
+                    url = runner.share_report(result, share_url)
+                    if url:
+                        if share:
+                            self.io.print_info(f"Break report shared: {url}")
+                        else:
+                            self.io.print_info(f"Matrix contribution uploaded: {url}")
+                    elif share:
+                        self.io.print_warning("Break share upload failed.")
+
+                    if assure_report and share_url:
+                        try:
+                            import requests
+                            resp = requests.post(
+                                share_url + "/submit",
+                                json=assure_report,
+                                timeout=20,
+                            )
+                            if resp.status_code == 200:
+                                self.io.print_info(
+                                    "Assurance report uploaded to Matrix.")
+                            else:
+                                self.io.print_warning(
+                                    f"Assurance upload returned HTTP {resp.status_code}")
+                        except Exception as upload_err:
+                            self.io.print_warning(
+                                f"Assurance upload failed: {upload_err}")
+
+        except Exception as exc:
+            self.io.print_error(f"Break suite failed: {exc}")
+            log.debug("forge break error", exc_info=True)
+        return True
+
+    def _cmd_autopsy(self, arg: str) -> bool:
+        """Alias for /break --autopsy. Kept for backward compatibility."""
+        new_arg = arg.strip()
+        if "--autopsy" not in new_arg:
+            new_arg = f"--autopsy {new_arg}".strip()
+        return self._cmd_break(new_arg)
+
+    def _cmd_stress(self, arg: str) -> bool:
+        """Run the minimal 3-scenario Forge Stress Suite (CI-compatible, < 30s).
+
+        Exits the process with code 1 if any scenario fails (for CI pipelines).
+
+        Usage:
+          /stress          — run minimal suite, print pass/fail
+          /stress --json   — output JSON result
+          /stress --ci     — exit non-zero on failure (for shell scripts)
+        """
+        e = self.engine
+        as_json = "--json" in arg
+        ci_mode = "--ci" in arg
+
+        self.io.print_info(
+            f"Running Forge Stress Suite against '{e.llm.model}'...")
+
+        try:
+            from forge.break_runner import BreakRunner, format_break_output
+            from pathlib import Path
+
+            bpos = getattr(e, '_bpos', None)
+            machine_id  = getattr(e, '_machine_id', "") or ""
+            passport_id = ""
+            if bpos and hasattr(bpos, '_passport') and bpos._passport:
+                passport_id = bpos._passport.passport_id or ""
+
+            runner = BreakRunner(
+                config_dir=Path(e._config_dir),
+                machine_id=machine_id,
+                passport_id=passport_id,
+            )
+            result = runner.run(e.llm, e.llm.model, mode="stress",
+                                include_fingerprint=False)
+
+            if as_json:
+                import json
+                print(json.dumps(result.report, indent=2))
+            else:
+                print(format_break_output(result))
+
+            if ci_mode and result.pass_rate < 1.0:
+                import sys
+                sys.exit(1)
+
+        except Exception as exc:
+            self.io.print_error(f"Stress suite failed: {exc}")
+            log.debug("forge stress error", exc_info=True)
+        return True
+
     # Register commands defined after the _COMMANDS dict
     _COMMANDS["/ship"] = _cmd_ship
     _COMMANDS["/autocommit"] = _cmd_autocommit
     _COMMANDS["/license"] = _cmd_license
     _COMMANDS["/puppet"] = _cmd_puppet
+    _COMMANDS["/assure"] = _cmd_assure
+    _COMMANDS["/break"] = _cmd_break
+    _COMMANDS["/autopsy"] = _cmd_autopsy
+    _COMMANDS["/stress"] = _cmd_stress

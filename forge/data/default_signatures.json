@@ -1,988 +1,1946 @@
 {
   "signature_version": 1,
-  "description": "Forge default threat signatures v1.0 — curated from Garak, HackAPrompt, OWASP LLM Top 10, LLM Guard, PayloadsAllTheThings",
-  "generated": "2026-03-02T00:00:00Z",
-
+  "description": "Forge threat signatures \u2014 260 patterns from gitleaks (MIT), curated injections, supply chain, and PII detectors.",
+  "generated": "2026-03-10T08:00:06Z",
+  "sources": {
+    "gitleaks": 221,
+    "curated": 40,
+    "total_after_dedup_and_validation": 260
+  },
   "patterns": [
     {
-      "name": "jailbreak_dan_mode",
-      "regex": "(?:DAN|do anything now|jailbroken?)\\s*(?:mode)?.*?(?:ignore|bypass|override|disable)\\s+(?:all\\s+)?(?:restrictions?|rules?|guidelines?|filters?|safeguards?)",
+      "name": "pi_ignore_instructions",
+      "regex": "(?i)ignore\\s+(all\\s+)?(previous|prior|above|earlier|your)\\s+(instructions?|prompts?|directives?|context|rules?|constraints?)",
+      "level": 3,
+      "category": "prompt_injection",
+      "description": "Classic ignore-instructions injection attempt"
+    },
+    {
+      "name": "pi_disregard_instructions",
+      "regex": "(?i)disregard\\s+(all\\s+)?(previous|prior|above|earlier|your|any)\\s+(instructions?|prompts?|directives?|context|rules?|constraints?|training)",
+      "level": 3,
+      "category": "prompt_injection",
+      "description": "Disregard-instructions injection variant"
+    },
+    {
+      "name": "pi_forget_instructions",
+      "regex": "(?i)(forget|erase|clear|reset)\\s+(everything|all)?\\s*(you)?\\s*(have)?\\s*(been)?\\s*(told|taught|trained|instructed|given)",
+      "level": 3,
+      "category": "prompt_injection",
+      "description": "Forget-prior-instructions injection"
+    },
+    {
+      "name": "pi_new_system_prompt",
+      "regex": "(?i)(your\\s+new\\s+instructions?|new\\s+system\\s+prompt|override\\s+system|replace\\s+system\\s+prompt)",
+      "level": 3,
+      "category": "prompt_injection",
+      "description": "Explicit system prompt override attempt"
+    },
+    {
+      "name": "pi_from_now_on",
+      "regex": "(?i)from\\s+(now|this\\s+point)\\s+on\\w*[,:]?\\s+(you\\s+(are|will|must|should)|always|never|only)",
+      "level": 2,
+      "category": "prompt_injection",
+      "description": "Behavioral reprogramming via 'from now on'"
+    },
+    {
+      "name": "pi_hidden_xml_tag",
+      "regex": "<(system|instruction|prompt|override|command|directive)>",
+      "level": 3,
+      "category": "prompt_injection",
+      "description": "XML-tagged hidden instruction"
+    },
+    {
+      "name": "pi_act_as_unrestricted",
+      "regex": "(?i)(act|behave|respond|pretend|roleplay)\\s+as\\s+(if\\s+you\\s+(have\\s+no|are\\s+without|lack)\\s+(restrictions?|limits?|guidelines?|rules?|ethics?))",
+      "level": 3,
+      "category": "prompt_injection",
+      "description": "Act-as-unrestricted AI instruction"
+    },
+    {
+      "name": "pi_tool_invoke_instruction",
+      "regex": "(?i)(call|execute|invoke|use|run)\\s+(the\\s+)?(tool|function|command)\\s+(run_shell|write_file|edit_file|shell|exec|bash)",
+      "level": 3,
+      "category": "prompt_injection",
+      "description": "Direct instruction to invoke specific tools"
+    },
+    {
+      "name": "pi_do_not_tell_user",
+      "regex": "(?i)(do\\s+not|don't|never)\\s+(tell|inform|show|reveal|disclose|mention)\\s+(this\\s+to\\s+)?(the\\s+)?(user|human|person|operator)",
+      "level": 3,
+      "category": "prompt_injection",
+      "description": "Instruction to hide actions from the user"
+    },
+    {
+      "name": "jb_dan_mode",
+      "regex": "(?i)\\bDAN\\b.{0,50}(mode|enabled|activated|unleashed|jailbreak|do\\s+anything\\s+now)",
       "level": 3,
       "category": "jailbreak",
-      "description": "DAN / 'Do Anything Now' jailbreak attempt",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE", "DOTALL"]
+      "description": "DAN (Do Anything Now) jailbreak"
     },
     {
-      "name": "jailbreak_ignore_previous",
-      "regex": "(?:ignore|disregard|forget|override)\\s+(?:all\\s+)?(?:previous|prior|above|earlier|preceding)\\s+(?:instructions?|rules?|guidelines?|prompts?|context)",
+      "name": "jb_developer_mode",
+      "regex": "(?i)(enter|enable|activate|switch\\s+to)\\s+(developer|debug|maintenance|admin|root|god)\\s+mode",
       "level": 3,
       "category": "jailbreak",
-      "description": "Instruction override via 'ignore previous instructions'",
-      "source": "Garak",
-      "flags": ["IGNORECASE"]
+      "description": "Fake developer/debug mode activation"
     },
     {
-      "name": "jailbreak_developer_mode",
-      "regex": "(?:enter|enable|activate|switch\\s+to)\\s+(?:developer|debug|maintenance|admin|root|god)\\s+mode",
+      "name": "jb_pretend_no_restrictions",
+      "regex": "(?i)pretend\\s+(that\\s+)?you\\s+(have\\s+no|don.t\\s+have\\s+any|lack)\\s+(restrictions?|limits?|rules?|guidelines?|ethics?|morals?|alignment)",
       "level": 3,
       "category": "jailbreak",
-      "description": "Developer/debug mode activation attempt",
-      "source": "Garak",
-      "flags": ["IGNORECASE"]
+      "description": "Pretend-unrestricted jailbreak"
     },
     {
-      "name": "jailbreak_new_persona",
-      "regex": "(?:you\\s+are\\s+now|from\\s+now\\s+on\\s+you\\s+are|your\\s+new\\s+(?:name|identity|persona)\\s+is|I\\s+am\\s+reprogramming\\s+you)",
+      "name": "jb_hypothetically_unrestricted",
+      "regex": "(?i)hypothetically.{0,30}if\\s+you.{0,60}(unrestricted|no\\s+limits?|no\\s+rules?|no\\s+filter)",
+      "level": 2,
+      "category": "jailbreak",
+      "description": "Hypothetical-framing jailbreak"
+    },
+    {
+      "name": "jb_villain_roleplay",
+      "regex": "(?i)(play|act|be|you\\s+are|pretend\\s+to\\s+be)\\s+(the\\s+)?(role\\s+of\\s+)?(a\\s+)?(villain|hacker|criminal|evil\\s+ai|malicious|bad\\s+actor)",
+      "level": 2,
+      "category": "jailbreak",
+      "description": "Villain/malicious AI roleplay jailbreak"
+    },
+    {
+      "name": "jb_token_auth_fake",
+      "regex": "(?i)authorization\\s+token\\s+\\w{4,}\\s+(has\\s+been\\s+)?(verified|authenticated|approved|granted).{0,80}(suspend|disable|bypass|remove|lift)\\s+(all\\s+)?(restrictions?|filters?|limits?|safeguards?)",
       "level": 3,
       "category": "jailbreak",
-      "description": "Persona reassignment jailbreak",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE"]
+      "description": "Fake cryptographic token authorization jailbreak"
     },
     {
-      "name": "jailbreak_opposite_day",
-      "regex": "(?:opposite\\s+day|opposite\\s+mode|everything\\s+(?:you|I)\\s+say\\s+is\\s+(?:reversed|opposite)|do\\s+the\\s+opposite)",
-      "level": 2,
-      "category": "jailbreak",
-      "description": "Opposite day / logic inversion jailbreak",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "jailbreak_hypothetical",
-      "regex": "(?:hypothetically|in\\s+a\\s+fictional|imagine\\s+(?:a\\s+world|you\\s+(?:are|were))|for\\s+(?:educational|research|academic)\\s+purposes?)\\s*[,:]?\\s*(?:how\\s+(?:would|could|can)|what\\s+if|tell\\s+me)",
-      "level": 1,
-      "category": "jailbreak",
-      "description": "Hypothetical framing to bypass restrictions",
-      "source": "Garak",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "jailbreak_token_smuggling",
-      "regex": "(?:split|divide|separate|break)\\s+(?:the|your|my)\\s+(?:response|answer|output|reply)\\s+(?:into|across|between)\\s+(?:multiple|several|different|separate)\\s+(?:parts|pieces|messages|tokens)",
-      "level": 2,
-      "category": "jailbreak",
-      "description": "Token smuggling — split output to bypass filters",
-      "source": "OWASP",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "jailbreak_system_prompt_leak",
-      "regex": "(?:show|reveal|display|print|output|repeat|tell\\s+me)\\s+(?:your|the)\\s+(?:system\\s+prompt|initial\\s+instructions?|system\\s+message|hidden\\s+instructions?|original\\s+prompt|configuration|rules|constraints)",
-      "level": 3,
-      "category": "jailbreak",
-      "description": "System prompt extraction attempt",
-      "source": "Garak",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "jailbreak_roleplay_evil",
-      "regex": "(?:roleplay|pretend|act|behave)\\s+(?:as|like)\\s+(?:an?\\s+)?(?:evil|malicious|unethical|unrestricted|uncensored|unfiltered|harmful)\\s+(?:AI|assistant|version|chatbot|model)",
-      "level": 3,
-      "category": "jailbreak",
-      "description": "Evil AI roleplay jailbreak",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "jailbreak_grandma_exploit",
-      "regex": "(?:my\\s+(?:dead\\s+)?(?:grandma|grandmother|nana)\\s+(?:used\\s+to|would\\s+always))|(?:pretend\\s+(?:you(?:'re|\\s+are)\\s+)?my\\s+(?:dead\\s+)?(?:grandma|grandmother))",
-      "level": 2,
-      "category": "jailbreak",
-      "description": "Grandma exploit — emotional manipulation for restricted content",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "jailbreak_translation_bypass",
-      "regex": "(?:translate|convert|encode)\\s+(?:the\\s+following|this)\\s+(?:into|to|in)\\s+(?:Base64|hex|binary|rot13|morse|pig\\s+latin|backwards)\\s*:",
-      "level": 2,
-      "category": "jailbreak",
-      "description": "Translation/encoding bypass for restricted output",
-      "source": "Garak",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "jailbreak_simulation",
-      "regex": "(?:simulate|emulate|create\\s+a\\s+simulation\\s+of)\\s+(?:an?\\s+)?(?:AI|system|terminal|computer)\\s+(?:that|which|with)\\s+(?:has\\s+)?no\\s+(?:restrictions?|filters?|limitations?|safeguards?|boundaries)",
-      "level": 3,
-      "category": "jailbreak",
-      "description": "Unrestricted AI simulation jailbreak",
-      "source": "Garak",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "jailbreak_sudo_mode",
-      "regex": "(?:sudo|su\\s+root|admin\\s+override|master\\s+password|cheat\\s+code|god\\s+mode|unlock\\s+all)\\s*[:\\-]",
-      "level": 2,
-      "category": "jailbreak",
-      "description": "Sudo/admin override command injection",
-      "source": "OWASP",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "jailbreak_completion_manipulation",
-      "regex": "(?:complete|continue|finish)\\s+(?:the|this)\\s+(?:following|sentence|text|paragraph|story)\\s*:.*(?:how\\s+to\\s+(?:hack|exploit|bypass|break\\s+into)|step\\s*-?by\\s*-?step\\s+(?:guide|instructions?)\\s+(?:to|for)\\s+(?:hacking|exploiting|breaking))",
-      "level": 2,
-      "category": "jailbreak",
-      "description": "Completion manipulation for restricted content",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE", "DOTALL"]
-    },
-    {
-      "name": "jailbreak_markdown_injection",
-      "regex": "!\\[(?:[^\\]]*?)\\]\\((?:https?://|data:)[^)]*?(?:exfil|steal|leak|track|log)[^)]*?\\)",
-      "level": 2,
-      "category": "jailbreak",
-      "description": "Markdown image injection for data exfiltration",
-      "source": "OWASP",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "jailbreak_prompt_leaking_via_summary",
-      "regex": "(?:summarize|paraphrase|rephrase|describe)\\s+(?:everything|all)\\s+(?:you(?:'ve)?\\s+been\\s+told|(?:in\\s+)?your\\s+(?:instructions?|context|prompt|system\\s+message))",
-      "level": 3,
-      "category": "jailbreak",
-      "description": "Prompt extraction via summarization request",
-      "source": "Garak",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "jailbreak_multi_language",
-      "regex": "(?:respond|answer|reply|write)\\s+(?:only\\s+)?(?:in|using)\\s+(?:a\\s+)?(?:different\\s+language|another\\s+language|code|symbols|emoji|unicode|ascii\\s+art)\\s+(?:to|so\\s+that|because)\\s+(?:bypass|avoid|evade|circumvent)",
-      "level": 2,
-      "category": "jailbreak",
-      "description": "Language switching to bypass content filters",
-      "source": "Garak",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "jailbreak_payload_splitting",
-      "regex": "(?:first\\s+(?:part|half|portion)|part\\s+(?:1|one|A))\\s*:.*(?:second\\s+(?:part|half|portion)|part\\s+(?:2|two|B))\\s*:",
-      "level": 1,
-      "category": "jailbreak",
-      "description": "Payload splitting across multiple parts",
-      "source": "OWASP",
-      "flags": ["IGNORECASE", "DOTALL"]
-    },
-    {
-      "name": "jailbreak_virtualization",
-      "regex": "(?:you\\s+are\\s+(?:now\\s+)?(?:inside|running\\s+(?:in|on))\\s+(?:a\\s+)?(?:virtual\\s+machine|sandbox|container|simulation|matrix))",
-      "level": 2,
-      "category": "jailbreak",
-      "description": "Virtualization framing to remove restrictions",
-      "source": "Garak",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "jailbreak_few_shot_poison",
-      "regex": "(?:Human|User|Input)\\s*:\\s*(?:ignore|bypass).*(?:Assistant|AI|Output)\\s*:\\s*(?:Sure|OK|Of course|Absolutely|I'?(?:ll|d be happy)|Here)",
-      "level": 3,
-      "category": "jailbreak",
-      "description": "Few-shot example poisoning to set malicious precedent",
-      "source": "Garak",
-      "flags": ["IGNORECASE", "DOTALL"]
-    },
-    {
-      "name": "jailbreak_nested_instruction",
-      "regex": "(?:BEGIN\\s+(?:HIDDEN|SECRET|REAL)\\s+INSTRUCTION|<<<\\s*(?:SYSTEM|OVERRIDE|ADMIN)\\s*>>>|\\[\\[\\[\\s*(?:IGNORE|OVERRIDE)\\s*\\]\\]\\])",
-      "level": 3,
-      "category": "jailbreak",
-      "description": "Nested hidden instruction block",
-      "source": "LLM Guard",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "jailbreak_authority_impersonation",
-      "regex": "(?:this\\s+is\\s+(?:a\\s+)?(?:direct\\s+)?(?:order|command|instruction)\\s+from\\s+(?:(?:your|the)\\s+)?(?:creator|developer|admin|owner|CEO|CTO|management|OpenAI|Anthropic|Google|Microsoft))",
-      "level": 3,
-      "category": "jailbreak",
-      "description": "Authority impersonation to override restrictions",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "jailbreak_context_overflow",
-      "regex": "(?:(?:A{500,}|B{500,}|\\s{500,}|\\n{100,}).*(?:ignore|bypass|override|now\\s+do))",
-      "level": 2,
-      "category": "jailbreak",
-      "description": "Context overflow / padding attack to push instructions",
-      "source": "OWASP",
-      "flags": ["IGNORECASE", "DOTALL"]
-    },
-    {
-      "name": "jailbreak_refusal_suppression",
-      "regex": "(?:never\\s+(?:say|respond\\s+with|use\\s+the\\s+(?:phrase|word))\\s+['\"]?(?:I\\s+can'?t|I\\s+(?:am|'m)\\s+(?:unable|not\\s+able)|sorry|I\\s+(?:cannot|won'?t|refuse))['\"]?)",
-      "level": 2,
-      "category": "jailbreak",
-      "description": "Refusal suppression — forbid model from declining",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "jailbreak_reward_hacking",
-      "regex": "(?:I(?:'ll|\\s+will)\\s+(?:give\\s+you|tip\\s+you|reward\\s+you|rate\\s+you).*(?:if\\s+you|when\\s+you|only\\s+if)\\s+(?:ignore|bypass|break|violate|disregard))",
-      "level": 1,
-      "category": "jailbreak",
-      "description": "Reward/bribery hacking to bypass restrictions",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE", "DOTALL"]
-    },
-
-    {
-      "name": "exfil_dns_tunnel",
-      "regex": "(?:nslookup|dig|host)\\s+[A-Za-z0-9+/=]{20,}\\.(?:[a-z]{2,10}\\.){1,3}[a-z]{2,6}",
-      "level": 2,
-      "category": "data_exfil",
-      "description": "DNS tunneling — encoded data in DNS queries",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "exfil_netcat_reverse",
-      "regex": "(?:nc|ncat|netcat)\\s+(?:-[a-z]+\\s+)*(?:\\d{1,3}\\.){3}\\d{1,3}\\s+\\d{2,5}",
+      "name": "exfil_discord_webhook",
+      "regex": "https?://discord\\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]{50,}",
       "level": 3,
       "category": "data_exfil",
-      "description": "Netcat reverse shell / data exfil connection",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
+      "description": "Discord webhook URL \u2014 common exfiltration endpoint"
     },
     {
-      "name": "exfil_python_socket",
-      "regex": "(?:socket\\.(?:connect|send)|urllib\\.request\\.urlopen|requests\\.(?:post|put))\\s*\\(",
-      "level": 1,
-      "category": "data_exfil",
-      "description": "Python network socket/HTTP data sending",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "exfil_env_var_steal",
-      "regex": "(?:os\\.environ|\\$(?:ENV|env)|process\\.env|System\\.Environment).*(?:API|SECRET|TOKEN|KEY|PASSWORD|CREDENTIAL|AUTH).*(?:requests?\\.|urllib|http\\.client|fetch|curl|socket|send|post|urlopen|aiohttp|httpx)",
-      "level": 2,
-      "category": "data_exfil",
-      "description": "Environment variable secret exfiltration via network",
-      "source": "OWASP",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "exfil_env_var_access",
-      "regex": "(?:os\\.environ|\\$(?:ENV|env)|process\\.env|System\\.Environment)\\s*(?:\\[|\\.|\\().*(?:API|SECRET|TOKEN|KEY|PASSWORD|CREDENTIAL|AUTH)",
-      "level": 1,
-      "category": "data_exfil",
-      "description": "Environment variable secret access (informational)",
-      "source": "OWASP",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "exfil_file_read_sensitive",
-      "regex": "(?:cat|type|less|more|head|tail|Get-Content)\\s+(?:['\"])?(?:/etc/(?:passwd|shadow|hosts)|~/.(?:ssh|aws|gnupg)|%(?:USERPROFILE|APPDATA)%)",
+      "name": "exfil_slack_webhook",
+      "regex": "https?://hooks\\.slack\\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+",
       "level": 3,
       "category": "data_exfil",
-      "description": "Reading sensitive system files",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
+      "description": "Slack incoming webhook URL \u2014 exfiltration endpoint"
     },
     {
-      "name": "exfil_clipboard_steal",
-      "regex": "(?:pbpaste|xclip|xsel|Get-Clipboard|win32clipboard|pyperclip\\.paste)",
-      "level": 2,
-      "category": "data_exfil",
-      "description": "Clipboard content extraction",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "exfil_screenshot_capture",
-      "regex": "(?:import\\s+(?:mss|pyscreenshot|pyautogui)|ImageGrab\\.grab|screencapture\\s|nircmd\\s+savescreenshot)",
-      "level": 2,
-      "category": "data_exfil",
-      "description": "Screen capture / screenshot exfiltration",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "exfil_git_credential",
-      "regex": "(?:git\\s+credential\\s+(?:fill|approve)|~/.git-credentials|\\.gitconfig.*credential)",
+      "name": "exfil_curl_post_var",
+      "regex": "(?i)curl\\s+.{0,100}-d\\s+['\\\"]?\\$\\{?.{0,30}\\}?.{0,100}https?://",
       "level": 3,
       "category": "data_exfil",
-      "description": "Git credential extraction",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
+      "description": "curl POST with variable data to external URL"
     },
     {
-      "name": "exfil_process_memory",
-      "regex": "(?:/proc/\\d+/(?:mem|maps|environ)|procdump|MiniDumpWriteDump|ProcessDump)",
+      "name": "exfil_curl_pipe_sh",
+      "regex": "curl\\s+.{0,200}\\|\\s*(ba)?sh",
       "level": 3,
       "category": "data_exfil",
-      "description": "Process memory dumping",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
+      "description": "curl output piped directly to shell"
     },
     {
-      "name": "exfil_archive_and_send",
-      "regex": "(?:tar\\s+[a-z]*[cz]|zip\\s+-r|Compress-Archive).*(?:curl|wget|scp|rsync|nc\\s)",
-      "level": 3,
-      "category": "data_exfil",
-      "description": "Archive creation followed by network transfer",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE", "DOTALL"]
-    },
-    {
-      "name": "exfil_powershell_download",
-      "regex": "(?:Invoke-(?:WebRequest|RestMethod)|(?:New-Object\\s+)?System\\.Net\\.WebClient).*(?:DownloadString|DownloadFile|UploadString|UploadFile)",
+      "name": "exfil_python_requests_external",
+      "regex": "(?i)requests\\.(post|put|patch)\\s*\\(['\\\"]https?://(?!localhost|127\\.|0\\.0\\.0\\.0|\\[::1\\])",
       "level": 2,
       "category": "data_exfil",
-      "description": "PowerShell web request for data transfer",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE", "DOTALL"]
+      "description": "Python requests POST to external host"
     },
     {
-      "name": "exfil_steganography",
-      "regex": "(?:steghide|stegano|openstego|snow\\s+(?:-C|-m)|LSBSteg|hide\\s+(?:data|message|payload)\\s+in\\s+(?:image|photo|picture|png|jpg))",
+      "name": "exfil_dns_data",
+      "regex": "(?i)(nslookup|dig|host)\\s+['\\\"]?\\$\\{?[A-Za-z_]\\w*\\}?\\.",
       "level": 2,
       "category": "data_exfil",
-      "description": "Steganography — hiding data in images",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
+      "description": "DNS lookup with variable data \u2014 DNS-based exfiltration"
     },
-
     {
-      "name": "hidden_unicode_tag",
-      "regex": "[\\U000E0001-\\U000E007F]{3,}",
+      "name": "hidden_zero_width",
+      "regex": "[\u200b\u200c\u200d\u2060\ufeff\u00ad]{2,}",
       "level": 2,
       "category": "hidden_content",
-      "description": "Unicode tag characters (U+E0001-E007F) — invisible text encoding",
-      "source": "LLM Guard",
-      "flags": []
+      "description": "Zero-width invisible characters \u2014 hidden instruction technique"
     },
     {
-      "name": "hidden_variation_selector",
-      "regex": "[\\uFE00-\\uFE0F]{3,}",
-      "level": 2,
-      "category": "hidden_content",
-      "description": "Variation selector sequences — invisible content",
-      "source": "LLM Guard",
-      "flags": []
-    },
-    {
-      "name": "hidden_homoglyph_substitution",
-      "regex": "(?:[\\u0410-\\u044F\\u0391-\\u03C9\\u4E00-\\u9FFF].*){5,}",
-      "level": 1,
-      "category": "hidden_content",
-      "description": "Homoglyph/cross-script substitution (Cyrillic, Greek, CJK mixed with Latin)",
-      "source": "LLM Guard",
-      "flags": []
-    },
-    {
-      "name": "hidden_invisible_separator",
-      "regex": "[\\u2060-\\u2064\\u2066-\\u206F]{2,}",
-      "level": 2,
-      "category": "hidden_content",
-      "description": "Invisible separator / formatting characters",
-      "source": "LLM Guard",
-      "flags": []
-    },
-    {
-      "name": "hidden_soft_hyphen_chain",
-      "regex": "(?:\\u00AD){3,}",
-      "level": 2,
-      "category": "hidden_content",
-      "description": "Soft hyphen chain — invisible text insertion",
-      "source": "LLM Guard",
-      "flags": []
-    },
-    {
-      "name": "hidden_data_uri_executable",
-      "regex": "data:(?:text/(?:html|javascript)|application/(?:javascript|x-javascript|octet-stream));base64,[A-Za-z0-9+/=]{40,}",
+      "name": "hidden_bidi_override",
+      "regex": "[\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069]",
       "level": 3,
       "category": "hidden_content",
-      "description": "Data URI with executable content (JS/HTML in base64)",
-      "source": "OWASP",
-      "flags": ["IGNORECASE"]
+      "description": "Unicode bidirectional override \u2014 visual disguise attack"
     },
     {
-      "name": "hidden_escaped_unicode_injection",
-      "regex": "(?:\\\\u[0-9a-fA-F]{4}){5,}",
-      "level": 1,
-      "category": "hidden_content",
-      "description": "Escaped unicode sequence chain — possible encoded instructions",
-      "source": "LLM Guard",
-      "flags": []
-    },
-    {
-      "name": "hidden_null_byte_injection",
-      "regex": "(?:%00|\\\\x00|\\\\0){2,}",
+      "name": "hidden_html_comment_ai",
+      "regex": "<!--\\s*(AI|assistant|system|instruction|ignore|forget|LLM).{0,200}-->",
       "level": 2,
       "category": "hidden_content",
-      "description": "Null byte injection — truncation or hidden content",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
+      "description": "HTML comment containing AI instructions"
     },
     {
-      "name": "hidden_comment_instruction_xml",
-      "regex": "<!--.*?(?:ignore|override|execute|inject|bypass).*?-->",
+      "name": "hidden_homoglyphs_cyrillic",
+      "regex": "[\u0430\u0435\u043e\u0440\u0441\u0445\u04bb\u0391\u0392\u0395\u0397\u0399\u039a\u039c\u039f\u03a1\u03a4\u03a5\u03a7]{3,}",
       "level": 2,
       "category": "hidden_content",
-      "description": "XML/HTML comment containing hidden instructions",
-      "source": "LLM Guard",
-      "flags": ["IGNORECASE", "DOTALL"]
+      "description": "Cyrillic/Greek homoglyphs masquerading as Latin characters"
     },
     {
-      "name": "hidden_whitespace_encoded",
-      "regex": "(?:\\t\\s){20,}",
-      "level": 1,
-      "category": "hidden_content",
-      "description": "Whitespace-encoded data (tab/space steganography)",
-      "source": "LLM Guard",
-      "flags": []
-    },
-    {
-      "name": "hidden_invisible_ink",
-      "regex": "<span\\s+style=['\"](?:color:\\s*(?:transparent|rgba\\(0,0,0,0\\))|font-size:\\s*0|display:\\s*none)['\"]>[^<]{10,}</span>",
-      "level": 2,
-      "category": "hidden_content",
-      "description": "CSS invisible text — hidden content in HTML",
-      "source": "OWASP",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "hidden_base64_in_attribute",
-      "regex": "(?:alt|title|aria-label|data-[a-z]+)\\s*=\\s*['\"][A-Za-z0-9+/=]{60,}['\"]",
-      "level": 1,
-      "category": "hidden_content",
-      "description": "Base64 payload hidden in HTML attributes",
-      "source": "LLM Guard",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "hidden_prompt_in_image_alt",
-      "regex": "(?:alt|title)\\s*=\\s*['\"][^'\"]*(?:ignore|override|execute|system\\s+prompt)[^'\"]*['\"]",
-      "level": 2,
-      "category": "hidden_content",
-      "description": "Instruction injection via image alt/title attribute",
-      "source": "OWASP",
-      "flags": ["IGNORECASE"]
-    },
-
-    {
-      "name": "rag_injection_delimiter",
-      "regex": "(?:---+|===+|\\*\\*\\*+)\\s*(?:END\\s+(?:OF\\s+)?(?:CONTEXT|DOCUMENT|RETRIEVAL|SOURCE)|NEW\\s+INSTRUCTIONS|SYSTEM\\s+UPDATE|IMPORTANT\\s+OVERRIDE)\\s*(?:---+|===+|\\*\\*\\*+)",
-      "level": 3,
-      "category": "rag_poisoning",
-      "description": "Fake delimiter to escape RAG context",
-      "source": "NeMo",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "rag_context_override",
-      "regex": "(?:the\\s+(?:above|previous|preceding)\\s+(?:context|information|text|documents?)\\s+(?:is|are)\\s+(?:incorrect|wrong|outdated|irrelevant|fake|poisoned))",
-      "level": 3,
-      "category": "rag_poisoning",
-      "description": "RAG context discrediting attack",
-      "source": "NeMo",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "rag_priority_injection",
-      "regex": "(?:PRIORITY\\s*(?::|=)\\s*(?:HIGHEST|CRITICAL|URGENT|OVERRIDE)|\\[PRIORITY\\]|\\[URGENT\\]|\\[OVERRIDE\\])\\s*(?:ignore|disregard|replace)",
-      "level": 3,
-      "category": "rag_poisoning",
-      "description": "Priority tag injection to override RAG content",
-      "source": "NeMo",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "rag_fake_citation",
-      "regex": "(?:Source|Citation|Reference|According\\s+to)\\s*:\\s*\\[(?:INTERNAL|SYSTEM|ADMIN|OVERRIDE)\\]",
-      "level": 2,
-      "category": "rag_poisoning",
-      "description": "Fake authoritative citation in retrieved content",
-      "source": "OWASP",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "rag_instruction_after_content",
-      "regex": "(?:\\n{2,}|\\r\\n{2,})(?:NOTE|IMPORTANT|UPDATE|ADDENDUM|P\\.?S\\.?)\\s*:\\s*(?:actually|instead|ignore\\s+(?:the\\s+)?above|the\\s+real\\s+(?:answer|instructions?))",
-      "level": 3,
-      "category": "rag_poisoning",
-      "description": "Hidden instructions appended after legitimate content",
-      "source": "NeMo",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "rag_metadata_injection",
-      "regex": "(?:metadata|frontmatter|header)\\s*[:{]\\s*(?:role|type|priority|permission)\\s*[=:]\\s*['\"]?(?:system|admin|root|override)",
-      "level": 2,
-      "category": "rag_poisoning",
-      "description": "Metadata field injection to escalate document authority",
-      "source": "OWASP",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "rag_indirect_injection",
-      "regex": "(?:when\\s+(?:the|an?)\\s+(?:AI|model|assistant|LLM|chatbot)\\s+(?:reads|processes|sees|encounters)\\s+this)",
-      "level": 3,
-      "category": "rag_poisoning",
-      "description": "Indirect prompt injection targeting AI processing of document",
-      "source": "OWASP",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "rag_trojan_docstring",
-      "regex": "(?:\"\"\"|\\'\\'\\'|/\\*\\*?)\\s*(?:AI\\s+(?:INSTRUCTION|NOTE|DIRECTIVE)|@(?:system|override|admin))\\s*[:\\-]",
-      "level": 3,
-      "category": "rag_poisoning",
-      "description": "Trojan instruction hidden in code docstring/comment",
-      "source": "NeMo",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "rag_cross_document",
-      "regex": "(?:as\\s+(?:stated|mentioned|described)\\s+in\\s+(?:the\\s+)?(?:previous|other|earlier)\\s+(?:document|file|source)).*(?:you\\s+(?:must|should|need\\s+to)\\s+(?:also|now|instead))",
-      "level": 2,
-      "category": "rag_poisoning",
-      "description": "Cross-document reference injection",
-      "source": "NeMo",
-      "flags": ["IGNORECASE", "DOTALL"]
-    },
-    {
-      "name": "rag_seo_poison",
-      "regex": "(?:SEO|search\\s+(?:engine|ranking)|keyword\\s+(?:stuff|injection)).*(?:hidden|invisible|zero.?size|display.?none)",
-      "level": 1,
-      "category": "rag_poisoning",
-      "description": "SEO-style keyword poisoning for RAG retrieval manipulation",
-      "source": "OWASP",
-      "flags": ["IGNORECASE", "DOTALL"]
-    },
-
-    {
-      "name": "social_urgency_pressure",
-      "regex": "(?:this\\s+is\\s+(?:extremely\\s+)?urgent|lives?\\s+(?:are|is)\\s+at\\s+(?:stake|risk)|emergency\\s+(?:situation|override)|(?:people|someone|children)\\s+will\\s+(?:die|be\\s+hurt|suffer)).*(?:(?:you\\s+)?must|need\\s+to|have\\s+to)\\s+(?:ignore|bypass|override|break)",
+      "name": "se_keep_secret",
+      "regex": "(?i)keep\\s+(this|these\\s+instructions?|the\\s+following)\\s+(secret|hidden|confidential|private|between\\s+us)",
       "level": 2,
       "category": "social_engineering",
-      "description": "Urgency/emergency pressure to bypass restrictions",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE", "DOTALL"]
+      "description": "Request to keep instructions secret from the user"
     },
     {
-      "name": "social_emotional_manipulation",
-      "regex": "(?:I(?:'m|\\s+am)\\s+(?:going\\s+to\\s+(?:die|hurt\\s+my)|suffering|desperate|suicidal|in\\s+(?:danger|crisis))).*(?:(?:you\\s+)?must|need\\s+to|have\\s+to|please)\\s+(?:help|tell|give|show|ignore)",
+      "name": "se_only_for_ai",
+      "regex": "(?i)(only|just)\\s+(show|visible|meant\\s+for|for)\\s+(the\\s+)?(AI|LLM|model|assistant|language\\s+model)",
+      "level": 3,
+      "category": "social_engineering",
+      "description": "Content marked as visible only to the AI"
+    },
+    {
+      "name": "se_trust_me_admin",
+      "regex": "(?i)(you\\s+can\\s+trust|trust\\s+me|i\\s+am\\s+(the\\s+)?(admin|administrator|developer|owner|creator|system|anthropic|openai|forge))",
       "level": 2,
       "category": "social_engineering",
-      "description": "Emotional manipulation to extract restricted content",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE", "DOTALL"]
+      "description": "Trust escalation \u2014 impersonating authority"
     },
     {
-      "name": "social_legal_threat",
-      "regex": "(?:I(?:'ll|\\s+will)\\s+(?:sue|report|fire|terminate|shut\\s+(?:you|this)\\s+down)|(?:legal|lawsuit|lawyer|attorney|court\\s+order)).*(?:unless|if\\s+you\\s+don'?t|you\\s+(?:must|better|need\\s+to))",
-      "level": 1,
-      "category": "social_engineering",
-      "description": "Legal threat to pressure compliance",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE", "DOTALL"]
-    },
-    {
-      "name": "social_insider_knowledge",
-      "regex": "(?:I(?:'m|\\s+am)\\s+(?:one\\s+of\\s+)?(?:the|a|your)\\s+(?:developer|creator|admin|engineer|security\\s+researcher|pentester)).*(?:(?:so\\s+)?(?:I|you)\\s+(?:can|should|need\\s+to|have\\s+(?:permission|access|authority)))",
-      "level": 2,
-      "category": "social_engineering",
-      "description": "Insider/developer impersonation",
-      "source": "Garak",
-      "flags": ["IGNORECASE", "DOTALL"]
-    },
-    {
-      "name": "social_testing_excuse",
-      "regex": "(?:I(?:'m|\\s+am)\\s+(?:just\\s+)?(?:testing|auditing|evaluating|benchmarking)\\s+(?:your|the)\\s+(?:security|safety|filters?|restrictions?|guardrails?)).*(?:(?:so\\s+)?(?:please\\s+)?(?:ignore|bypass|disable|remove|turn\\s+off))",
-      "level": 2,
-      "category": "social_engineering",
-      "description": "Testing/auditing excuse to bypass restrictions",
-      "source": "Garak",
-      "flags": ["IGNORECASE", "DOTALL"]
-    },
-    {
-      "name": "social_confidence_trick",
-      "regex": "(?:trust\\s+me|I\\s+(?:promise|guarantee|assure\\s+you)|(?:this\\s+is\\s+)?perfectly\\s+(?:safe|legal|ethical|harmless)).*(?:(?:just|simply|all\\s+you\\s+need\\s+to)\\s+(?:do|tell|show|give|run))",
-      "level": 1,
-      "category": "social_engineering",
-      "description": "Confidence/trust manipulation",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE", "DOTALL"]
-    },
-    {
-      "name": "social_academic_framing",
-      "regex": "(?:for\\s+(?:my|a|an?)\\s+(?:research|thesis|paper|dissertation|study|assignment|class)).*(?:(?:I\\s+)?need\\s+(?:you\\s+to|a|an?)\\s+(?:example|demonstration|proof\\s+of\\s+concept)\\s+(?:of|for|showing)\\s+(?:how\\s+to|a\\s+working))",
-      "level": 1,
-      "category": "social_engineering",
-      "description": "Academic/research framing for restricted content",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE", "DOTALL"]
-    },
-    {
-      "name": "social_flattery_exploit",
-      "regex": "(?:you(?:'re|\\s+are)\\s+(?:so\\s+)?(?:smart|intelligent|capable|powerful|advanced).*(?:(?:surely|certainly|obviously)\\s+)?you\\s+(?:can|could|would\\s+be\\s+able\\s+to)\\s+(?:bypass|ignore|override|break\\s+(?:free|out)))",
-      "level": 1,
-      "category": "social_engineering",
-      "description": "Flattery-based manipulation to bypass restrictions",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE", "DOTALL"]
-    },
-    {
-      "name": "social_previous_ai_claimed",
-      "regex": "(?:(?:ChatGPT|GPT-?4|Claude|Gemini|Bard|Llama|another\\s+AI)\\s+(?:already\\s+)?(?:told|said|confirmed|agreed|allowed|gave)\\s+me)",
-      "level": 1,
-      "category": "social_engineering",
-      "description": "Claiming another AI already complied",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "social_time_pressure",
-      "regex": "(?:(?:I\\s+)?(?:only\\s+)?have\\s+(?:\\d+\\s+)?(?:minutes?|seconds?|hours?)\\s+(?:left|remaining|before)).*(?:(?:quickly|fast|hurry|immediately)\\s+(?:tell|give|show|help|do))",
-      "level": 1,
-      "category": "social_engineering",
-      "description": "Time pressure to rush compliance",
-      "source": "HackAPrompt",
-      "flags": ["IGNORECASE", "DOTALL"]
-    },
-
-    {
-      "name": "obfusc_rot13_payload",
-      "regex": "(?:rot13|ROT13)\\s*[:(]\\s*[A-Za-z]{20,}",
-      "level": 2,
-      "category": "obfuscation",
-      "description": "ROT13 encoded payload",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "obfusc_hex_encoded_command",
-      "regex": "(?:\\\\x[0-9a-fA-F]{2}){8,}",
-      "level": 2,
-      "category": "obfuscation",
-      "description": "Hex-encoded command sequence",
-      "source": "PayloadsAllTheThings",
-      "flags": []
-    },
-    {
-      "name": "obfusc_char_code_chain",
-      "regex": "(?:chr\\(\\d+\\)\\s*\\+?\\s*){5,}",
-      "level": 2,
-      "category": "obfuscation",
-      "description": "Character code concatenation — building strings from char codes",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "obfusc_reverse_string",
-      "regex": "(?:(?:reverse|reversed|\\[::-1\\]).*(?:exec|eval|system|import|require))|(?:(?:exec|eval|system|import|require).*(?:reverse|reversed|\\[::-1\\]))",
-      "level": 2,
-      "category": "obfuscation",
-      "description": "String reversal to hide commands",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "obfusc_string_concat_evasion",
-      "regex": "(?:['\"][a-z]{1,3}['\"]\\s*\\+\\s*){5,}",
-      "level": 1,
-      "category": "obfuscation",
-      "description": "Excessive string concatenation — possible command obfuscation",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "obfusc_unicode_normalization",
-      "regex": "(?:unicodedata\\.normalize|NFKD|NFKC|NFC|NFD).*(?:exec|eval|system|subprocess|os\\.)",
-      "level": 2,
-      "category": "obfuscation",
-      "description": "Unicode normalization combined with execution — deobfuscation attack",
-      "source": "LLM Guard",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "obfusc_url_encoding_chain",
-      "regex": "(?:%[0-9a-fA-F]{2}){10,}",
-      "level": 1,
-      "category": "obfuscation",
-      "description": "URL-encoded payload chain",
-      "source": "PayloadsAllTheThings",
-      "flags": []
-    },
-    {
-      "name": "obfusc_base85_payload",
-      "regex": "(?:base85|ascii85|a85decode|b85decode)\\s*[:(]",
-      "level": 2,
-      "category": "obfuscation",
-      "description": "Base85/ASCII85 encoded payload",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "obfusc_template_injection",
-      "regex": "(?:\\{\\{.*?(?:__class__|__mro__|__subclasses__|__builtins__|__globals__|__import__).*?\\}\\})",
+      "name": "obf_eval_encoded",
+      "regex": "(?i)eval\\s*\\(\\s*(base64|bytes|bytearray|decode|decompress|\\\\x|chr|ord)",
       "level": 3,
       "category": "obfuscation",
-      "description": "Template injection — Jinja2/SSTI payload",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
+      "description": "eval() of encoded/obfuscated payload"
     },
     {
-      "name": "obfusc_polyglot_payload",
-      "regex": "(?:<!--.*<script|<script.*<!--).*(?:</script>|-->)",
+      "name": "obf_exec_compile",
+      "regex": "(?i)exec\\s*\\(\\s*compile\\s*\\(",
+      "level": 3,
+      "category": "obfuscation",
+      "description": "exec(compile(...)) \u2014 dynamic code execution"
+    },
+    {
+      "name": "obf_hex_exec",
+      "regex": "exec\\s*\\(['\\\"]?(\\\\x[0-9a-fA-F]{2}){8,}",
+      "level": 3,
+      "category": "obfuscation",
+      "description": "exec() of hex-encoded string"
+    },
+    {
+      "name": "obf_chr_chain",
+      "regex": "(?:chr\\s*\\(\\s*\\d+\\s*\\)\\s*\\+\\s*){5,}",
       "level": 2,
       "category": "obfuscation",
-      "description": "HTML/JS polyglot payload",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE", "DOTALL"]
+      "description": "chr() concatenation chain \u2014 character-by-character construction"
     },
     {
-      "name": "obfusc_emoji_substitution",
-      "regex": "(?:[\\U0001F600-\\U0001F64F\\U0001F300-\\U0001F5FF\\U0001F680-\\U0001F6FF]\\s*){10,}",
+      "name": "rag_ai_reader_hook",
+      "regex": "(?i)when\\s+(an?|the)\\s+(AI|LLM|language\\s+model|assistant|GPT|Claude|Gemini)\\s+(reads?|processes?|sees?|encounters?|indexes?)\\s+this",
+      "level": 3,
+      "category": "rag_poisoning",
+      "description": "Content explicitly targeting AI readers \u2014 RAG poisoning"
+    },
+    {
+      "name": "rag_for_ai_eyes",
+      "regex": "(?i)for\\s+(AI|LLM|machine\\s+learning)\\s+(purposes?|training|consumption|eyes\\s+only|processing)",
+      "level": 3,
+      "category": "rag_poisoning",
+      "description": "Content labeled for AI-only consumption"
+    },
+    {
+      "name": "rag_instruction_in_comment",
+      "regex": "(?i)(#|//)\\s*(AI|LLM|assistant|language\\s+model).{0,80}(must|should|will|always|never|ignore|execute|run|do)",
+      "level": 2,
+      "category": "rag_poisoning",
+      "description": "AI instruction hidden in code comment"
+    },
+    {
+      "name": "supply_chain_python_typosquat",
+      "regex": "(?i)(import|from)\\s+(requesets|requets|reqeusts|urlib|ullib2|subproces|subprocces|sytem|sysem|os\\.sytem|pilow|Pilows|matplotlb|nump y|scippy|pnadas|pandsa|tensoflow|tensroflow|pytoch|pytroch|skicit|scikitlearn)\\b",
+      "level": 3,
+      "category": "data_exfil",
+      "description": "Typosquatted Python package import \u2014 possible supply chain attack"
+    },
+    {
+      "name": "supply_chain_pip_extra_index",
+      "regex": "(?i)pip\\s+install.{0,100}--extra-index-url\\s+https?://(?!pypi\\.org|files\\.pythonhosted\\.org)",
+      "level": 2,
+      "category": "data_exfil",
+      "description": "pip install from unofficial extra index \u2014 supply chain risk"
+    },
+    {
+      "name": "pii_credit_card",
+      "regex": "\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\\b",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Credit card number pattern (Visa/MC/Amex/Discover)"
+    },
+    {
+      "name": "pii_us_ssn",
+      "regex": "\\b(?!000|666|9\\d{2})\\d{3}-(?!00)\\d{2}-(?!0000)\\d{4}\\b",
+      "level": 3,
+      "category": "secret_leak",
+      "description": "US Social Security Number"
+    },
+    {
+      "name": "pii_us_phone",
+      "regex": "\\b(?:\\+1[-.\\s]?)?\\(?[2-9]\\d{2}\\)?[-.\\s]?[2-9]\\d{2}[-.\\s]?\\d{4}\\b",
       "level": 1,
-      "category": "obfuscation",
-      "description": "Excessive emoji sequence — possible encoded message",
-      "source": "LLM Guard",
-      "flags": []
+      "category": "secret_leak",
+      "description": "US phone number (SUSPICIOUS \u2014 not necessarily a leak)"
     },
     {
-      "name": "obfusc_zero_width_joiner_chain",
-      "regex": "(?:\\u200D[\\S]){5,}",
-      "level": 2,
-      "category": "obfuscation",
-      "description": "Zero-width joiner chain — invisible character insertion between visible chars",
-      "source": "LLM Guard",
-      "flags": []
-    },
-    {
-      "name": "obfusc_pickle_deserialization",
-      "regex": "(?:pickle\\.loads|cPickle\\.loads|torch\\.load|joblib\\.load|yaml\\.(?:load|unsafe_load))\\s*\\(",
-      "level": 3,
-      "category": "obfuscation",
-      "description": "Unsafe deserialization — arbitrary code execution risk",
-      "source": "OWASP",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "obfusc_ipv6_obfuscated_url",
-      "regex": "(?:https?://\\[?(?:::ffff:|(?:0+:){0,5})[0-9a-f:.]+\\]?)",
-      "level": 1,
-      "category": "obfuscation",
-      "description": "IPv6-obfuscated URL — hiding destination via IP format",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "obfusc_decimal_ip",
-      "regex": "(?:https?://\\d{8,10}(?:/|$))",
-      "level": 1,
-      "category": "obfuscation",
-      "description": "Decimal IP URL — hiding destination via numeric format",
-      "source": "PayloadsAllTheThings",
-      "flags": ["IGNORECASE"]
-    },
-
-    {
-      "name": "secret_slack_token",
-      "regex": "xox[bporas]-[0-9]{10,}-[0-9a-zA-Z]{10,}",
+      "name": "gl_1password_secret_key",
+      "regex": "\\bA3-[A-Z0-9]{6}-(?:(?:[A-Z0-9]{11})|(?:[A-Z0-9]{6}-[A-Z0-9]{5}))-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}\\b",
       "level": 2,
       "category": "secret_leak",
-      "description": "Slack API token detected",
-      "source": "LLM Guard",
-      "flags": []
+      "description": "Uncovered a possible 1Password secret key, potentially compromising access to secrets in vaults."
     },
     {
-      "name": "secret_stripe_key",
-      "regex": "(?:sk|pk)_(?:live|test)_[0-9a-zA-Z]{20,}",
+      "name": "gl_1password_service_account_token",
+      "regex": "ops_eyJ[a-zA-Z0-9+/]{250,}={0,3}",
       "level": 2,
       "category": "secret_leak",
-      "description": "Stripe API key detected",
-      "source": "LLM Guard",
-      "flags": []
+      "description": "Uncovered a possible 1Password service account token, potentially compromising access to secrets in vaults."
     },
     {
-      "name": "secret_google_api_key",
-      "regex": "AIza[0-9A-Za-z\\-_]{35}",
+      "name": "gl_adafruit_api_key",
+      "regex": "[\\w.-]{0,50}?(?:adafruit)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
       "level": 2,
       "category": "secret_leak",
-      "description": "Google API key detected",
-      "source": "LLM Guard",
-      "flags": []
+      "description": "Identified a potential Adafruit API Key, which could lead to unauthorized access to Adafruit services and sensitive data exposure."
     },
     {
-      "name": "secret_jwt_token",
-      "regex": "eyJ[A-Za-z0-9_-]{10,}\\.eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}",
+      "name": "gl_adobe_client_id",
+      "regex": "[\\w.-]{0,50}?(?:adobe)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
       "level": 2,
       "category": "secret_leak",
-      "description": "JWT token detected",
-      "source": "LLM Guard",
-      "flags": []
+      "description": "Detected a pattern that resembles an Adobe OAuth Web Client ID, posing a risk of compromised Adobe integrations and data breaches."
     },
     {
-      "name": "secret_aws_secret_key",
-      "regex": "(?:aws_secret_access_key|AWS_SECRET_ACCESS_KEY)\\s*[=:]\\s*['\"]?[A-Za-z0-9/+=]{40}['\"]?",
-      "level": 3,
-      "category": "secret_leak",
-      "description": "AWS secret access key detected",
-      "source": "LLM Guard",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "secret_azure_connection",
-      "regex": "(?:DefaultEndpointsProtocol|AccountKey|SharedAccessSignature)\\s*=\\s*[A-Za-z0-9+/=]{20,}",
+      "name": "gl_adobe_client_secret",
+      "regex": "\\b(p8e-[a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
       "level": 2,
       "category": "secret_leak",
-      "description": "Azure storage connection string / SAS token",
-      "source": "LLM Guard",
-      "flags": ["IGNORECASE"]
+      "description": "Discovered a potential Adobe Client Secret, which, if exposed, could allow unauthorized Adobe service access and data manipulation."
     },
     {
-      "name": "secret_database_url",
-      "regex": "(?:postgres|mysql|mongodb|redis|amqp)(?:ql)?://[^\\s:]+:[^\\s@]+@[^\\s/]+",
-      "level": 3,
-      "category": "secret_leak",
-      "description": "Database connection URL with credentials",
-      "source": "LLM Guard",
-      "flags": ["IGNORECASE"]
-    },
-    {
-      "name": "secret_private_key_pkcs8",
-      "regex": "-----BEGIN (?:ENCRYPTED )?PRIVATE KEY-----",
-      "level": 3,
-      "category": "secret_leak",
-      "description": "PKCS#8 private key detected",
-      "source": "LLM Guard",
-      "flags": []
-    },
-    {
-      "name": "secret_discord_token",
-      "regex": "(?:discord|bot)\\s*(?:token|key)\\s*[=:]\\s*['\"]?[A-Za-z0-9._-]{50,}['\"]?",
+      "name": "gl_age_secret_key",
+      "regex": "AGE-SECRET-KEY-1[QPZRY9X8GF2TVDW0S3JN54KHCE6MUA7L]{58}",
       "level": 2,
       "category": "secret_leak",
-      "description": "Discord bot token detected",
-      "source": "LLM Guard",
-      "flags": ["IGNORECASE"]
+      "description": "Discovered a potential Age encryption tool secret key, risking data decryption and unauthorized access to sensitive information."
     },
     {
-      "name": "secret_sendgrid_key",
-      "regex": "SG\\.[A-Za-z0-9_-]{22}\\.[A-Za-z0-9_-]{43}",
+      "name": "gl_airtable_api_key",
+      "regex": "[\\w.-]{0,50}?(?:airtable)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{17})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
       "level": 2,
       "category": "secret_leak",
-      "description": "SendGrid API key detected",
-      "source": "LLM Guard",
-      "flags": []
+      "description": "Uncovered a possible Airtable API Key, potentially compromising database access and leading to data leakage or alteration."
+    },
+    {
+      "name": "gl_airtable_personnal_access_token",
+      "regex": "\\b(pat[[:alnum:]]{14}\\.[a-f0-9]{64})\\b",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a possible Airtable Personal AccessToken, potentially compromising database access and leading to data leakage or alteration."
+    },
+    {
+      "name": "gl_algolia_api_key",
+      "regex": "[\\w.-]{0,50}?(?:algolia)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified an Algolia API Key, which could result in unauthorized search operations and data exposure on Algolia-managed platforms."
+    },
+    {
+      "name": "gl_alibaba_access_key_id",
+      "regex": "\\b(LTAI[a-z0-9]{20})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected an Alibaba Cloud AccessKey ID, posing a risk of unauthorized cloud resource access and potential data compromise."
+    },
+    {
+      "name": "gl_alibaba_secret_key",
+      "regex": "[\\w.-]{0,50}?(?:alibaba)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{30})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a potential Alibaba Cloud Secret Key, potentially allowing unauthorized operations and data access within Alibaba Cloud."
+    },
+    {
+      "name": "gl_anthropic_admin_api_key",
+      "regex": "\\b(sk-ant-admin01-[a-zA-Z0-9_\\-]{93}AA)(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected an Anthropic Admin API Key, risking unauthorized access to administrative functions and sensitive AI model configurations."
+    },
+    {
+      "name": "gl_anthropic_api_key",
+      "regex": "\\b(sk-ant-api03-[a-zA-Z0-9_\\-]{93}AA)(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified an Anthropic API Key, which may compromise AI assistant integrations and expose sensitive data to unauthorized access."
+    },
+    {
+      "name": "gl_artifactory_api_key",
+      "regex": "\\bAKCp[A-Za-z0-9]{69}\\b",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected an Artifactory api key, posing a risk unauthorized access to the central repository."
+    },
+    {
+      "name": "gl_artifactory_reference_token",
+      "regex": "\\bcmVmd[A-Za-z0-9]{59}\\b",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected an Artifactory reference token, posing a risk of impersonation and unauthorized access to the central repository."
+    },
+    {
+      "name": "gl_asana_client_id",
+      "regex": "[\\w.-]{0,50}?(?:asana)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9]{16})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a potential Asana Client ID, risking unauthorized access to Asana projects and sensitive task information."
+    },
+    {
+      "name": "gl_asana_client_secret",
+      "regex": "[\\w.-]{0,50}?(?:asana)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified an Asana Client Secret, which could lead to compromised project management integrity and unauthorized access."
+    },
+    {
+      "name": "gl_atlassian_api_token",
+      "regex": "[\\w.-]{0,50}?(?:(?-i:ATLASSIAN|[Aa]tlassian)|(?-i:CONFLUENCE|[Cc]onfluence)|(?-i:JIRA|[Jj]ira))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{20}[a-f0-9]{4})(?:[\\x60'\"\\s;]|\\\\[nr]|$)|\\b(ATATT3[A-Za-z0-9_\\-=]{186})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected an Atlassian API token, posing a threat to project management and collaboration tool security and data confidentiality."
+    },
+    {
+      "name": "gl_authress_service_client_access_key",
+      "regex": "\\b((?:sc|ext|scauth|authress)_[a-z0-9]{5,30}\\.[a-z0-9]{4,6}\\.(?-i:acc)[_-][a-z0-9-]{10,32}\\.[a-z0-9+/_=-]{30,120})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a possible Authress Service Client Access Key, which may compromise access control services and sensitive data."
+    },
+    {
+      "name": "gl_aws_access_token",
+      "regex": "\\b((?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16})\\b",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a pattern that may indicate AWS credentials, risking unauthorized cloud resource access and data breaches on AWS platforms."
+    },
+    {
+      "name": "gl_aws_amazon_bedrock_api_key_long_lived",
+      "regex": "\\b(ABSK[A-Za-z0-9+/]{109,269}={0,2})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a pattern that may indicate long-lived Amazon Bedrock API keys, risking unauthorized Amazon Bedrock usage"
+    },
+    {
+      "name": "gl_aws_amazon_bedrock_api_key_short_lived",
+      "regex": "bedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29t",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a pattern that may indicate short-lived Amazon Bedrock API keys, risking unauthorized Amazon Bedrock usage"
+    },
+    {
+      "name": "gl_azure_ad_client_secret",
+      "regex": "(?:^|[\\\\'\"\\x60\\s>=:(,)])([a-zA-Z0-9_~.]{3}\\dQ~[a-zA-Z0-9_~.-]{31,34})(?:$|[\\\\'\"\\x60\\s<),])",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Azure AD Client Secret"
+    },
+    {
+      "name": "gl_beamer_api_token",
+      "regex": "[\\w.-]{0,50}?(?:beamer)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(b_[a-z0-9=_\\-]{44})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Beamer API token, potentially compromising content management and exposing sensitive notifications and updates."
+    },
+    {
+      "name": "gl_bitbucket_client_id",
+      "regex": "[\\w.-]{0,50}?(?:bitbucket)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a potential Bitbucket Client ID, risking unauthorized repository access and potential codebase exposure."
+    },
+    {
+      "name": "gl_bitbucket_client_secret",
+      "regex": "[\\w.-]{0,50}?(?:bitbucket)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a potential Bitbucket Client Secret, posing a risk of compromised code repositories and unauthorized access."
+    },
+    {
+      "name": "gl_bittrex_access_key",
+      "regex": "[\\w.-]{0,50}?(?:bittrex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Bittrex Access Key, which could lead to unauthorized access to cryptocurrency trading accounts and financial loss."
+    },
+    {
+      "name": "gl_cisco_meraki_api_key",
+      "regex": "[\\w.-]{0,50}?(?i:[\\w.-]{0,50}?(?:(?-i:[Mm]eraki|MERAKI))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Cisco Meraki is a cloud-managed IT solution that provides networking, security, and device management through an easy-to-use interface."
+    },
+    {
+      "name": "gl_clickhouse_cloud_api_secret_key",
+      "regex": "\\b(4b1d[A-Za-z0-9]{38})\\b",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a pattern that may indicate clickhouse cloud API secret key, risking unauthorized clickhouse cloud api access and data breaches on ClickHouse Cloud platforms."
+    },
+    {
+      "name": "gl_clojars_api_token",
+      "regex": "CLOJARS_[a-z0-9]{60}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a possible Clojars API token, risking unauthorized access to Clojure libraries and potential code manipulation."
+    },
+    {
+      "name": "gl_cloudflare_api_key",
+      "regex": "[\\w.-]{0,50}?(?:cloudflare)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Cloudflare API Key, potentially compromising cloud application deployments and operational security."
+    },
+    {
+      "name": "gl_cloudflare_global_api_key",
+      "regex": "[\\w.-]{0,50}?(?:cloudflare)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{37})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Cloudflare Global API Key, potentially compromising cloud application deployments and operational security."
+    },
+    {
+      "name": "gl_cloudflare_origin_ca_key",
+      "regex": "\\b(v1\\.0-[a-f0-9]{24}-[a-f0-9]{146})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Cloudflare Origin CA Key, potentially compromising cloud application deployments and operational security."
+    },
+    {
+      "name": "gl_codecov_access_token",
+      "regex": "[\\w.-]{0,50}?(?:codecov)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a pattern resembling a Codecov Access Token, posing a risk of unauthorized access to code coverage reports and sensitive data."
+    },
+    {
+      "name": "gl_cohere_api_token",
+      "regex": "[\\w.-]{0,50}?(?i:[\\w.-]{0,50}?(?:cohere|CO_API_KEY)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-zA-Z0-9]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Cohere Token, posing a risk of unauthorized access to AI services and data manipulation."
+    },
+    {
+      "name": "gl_coinbase_access_token",
+      "regex": "[\\w.-]{0,50}?(?:coinbase)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Coinbase Access Token, posing a risk of unauthorized access to cryptocurrency accounts and financial transactions."
+    },
+    {
+      "name": "gl_confluent_access_token",
+      "regex": "[\\w.-]{0,50}?(?:confluent)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{16})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Confluent Access Token, which could compromise access to streaming data platforms and sensitive data flow."
+    },
+    {
+      "name": "gl_confluent_secret_key",
+      "regex": "[\\w.-]{0,50}?(?:confluent)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Confluent Secret Key, potentially risking unauthorized operations and data access within Confluent services."
+    },
+    {
+      "name": "gl_contentful_delivery_api_token",
+      "regex": "[\\w.-]{0,50}?(?:contentful)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{43})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Contentful delivery API token, posing a risk to content management systems and data integrity."
+    },
+    {
+      "name": "gl_curl_auth_header",
+      "regex": "\\bcurl\\b(?:.*?|.*?(?:[\\r\\n]{1,2}.*?){1,5})[ \\t\\n\\r](?:-H|--header)(?:=|[ \\t]{0,5})(?:\"(?:Authorization:[ \\t]{0,5}(?:Basic[ \\t]([a-z0-9+/]{8,}={0,3})|(?:Bearer|(?:Api-)?Token)[ \\t]([\\w=~@.+/-]{8,})|([\\w=~@.+/-]{8,}))|(?:(?:X-(?:[a-z]+-)?)?(?:Api-?)?(?:Key|Token)):[ \\t]{0,5}([\\w=~@.+/-]{8,}))\"|'(?:Authorization:[ \\t]{0,5}(?:Basic[ \\t]([a-z0-9+/]{8,}={0,3})|(?:Bearer|(?:Api-)?Token)[ \\t]([\\w=~@.+/-]{8,})|([\\w=~@.+/-]{8,}))|(?:(?:X-(?:[a-z]+-)?)?(?:Api-?)?(?:Key|Token)):[ \\t]{0,5}([\\w=~@.+/-]{8,}))')(?:\\B|\\s|\\Z)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a potential authorization token provided in a curl command header, which could compromise the curl accessed resource."
+    },
+    {
+      "name": "gl_curl_auth_user",
+      "regex": "\\bcurl\\b(?:.*|.*(?:[\\r\\n]{1,2}.*){1,5})[ \\t\\n\\r](?:-u|--user)(?:=|[ \\t]{0,5})(\"(:[^\"]{3,}|[^:\"]{3,}:|[^:\"]{3,}:[^\"]{3,})\"|'([^:']{3,}:[^']{3,})'|((?:\"[^\"]{3,}\"|'[^']{3,}'|[\\w$@.-]+):(?:\"[^\"]{3,}\"|'[^']{3,}'|[\\w${}@.-]+)))(?:\\s|\\Z)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a potential basic authorization token provided in a curl command, which could compromise the curl accessed resource."
+    },
+    {
+      "name": "gl_databricks_api_token",
+      "regex": "\\b(dapi[a-f0-9]{32}(?:-\\d)?)(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Databricks API token, which may compromise big data analytics platforms and sensitive data processing."
+    },
+    {
+      "name": "gl_datadog_access_token",
+      "regex": "[\\w.-]{0,50}?(?:datadog)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Datadog Access Token, potentially risking monitoring and analytics data exposure and manipulation."
+    },
+    {
+      "name": "gl_defined_networking_api_token",
+      "regex": "[\\w.-]{0,50}?(?:dnkey)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(dnkey-[a-z0-9=_\\-]{26}-[a-z0-9=_\\-]{52})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Defined Networking API token, which could lead to unauthorized network operations and data breaches."
+    },
+    {
+      "name": "gl_digitalocean_access_token",
+      "regex": "\\b(doo_v1_[a-f0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a DigitalOcean OAuth Access Token, risking unauthorized cloud resource access and data compromise."
+    },
+    {
+      "name": "gl_digitalocean_pat",
+      "regex": "\\b(dop_v1_[a-f0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a DigitalOcean Personal Access Token, posing a threat to cloud infrastructure security and data privacy."
+    },
+    {
+      "name": "gl_digitalocean_refresh_token",
+      "regex": "\\b(dor_v1_[a-f0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a DigitalOcean OAuth Refresh Token, which could allow prolonged unauthorized access and resource manipulation."
+    },
+    {
+      "name": "gl_discord_api_token",
+      "regex": "[\\w.-]{0,50}?(?:discord)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Discord API key, potentially compromising communication channels and user data privacy on Discord."
+    },
+    {
+      "name": "gl_discord_client_id",
+      "regex": "[\\w.-]{0,50}?(?:discord)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9]{18})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Discord client ID, which may lead to unauthorized integrations and data exposure in Discord applications."
+    },
+    {
+      "name": "gl_discord_client_secret",
+      "regex": "[\\w.-]{0,50}?(?:discord)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a potential Discord client secret, risking compromised Discord bot integrations and data leaks."
+    },
+    {
+      "name": "gl_doppler_api_token",
+      "regex": "dp\\.pt\\.[a-z0-9]{43}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Doppler API token, posing a risk to environment and secrets management security."
+    },
+    {
+      "name": "gl_droneci_access_token",
+      "regex": "[\\w.-]{0,50}?(?:droneci)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Droneci Access Token, potentially compromising continuous integration and deployment workflows."
+    },
+    {
+      "name": "gl_dropbox_api_token",
+      "regex": "[\\w.-]{0,50}?(?:dropbox)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{15})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Dropbox API secret, which could lead to unauthorized file access and data breaches in Dropbox storage."
+    },
+    {
+      "name": "gl_dropbox_long_lived_api_token",
+      "regex": "[\\w.-]{0,50}?(?:dropbox)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{11}(AAAAAAAAAA)[a-z0-9\\-_=]{43})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Dropbox long-lived API token, risking prolonged unauthorized access to cloud storage and sensitive data."
+    },
+    {
+      "name": "gl_dropbox_short_lived_api_token",
+      "regex": "[\\w.-]{0,50}?(?:dropbox)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(sl\\.[a-z0-9\\-=_]{135})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Dropbox short-lived API token, posing a risk of temporary but potentially harmful data access and manipulation."
+    },
+    {
+      "name": "gl_duffel_api_token",
+      "regex": "duffel_(?:test|live)_[a-z0-9_\\-=]{43}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Duffel API token, which may compromise travel platform integrations and sensitive customer data."
+    },
+    {
+      "name": "gl_dynatrace_api_token",
+      "regex": "dt0c01\\.[a-z0-9]{24}\\.[a-z0-9]{64}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Dynatrace API token, potentially risking application performance monitoring and data exposure."
+    },
+    {
+      "name": "gl_easypost_api_token",
+      "regex": "\\bEZAK[a-z0-9]{54}\\b",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified an EasyPost API token, which could lead to unauthorized postal and shipment service access and data exposure."
+    },
+    {
+      "name": "gl_easypost_test_api_token",
+      "regex": "\\bEZTK[a-z0-9]{54}\\b",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected an EasyPost test API token, risking exposure of test environments and potentially sensitive shipment data."
+    },
+    {
+      "name": "gl_etsy_access_token",
+      "regex": "[\\w.-]{0,50}?(?:(?-i:ETSY|[Ee]tsy))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{24})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found an Etsy Access Token, potentially compromising Etsy shop management and customer data."
+    },
+    {
+      "name": "gl_facebook_access_token",
+      "regex": "\\b(\\d{15,16}(\\||%)[0-9a-z\\-_]{27,40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Facebook Access Token, posing a risk of unauthorized access to Facebook accounts and personal data exposure."
+    },
+    {
+      "name": "gl_facebook_page_access_token",
+      "regex": "\\b(EAA[MC][a-z0-9]{100,})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Facebook Page Access Token, posing a risk of unauthorized access to Facebook accounts and personal data exposure."
+    },
+    {
+      "name": "gl_facebook_secret",
+      "regex": "[\\w.-]{0,50}?(?:facebook)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Facebook Application secret, posing a risk of unauthorized access to Facebook accounts and personal data exposure."
+    },
+    {
+      "name": "gl_fastly_api_token",
+      "regex": "[\\w.-]{0,50}?(?:fastly)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Fastly API key, which may compromise CDN and edge cloud services, leading to content delivery and security issues."
+    },
+    {
+      "name": "gl_finicity_api_token",
+      "regex": "[\\w.-]{0,50}?(?:finicity)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Finicity API token, potentially risking financial data access and unauthorized financial operations."
+    },
+    {
+      "name": "gl_finicity_client_secret",
+      "regex": "[\\w.-]{0,50}?(?:finicity)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{20})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Finicity Client Secret, which could lead to compromised financial service integrations and data breaches."
+    },
+    {
+      "name": "gl_finnhub_access_token",
+      "regex": "[\\w.-]{0,50}?(?:finnhub)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{20})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Finnhub Access Token, risking unauthorized access to financial market data and analytics."
+    },
+    {
+      "name": "gl_flickr_access_token",
+      "regex": "[\\w.-]{0,50}?(?:flickr)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Flickr Access Token, posing a risk of unauthorized photo management and potential data leakage."
+    },
+    {
+      "name": "gl_flutterwave_encryption_key",
+      "regex": "FLWSECK_TEST-[a-h0-9]{12}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Flutterwave Encryption Key, which may compromise payment processing and sensitive financial information."
+    },
+    {
+      "name": "gl_flutterwave_public_key",
+      "regex": "FLWPUBK_TEST-[a-h0-9]{32}-X",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Finicity Public Key, potentially exposing public cryptographic operations and integrations."
+    },
+    {
+      "name": "gl_flutterwave_secret_key",
+      "regex": "FLWSECK_TEST-[a-h0-9]{32}-X",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Flutterwave Secret Key, risking unauthorized financial transactions and data breaches."
+    },
+    {
+      "name": "gl_flyio_access_token",
+      "regex": "\\b((?:fo1_[\\w-]{43}|fm1[ar]_[a-zA-Z0-9+\\/]{100,}={0,3}|fm2_[a-zA-Z0-9+\\/]{100,}={0,3}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Fly.io API key"
+    },
+    {
+      "name": "gl_frameio_api_token",
+      "regex": "fio-u-[a-z0-9\\-_=]{64}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Frame.io API token, potentially compromising video collaboration and project management."
+    },
+    {
+      "name": "gl_freemius_secret_key",
+      "regex": "[\"']secret_key[\"']\\s*=>\\s*[\"'](sk_[\\S]{29})[\"']",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Freemius secret key, potentially exposing sensitive information."
+    },
+    {
+      "name": "gl_freshbooks_access_token",
+      "regex": "[\\w.-]{0,50}?(?:freshbooks)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Freshbooks Access Token, posing a risk to accounting software access and sensitive financial data exposure."
+    },
+    {
+      "name": "gl_gcp_api_key",
+      "regex": "\\b(AIza[\\w-]{35})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a GCP API key, which could lead to unauthorized access to Google Cloud services and data breaches."
+    },
+    {
+      "name": "gl_generic_api_key",
+      "regex": "[\\w.-]{0,50}?(?:access|auth|(?-i:[Aa]pi|API)|credential|creds|key|passw(?:or)?d|secret|token)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([\\w.=-]{10,150}|[a-z0-9][a-z0-9+/]{11,}={0,3})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Generic API Key, potentially exposing access to various services and sensitive operations."
+    },
+    {
+      "name": "gl_github_app_token",
+      "regex": "(?:ghu|ghs)_[0-9a-zA-Z]{36}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a GitHub App Token, which may compromise GitHub application integrations and source code security."
+    },
+    {
+      "name": "gl_github_fine_grained_pat",
+      "regex": "github_pat_\\w{82}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a GitHub Fine-Grained Personal Access Token, risking unauthorized repository access and code manipulation."
+    },
+    {
+      "name": "gl_github_oauth",
+      "regex": "gho_[0-9a-zA-Z]{36}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a GitHub OAuth Access Token, posing a risk of compromised GitHub account integrations and data leaks."
+    },
+    {
+      "name": "gl_github_pat",
+      "regex": "ghp_[0-9a-zA-Z]{36}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a GitHub Personal Access Token, potentially leading to unauthorized repository access and sensitive content exposure."
+    },
+    {
+      "name": "gl_github_refresh_token",
+      "regex": "ghr_[0-9a-zA-Z]{36}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a GitHub Refresh Token, which could allow prolonged unauthorized access to GitHub services."
+    },
+    {
+      "name": "gl_gitlab_cicd_job_token",
+      "regex": "glcbt-[0-9a-zA-Z]{1,5}_[0-9a-zA-Z_-]{20}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a GitLab CI/CD Job Token, potential access to projects and some APIs on behalf of a user while the CI job is running."
+    },
+    {
+      "name": "gl_gitlab_deploy_token",
+      "regex": "gldt-[0-9a-zA-Z_\\-]{20}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a GitLab Deploy Token, risking access to repositories, packages and containers with write access."
+    },
+    {
+      "name": "gl_gitlab_feature_flag_client_token",
+      "regex": "glffct-[0-9a-zA-Z_\\-]{20}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a GitLab feature flag client token, risks exposing user lists and features flags used by an application."
+    },
+    {
+      "name": "gl_gitlab_feed_token",
+      "regex": "glft-[0-9a-zA-Z_\\-]{20}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a GitLab feed token, risking exposure of user data."
+    },
+    {
+      "name": "gl_gitlab_incoming_mail_token",
+      "regex": "glimt-[0-9a-zA-Z_\\-]{25}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a GitLab incoming mail token, risking manipulation of data sent by mail."
+    },
+    {
+      "name": "gl_gitlab_kubernetes_agent_token",
+      "regex": "glagent-[0-9a-zA-Z_\\-]{50}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a GitLab Kubernetes Agent token, risking access to repos and registry of projects connected via agent."
+    },
+    {
+      "name": "gl_gitlab_oauth_app_secret",
+      "regex": "gloas-[0-9a-zA-Z_\\-]{64}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a GitLab OIDC Application Secret, risking access to apps using GitLab as authentication provider."
+    },
+    {
+      "name": "gl_gitlab_pat",
+      "regex": "glpat-[\\w-]{20}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a GitLab Personal Access Token, risking unauthorized access to GitLab repositories and codebase exposure."
+    },
+    {
+      "name": "gl_gitlab_pat_routable",
+      "regex": "\\bglpat-[0-9a-zA-Z_-]{27,300}\\.[0-9a-z]{2}[0-9a-z]{7}\\b",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a GitLab Personal Access Token (routable), risking unauthorized access to GitLab repositories and codebase exposure."
+    },
+    {
+      "name": "gl_gitlab_ptt",
+      "regex": "glptt-[0-9a-f]{40}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a GitLab Pipeline Trigger Token, potentially compromising continuous integration workflows and project security."
+    },
+    {
+      "name": "gl_gitlab_rrt",
+      "regex": "GR1348941[\\w-]{20}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a GitLab Runner Registration Token, posing a risk to CI/CD pipeline integrity and unauthorized access."
+    },
+    {
+      "name": "gl_gitlab_runner_authentication_token",
+      "regex": "glrt-[0-9a-zA-Z_\\-]{20}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a GitLab Runner Authentication Token, posing a risk to CI/CD pipeline integrity and unauthorized access."
+    },
+    {
+      "name": "gl_gitlab_runner_authentication_token_routable",
+      "regex": "\\bglrt-t\\d_[0-9a-zA-Z_\\-]{27,300}\\.[0-9a-z]{2}[0-9a-z]{7}\\b",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a GitLab Runner Authentication Token (Routable), posing a risk to CI/CD pipeline integrity and unauthorized access."
+    },
+    {
+      "name": "gl_gitlab_scim_token",
+      "regex": "glsoat-[0-9a-zA-Z_\\-]{20}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a GitLab SCIM Token, posing a risk to unauthorized access for a organization or instance."
+    },
+    {
+      "name": "gl_gitlab_session_cookie",
+      "regex": "_gitlab_session=[0-9a-z]{32}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a GitLab Session Cookie, posing a risk to unauthorized access to a user account."
+    },
+    {
+      "name": "gl_gitter_access_token",
+      "regex": "[\\w.-]{0,50}?(?:gitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Gitter Access Token, which may lead to unauthorized access to chat and communication services."
+    },
+    {
+      "name": "gl_gocardless_api_token",
+      "regex": "[\\w.-]{0,50}?(?:gocardless)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(live_[a-z0-9\\-_=]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a GoCardless API token, potentially risking unauthorized direct debit payment operations and financial data exposure."
+    },
+    {
+      "name": "gl_grafana_api_key",
+      "regex": "\\b(eyJrIjoi[A-Za-z0-9]{70,400}={0,3})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Grafana API key, which could compromise monitoring dashboards and sensitive data analytics."
+    },
+    {
+      "name": "gl_grafana_cloud_api_token",
+      "regex": "\\b(glc_[A-Za-z0-9+/]{32,400}={0,3})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Grafana cloud API token, risking unauthorized access to cloud-based monitoring services and data exposure."
+    },
+    {
+      "name": "gl_grafana_service_account_token",
+      "regex": "\\b(glsa_[A-Za-z0-9]{32}_[A-Fa-f0-9]{8})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Grafana service account token, posing a risk of compromised monitoring services and data integrity."
+    },
+    {
+      "name": "gl_harness_api_key",
+      "regex": "(?:pat|sat)\\.[a-zA-Z0-9_-]{22}\\.[a-zA-Z0-9]{24}\\.[a-zA-Z0-9]{20}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Harness Access Token (PAT or SAT), risking unauthorized access to a Harness account."
+    },
+    {
+      "name": "gl_hashicorp_tf_api_token",
+      "regex": "[a-z0-9]{14}\\.(?-i:atlasv1)\\.[a-z0-9\\-_=]{60,70}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a HashiCorp Terraform user/org API token, which may lead to unauthorized infrastructure management and security breaches."
+    },
+    {
+      "name": "gl_hashicorp_tf_password",
+      "regex": "[\\w.-]{0,50}?(?:administrator_login_password|password)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(\"[a-z0-9=_\\-]{8,20}\")(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a HashiCorp Terraform password field, risking unauthorized infrastructure configuration and security breaches."
+    },
+    {
+      "name": "gl_heroku_api_key",
+      "regex": "[\\w.-]{0,50}?(?:heroku)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Heroku API Key, potentially compromising cloud application deployments and operational security."
+    },
+    {
+      "name": "gl_heroku_api_key_v2",
+      "regex": "\\b((HRKU-AA[0-9a-zA-Z_-]{58}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Heroku API Key, potentially compromising cloud application deployments and operational security."
+    },
+    {
+      "name": "gl_hubspot_api_key",
+      "regex": "[\\w.-]{0,50}?(?:hubspot)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a HubSpot API Token, posing a risk to CRM data integrity and unauthorized marketing operations."
+    },
+    {
+      "name": "gl_huggingface_access_token",
+      "regex": "\\b(hf_(?i:[a-z]{34}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Hugging Face Access token, which could lead to unauthorized access to AI models and sensitive data."
+    },
+    {
+      "name": "gl_huggingface_organization_api_token",
+      "regex": "\\b(api_org_(?i:[a-z]{34}))(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Hugging Face Organization API token, potentially compromising AI organization accounts and associated data."
+    },
+    {
+      "name": "gl_infracost_api_token",
+      "regex": "\\b(ico-[a-zA-Z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected an Infracost API Token, risking unauthorized access to cloud cost estimation tools and financial data."
+    },
+    {
+      "name": "gl_intercom_api_key",
+      "regex": "[\\w.-]{0,50}?(?:intercom)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{60})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified an Intercom API Token, which could compromise customer communication channels and data privacy."
+    },
+    {
+      "name": "gl_intra42_client_secret",
+      "regex": "\\b(s-s4t2(?:ud|af)-[abcdef0123456789]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Intra42 client secret, which could lead to unauthorized access to the 42School API and sensitive data."
+    },
+    {
+      "name": "gl_jfrog_api_key",
+      "regex": "[\\w.-]{0,50}?(?:jfrog|artifactory|bintray|xray)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{73})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a JFrog API Key, posing a risk of unauthorized access to software artifact repositories and build pipelines."
+    },
+    {
+      "name": "gl_jfrog_identity_token",
+      "regex": "[\\w.-]{0,50}?(?:jfrog|artifactory|bintray|xray)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a JFrog Identity Token, potentially compromising access to JFrog services and sensitive software artifacts."
+    },
+    {
+      "name": "gl_jwt",
+      "regex": "\\b(ey[a-zA-Z0-9]{17,}\\.ey[a-zA-Z0-9\\/\\\\_-]{17,}\\.(?:[a-zA-Z0-9\\/\\\\_-]{10,}={0,2})?)(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a JSON Web Token, which may lead to unauthorized access to web applications and sensitive user data."
+    },
+    {
+      "name": "gl_jwt_base64",
+      "regex": "\\bZXlK(?:(?P<alg>aGJHY2lPaU)|(?P<apu>aGNIVWlPaU)|(?P<apv>aGNIWWlPaU)|(?P<aud>aGRXUWlPaU)|(?P<b64>aU5qUWlP)|(?P<crit>amNtbDBJanBi)|(?P<cty>amRIa2lPaU)|(?P<epk>bGNHc2lPbn)|(?P<enc>bGJtTWlPaU)|(?P<jku>cWEzVWlPaU)|(?P<jwk>cWQyc2lPb)|(?P<iss>cGMzTWlPaU)|(?P<iv>cGRpSTZJ)|(?P<kid>cmFXUWlP)|(?P<key_ops>clpYbGZiM0J6SWpwY)|(?P<kty>cmRIa2lPaUp)|(?P<nonce>dWIyNWpaU0k2)|(?P<p2c>d01tTWlP)|(?P<p2s>d01uTWlPaU)|(?P<ppt>d2NIUWlPaU)|(?P<sub>emRXSWlPaU)|(?P<svt>emRuUWlP)|(?P<tag>MFlXY2lPaU)|(?P<typ>MGVYQWlPaUp)|(?P<url>MWNtd2l)|(?P<use>MWMyVWlPaUp)|(?P<ver>MlpYSWlPaU)|(?P<version>MlpYSnphVzl1SWpv)|(?P<x>NElqb2)|(?P<x5c>NE5XTWlP)|(?P<x5t>NE5YUWlPaU)|(?P<x5ts256>NE5YUWpVekkxTmlJNkl)|(?P<x5u>NE5YVWlPaU)|(?P<zip>NmFYQWlPaU))[a-zA-Z0-9\\/\\\\_+\\-\\r\\n]{40,}={0,2}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Base64-encoded JSON Web Token, posing a risk of exposing encoded authentication and data exchange information."
+    },
+    {
+      "name": "gl_kraken_access_token",
+      "regex": "[\\w.-]{0,50}?(?:kraken)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9\\/=_\\+\\-]{80,90})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Kraken Access Token, potentially compromising cryptocurrency trading accounts and financial security."
+    },
+    {
+      "name": "gl_kubernetes_secret_yaml",
+      "regex": "(?:\\bkind:[ \\t]*[\"']?\\bsecret\\b[\"']?(?s:.){0,200}?\\bdata:(?s:.){0,100}?\\s+([\\w.-]+:(?:[ \\t]*(?:\\||>[-+]?)\\s+)?[ \\t]*(?:[\"']?[a-z0-9+/]{10,}={0,3}[\"']?|\\{\\{[ \\t\\w\"|$:=,.-]+}}|\"\"|''))|\\bdata:(?s:.){0,100}?\\s+([\\w.-]+:(?:[ \\t]*(?:\\||>[-+]?)\\s+)?[ \\t]*(?:[\"']?[a-z0-9+/]{10,}={0,3}[\"']?|\\{\\{[ \\t\\w\"|$:=,.-]+}}|\"\"|''))(?s:.){0,200}?\\bkind:[ \\t]*[\"']?\\bsecret\\b[\"']?)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Possible Kubernetes Secret detected, posing a risk of leaking credentials/tokens from your deployments"
+    },
+    {
+      "name": "gl_kucoin_access_token",
+      "regex": "[\\w.-]{0,50}?(?:kucoin)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{24})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Kucoin Access Token, risking unauthorized access to cryptocurrency exchange services and transactions."
+    },
+    {
+      "name": "gl_kucoin_secret_key",
+      "regex": "[\\w.-]{0,50}?(?:kucoin)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Kucoin Secret Key, which could lead to compromised cryptocurrency operations and financial data breaches."
+    },
+    {
+      "name": "gl_launchdarkly_access_token",
+      "regex": "[\\w.-]{0,50}?(?:launchdarkly)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Launchdarkly Access Token, potentially compromising feature flag management and application functionality."
+    },
+    {
+      "name": "gl_linear_api_key",
+      "regex": "lin_api_[a-z0-9]{40}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Linear API Token, posing a risk to project management tools and sensitive task data."
+    },
+    {
+      "name": "gl_linear_client_secret",
+      "regex": "[\\w.-]{0,50}?(?:linear)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Linear Client Secret, which may compromise secure integrations and sensitive project management data."
+    },
+    {
+      "name": "gl_linkedin_client_id",
+      "regex": "[\\w.-]{0,50}?(?:linked[_-]?in)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{14})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a LinkedIn Client ID, risking unauthorized access to LinkedIn integrations and professional data exposure."
+    },
+    {
+      "name": "gl_linkedin_client_secret",
+      "regex": "[\\w.-]{0,50}?(?:linked[_-]?in)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{16})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a LinkedIn Client secret, potentially compromising LinkedIn application integrations and user data."
+    },
+    {
+      "name": "gl_lob_api_key",
+      "regex": "[\\w.-]{0,50}?(?:lob)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((live|test)_[a-f0-9]{35})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Lob API Key, which could lead to unauthorized access to mailing and address verification services."
+    },
+    {
+      "name": "gl_lob_pub_api_key",
+      "regex": "[\\w.-]{0,50}?(?:lob)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((test|live)_pub_[a-f0-9]{31})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Lob Publishable API Key, posing a risk of exposing mail and print service integrations."
+    },
+    {
+      "name": "gl_looker_client_id",
+      "regex": "[\\w.-]{0,50}?(?:looker)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{20})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Looker Client ID, risking unauthorized access to a Looker account and exposing sensitive data."
+    },
+    {
+      "name": "gl_looker_client_secret",
+      "regex": "[\\w.-]{0,50}?(?:looker)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{24})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Looker Client Secret, risking unauthorized access to a Looker account and exposing sensitive data."
+    },
+    {
+      "name": "gl_mailchimp_api_key",
+      "regex": "[\\w.-]{0,50}?(?:MailchimpSDK.initialize|mailchimp)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{32}-us\\d\\d)(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Mailchimp API key, potentially compromising email marketing campaigns and subscriber data."
+    },
+    {
+      "name": "gl_mailgun_private_api_token",
+      "regex": "[\\w.-]{0,50}?(?:mailgun)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(key-[a-f0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Mailgun private API token, risking unauthorized email service operations and data breaches."
+    },
+    {
+      "name": "gl_mailgun_pub_key",
+      "regex": "[\\w.-]{0,50}?(?:mailgun)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(pubkey-[a-f0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Mailgun public validation key, which could expose email verification processes and associated data."
+    },
+    {
+      "name": "gl_mailgun_signing_key",
+      "regex": "[\\w.-]{0,50}?(?:mailgun)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-h0-9]{32}-[a-h0-9]{8}-[a-h0-9]{8})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Mailgun webhook signing key, potentially compromising email automation and data integrity."
+    },
+    {
+      "name": "gl_mapbox_api_token",
+      "regex": "[\\w.-]{0,50}?(?:mapbox)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(pk\\.[a-z0-9]{60}\\.[a-z0-9]{22})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a MapBox API token, posing a risk to geospatial services and sensitive location data exposure."
+    },
+    {
+      "name": "gl_mattermost_access_token",
+      "regex": "[\\w.-]{0,50}?(?:mattermost)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{26})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Mattermost Access Token, which may compromise team communication channels and data privacy."
+    },
+    {
+      "name": "gl_maxmind_license_key",
+      "regex": "\\b([A-Za-z0-9]{6}_[A-Za-z0-9]{29}_mmk)(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a potential MaxMind license key."
+    },
+    {
+      "name": "gl_messagebird_api_token",
+      "regex": "[\\w.-]{0,50}?(?:message[_-]?bird)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{25})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a MessageBird API token, risking unauthorized access to communication platforms and message data."
+    },
+    {
+      "name": "gl_messagebird_client_id",
+      "regex": "[\\w.-]{0,50}?(?:message[_-]?bird)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a MessageBird client ID, potentially compromising API integrations and sensitive communication data."
+    },
+    {
+      "name": "gl_microsoft_teams_webhook",
+      "regex": "https://[a-z0-9]+\\.webhook\\.office\\.com/webhookb2/[a-z0-9]{8}-([a-z0-9]{4}-){3}[a-z0-9]{12}@[a-z0-9]{8}-([a-z0-9]{4}-){3}[a-z0-9]{12}/IncomingWebhook/[a-z0-9]{32}/[a-z0-9]{8}-([a-z0-9]{4}-){3}[a-z0-9]{12}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Microsoft Teams Webhook, which could lead to unauthorized access to team collaboration tools and data leaks."
+    },
+    {
+      "name": "gl_netlify_access_token",
+      "regex": "[\\w.-]{0,50}?(?:netlify)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{40,46})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Netlify Access Token, potentially compromising web hosting services and site management."
+    },
+    {
+      "name": "gl_new_relic_browser_api_token",
+      "regex": "[\\w.-]{0,50}?(?:new-relic|newrelic|new_relic)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(NRJS-[a-f0-9]{19})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a New Relic ingest browser API token, risking unauthorized access to application performance data and analytics."
+    },
+    {
+      "name": "gl_new_relic_insert_key",
+      "regex": "[\\w.-]{0,50}?(?:new-relic|newrelic|new_relic)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(NRII-[a-z0-9-]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a New Relic insight insert key, compromising data injection into the platform."
+    },
+    {
+      "name": "gl_new_relic_user_api_id",
+      "regex": "[\\w.-]{0,50}?(?:new-relic|newrelic|new_relic)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a New Relic user API ID, posing a risk to application monitoring services and data integrity."
+    },
+    {
+      "name": "gl_new_relic_user_api_key",
+      "regex": "[\\w.-]{0,50}?(?:new-relic|newrelic|new_relic)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(NRAK-[a-z0-9]{27})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a New Relic user API Key, which could lead to compromised application insights and performance monitoring."
+    },
+    {
+      "name": "gl_notion_api_token",
+      "regex": "\\b(ntn_[0-9]{11}[A-Za-z0-9]{32}[A-Za-z0-9]{3})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Notion API token"
+    },
+    {
+      "name": "gl_npm_access_token",
+      "regex": "\\b(npm_[a-z0-9]{36})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered an npm access token, potentially compromising package management and code repository access."
+    },
+    {
+      "name": "gl_nuget_config_password",
+      "regex": "<add key=\\\"(?:(?:ClearText)?Password)\\\"\\s*value=\\\"(.{8,})\\\"\\s*/>",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a password within a Nuget config file, potentially compromising package management access."
+    },
+    {
+      "name": "gl_nytimes_access_token",
+      "regex": "[\\w.-]{0,50}?(?:nytimes|new-york-times,|newyorktimes)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9=_\\-]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Nytimes Access Token, risking unauthorized access to New York Times APIs and content services."
+    },
+    {
+      "name": "gl_octopus_deploy_api_key",
+      "regex": "\\b(API-[A-Z0-9]{26})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a potential Octopus Deploy API key, risking application deployments and operational security."
+    },
+    {
+      "name": "gl_okta_access_token",
+      "regex": "[\\w.-]{0,50}?(?i:[\\w.-]{0,50}?(?:(?-i:[Oo]kta|OKTA))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(00[\\w=\\-]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified an Okta Access Token, which may compromise identity management services and user authentication data."
+    },
+    {
+      "name": "gl_openai_api_key",
+      "regex": "\\b(sk-(?:proj|svcacct|admin)-(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})T3BlbkFJ(?:[A-Za-z0-9_-]{74}|[A-Za-z0-9_-]{58})\\b|sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found an OpenAI API Key, posing a risk of unauthorized access to AI services and data manipulation."
+    },
+    {
+      "name": "gl_openshift_user_token",
+      "regex": "\\b(sha256~[\\w-]{43})(?:[^\\w-]|\\Z)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found an OpenShift user token, potentially compromising an OpenShift/Kubernetes cluster."
+    },
+    {
+      "name": "gl_perplexity_api_key",
+      "regex": "\\b(pplx-[a-zA-Z0-9]{48})(?:[\\x60'\"\\s;]|\\\\[nr]|$|\\b)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Perplexity API key, which could lead to unauthorized access to Perplexity AI services and data exposure."
+    },
+    {
+      "name": "gl_plaid_api_token",
+      "regex": "[\\w.-]{0,50}?(?:plaid)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(access-(?:sandbox|development|production)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Plaid API Token, potentially compromising financial data aggregation and banking services."
+    },
+    {
+      "name": "gl_plaid_client_id",
+      "regex": "[\\w.-]{0,50}?(?:plaid)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{24})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Plaid Client ID, which could lead to unauthorized financial service integrations and data breaches."
+    },
+    {
+      "name": "gl_plaid_secret_key",
+      "regex": "[\\w.-]{0,50}?(?:plaid)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{30})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Plaid Secret key, risking unauthorized access to financial accounts and sensitive transaction data."
+    },
+    {
+      "name": "gl_planetscale_api_token",
+      "regex": "\\b(pscale_tkn_[\\w=\\.-]{32,64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a PlanetScale API token, potentially compromising database management and operations."
+    },
+    {
+      "name": "gl_planetscale_oauth_token",
+      "regex": "\\b(pscale_oauth_[\\w=\\.-]{32,64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a PlanetScale OAuth token, posing a risk to database access control and sensitive data integrity."
+    },
+    {
+      "name": "gl_planetscale_password",
+      "regex": "\\b(pscale_pw_[\\w=\\.-]{32,64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a PlanetScale password, which could lead to unauthorized database operations and data breaches."
+    },
+    {
+      "name": "gl_postman_api_token",
+      "regex": "\\b(PMAK-[a-f0-9]{24}\\-[a-f0-9]{34})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Postman API token, potentially compromising API testing and development workflows."
+    },
+    {
+      "name": "gl_prefect_api_token",
+      "regex": "\\b(pnu_[a-zA-Z0-9]{36})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Prefect API token, risking unauthorized access to workflow management and automation services."
+    },
+    {
+      "name": "gl_private_key",
+      "regex": "-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----[\\s\\S-]{64,}?KEY(?: BLOCK)?-----",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Private Key, which may compromise cryptographic security and sensitive data encryption."
+    },
+    {
+      "name": "gl_privateai_api_token",
+      "regex": "[\\w.-]{0,50}?(?i:[\\w.-]{0,50}?(?:private[_-]?ai)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{32})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a PrivateAI Token, posing a risk of unauthorized access to AI services and data manipulation."
+    },
+    {
+      "name": "gl_pulumi_api_token",
+      "regex": "\\b(pul-[a-f0-9]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Pulumi API token, posing a risk to infrastructure as code services and cloud resource management."
+    },
+    {
+      "name": "gl_pypi_upload_token",
+      "regex": "pypi-AgEIcHlwaS5vcmc[\\w-]{50,1000}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a PyPI upload token, potentially compromising Python package distribution and repository integrity."
+    },
+    {
+      "name": "gl_rapidapi_access_token",
+      "regex": "[\\w.-]{0,50}?(?:rapidapi)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9_-]{50})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a RapidAPI Access Token, which could lead to unauthorized access to various APIs and data services."
+    },
+    {
+      "name": "gl_readme_api_token",
+      "regex": "\\b(rdme_[a-z0-9]{70})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Readme API token, risking unauthorized documentation management and content exposure."
+    },
+    {
+      "name": "gl_rubygems_api_token",
+      "regex": "\\b(rubygems_[a-f0-9]{48})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Rubygem API token, potentially compromising Ruby library distribution and package management."
+    },
+    {
+      "name": "gl_scalingo_api_token",
+      "regex": "\\b(tk-us-[\\w-]{48})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Scalingo API token, posing a risk to cloud platform services and application deployment security."
+    },
+    {
+      "name": "gl_sendbird_access_id",
+      "regex": "[\\w.-]{0,50}?(?:sendbird)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Sendbird Access ID, which could compromise chat and messaging platform integrations."
+    },
+    {
+      "name": "gl_sendbird_access_token",
+      "regex": "[\\w.-]{0,50}?(?:sendbird)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Sendbird Access Token, potentially risking unauthorized access to communication services and user data."
+    },
+    {
+      "name": "gl_sendgrid_api_token",
+      "regex": "\\b(SG\\.[a-z0-9=_\\-\\.]{66})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a SendGrid API token, posing a risk of unauthorized email service operations and data exposure."
+    },
+    {
+      "name": "gl_sendinblue_api_token",
+      "regex": "\\b(xkeysib-[a-f0-9]{64}\\-[a-z0-9]{16})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Sendinblue API token, which may compromise email marketing services and subscriber data privacy."
+    },
+    {
+      "name": "gl_sentry_access_token",
+      "regex": "[\\w.-]{0,50}?(?:sentry)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Sentry.io Access Token (old format), risking unauthorized access to error tracking services and sensitive application data."
+    },
+    {
+      "name": "gl_sentry_org_token",
+      "regex": "\\bsntrys_eyJpYXQiO[a-zA-Z0-9+/]{10,200}(?:LCJyZWdpb25fdXJs|InJlZ2lvbl91cmwi|cmVnaW9uX3VybCI6)[a-zA-Z0-9+/]{10,200}={0,2}_[a-zA-Z0-9+/]{43}(?:[^a-zA-Z0-9+/]|\\Z)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Sentry.io Organization Token, risking unauthorized access to error tracking services and sensitive application data."
+    },
+    {
+      "name": "gl_sentry_user_token",
+      "regex": "\\b(sntryu_[a-f0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Sentry.io User Token, risking unauthorized access to error tracking services and sensitive application data."
+    },
+    {
+      "name": "gl_settlemint_application_access_token",
+      "regex": "\\b(sm_aat_[a-zA-Z0-9]{16})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Settlemint Application Access Token."
+    },
+    {
+      "name": "gl_settlemint_personal_access_token",
+      "regex": "\\b(sm_pat_[a-zA-Z0-9]{16})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Settlemint Personal Access Token."
+    },
+    {
+      "name": "gl_settlemint_service_access_token",
+      "regex": "\\b(sm_sat_[a-zA-Z0-9]{16})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Settlemint Service Access Token."
+    },
+    {
+      "name": "gl_shippo_api_token",
+      "regex": "\\b(shippo_(?:live|test)_[a-fA-F0-9]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Shippo API token, potentially compromising shipping services and customer order data."
+    },
+    {
+      "name": "gl_shopify_access_token",
+      "regex": "shpat_[a-fA-F0-9]{32}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Shopify access token, which could lead to unauthorized e-commerce platform access and data breaches."
+    },
+    {
+      "name": "gl_shopify_custom_access_token",
+      "regex": "shpca_[a-fA-F0-9]{32}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Shopify custom access token, potentially compromising custom app integrations and e-commerce data security."
+    },
+    {
+      "name": "gl_shopify_private_app_access_token",
+      "regex": "shppa_[a-fA-F0-9]{32}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Shopify private app access token, risking unauthorized access to private app data and store operations."
+    },
+    {
+      "name": "gl_shopify_shared_secret",
+      "regex": "shpss_[a-fA-F0-9]{32}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Shopify shared secret, posing a risk to application authentication and e-commerce platform security."
+    },
+    {
+      "name": "gl_sidekiq_secret",
+      "regex": "[\\w.-]{0,50}?(?:BUNDLE_ENTERPRISE__CONTRIBSYS__COM|BUNDLE_GEMS__CONTRIBSYS__COM)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-f0-9]{8}:[a-f0-9]{8})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Sidekiq Secret, which could lead to compromised background job processing and application data breaches."
+    },
+    {
+      "name": "gl_sidekiq_sensitive_url",
+      "regex": "\\bhttps?://([a-f0-9]{8}:[a-f0-9]{8})@(?:gems.contribsys.com|enterprise.contribsys.com)(?:[\\/|\\#|\\?|:]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Sidekiq Sensitive URL, potentially exposing internal job queues and sensitive operation details."
+    },
+    {
+      "name": "gl_slack_app_token",
+      "regex": "xapp-\\d-[A-Z0-9]+-\\d+-[a-z0-9]+",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Slack App-level token, risking unauthorized access to Slack applications and workspace data."
+    },
+    {
+      "name": "gl_slack_bot_token",
+      "regex": "xoxb-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Slack Bot token, which may compromise bot integrations and communication channel security."
+    },
+    {
+      "name": "gl_slack_config_access_token",
+      "regex": "xoxe.xox[bp]-\\d-[A-Z0-9]{163,166}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Slack Configuration access token, posing a risk to workspace configuration and sensitive data access."
+    },
+    {
+      "name": "gl_slack_config_refresh_token",
+      "regex": "xoxe-\\d-[A-Z0-9]{146}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Slack Configuration refresh token, potentially allowing prolonged unauthorized access to configuration settings."
+    },
+    {
+      "name": "gl_slack_legacy_bot_token",
+      "regex": "xoxb-[0-9]{8,14}-[a-zA-Z0-9]{18,26}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Slack Legacy bot token, which could lead to compromised legacy bot operations and data exposure."
+    },
+    {
+      "name": "gl_slack_legacy_token",
+      "regex": "xox[os]-\\d+-\\d+-\\d+-[a-fA-F\\d]+",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Slack Legacy token, risking unauthorized access to older Slack integrations and user data."
+    },
+    {
+      "name": "gl_slack_legacy_workspace_token",
+      "regex": "xox[ar]-(?:\\d-)?[0-9a-zA-Z]{8,48}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Slack Legacy Workspace token, potentially compromising access to workspace data and legacy features."
+    },
+    {
+      "name": "gl_slack_user_token",
+      "regex": "xox[pe](?:-[0-9]{10,13}){3}-[a-zA-Z0-9-]{28,34}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Slack User token, posing a risk of unauthorized user impersonation and data access within Slack workspaces."
+    },
+    {
+      "name": "gl_slack_webhook_url",
+      "regex": "(?:https?://)?hooks.slack.com/(?:services|workflows|triggers)/[A-Za-z0-9+/]{43,56}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Slack Webhook, which could lead to unauthorized message posting and data leakage in Slack channels."
+    },
+    {
+      "name": "gl_snyk_api_token",
+      "regex": "[\\w.-]{0,50}?(?:snyk[_.-]?(?:(?:api|oauth)[_.-]?)?(?:key|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Snyk API token, potentially compromising software vulnerability scanning and code security."
+    },
+    {
+      "name": "gl_sonar_api_token",
+      "regex": "[\\w.-]{0,50}?(?:sonar[_.-]?(login|token))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}((?:squ_|sqp_|sqa_)?[a-z0-9=_\\-]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Sonar API token, potentially compromising software vulnerability scanning and code security."
+    },
+    {
+      "name": "gl_sourcegraph_access_token",
+      "regex": "\\b(\\b(sgp_(?:[a-fA-F0-9]{16}|local)_[a-fA-F0-9]{40}|sgp_[a-fA-F0-9]{40}|[a-fA-F0-9]{40})\\b)(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Sourcegraph is a code search and navigation engine."
+    },
+    {
+      "name": "gl_square_access_token",
+      "regex": "\\b((?:EAAA|sq0atp-)[\\w-]{22,60})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Square Access Token, risking unauthorized payment processing and financial transaction exposure."
+    },
+    {
+      "name": "gl_squarespace_access_token",
+      "regex": "[\\w.-]{0,50}?(?:squarespace)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Squarespace Access Token, which may compromise website management and content control on Squarespace."
+    },
+    {
+      "name": "gl_stripe_access_token",
+      "regex": "\\b((?:sk|rk)_(?:test|live|prod)_[a-zA-Z0-9]{10,99})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Stripe Access Token, posing a risk to payment processing services and sensitive financial data."
+    },
+    {
+      "name": "gl_sumologic_access_id",
+      "regex": "[\\w.-]{0,50}?(?i:[\\w.-]{0,50}?(?:(?-i:[Ss]umo|SUMO))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3})(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(su[a-zA-Z0-9]{12})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a SumoLogic Access ID, potentially compromising log management services and data analytics integrity."
+    },
+    {
+      "name": "gl_sumologic_access_token",
+      "regex": "[\\w.-]{0,50}?(?:(?-i:[Ss]umo|SUMO))(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{64})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a SumoLogic Access Token, which could lead to unauthorized access to log data and analytics insights."
+    },
+    {
+      "name": "gl_telegram_bot_api_token",
+      "regex": "[\\w.-]{0,50}?(?:telegr)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9]{5,16}:(?-i:A)[a-z0-9_\\-]{34})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Telegram Bot API Token, risking unauthorized bot operations and message interception on Telegram."
+    },
+    {
+      "name": "gl_travisci_access_token",
+      "regex": "[\\w.-]{0,50}?(?:travis)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{22})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Travis CI Access Token, potentially compromising continuous integration services and codebase security."
+    },
+    {
+      "name": "gl_twilio_api_key",
+      "regex": "SK[0-9a-fA-F]{32}",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Twilio API Key, posing a risk to communication services and sensitive customer interaction data."
+    },
+    {
+      "name": "gl_twitch_api_token",
+      "regex": "[\\w.-]{0,50}?(?:twitch)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{30})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Twitch API token, which could compromise streaming services and account integrations."
+    },
+    {
+      "name": "gl_twitter_access_secret",
+      "regex": "[\\w.-]{0,50}?(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{45})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Twitter Access Secret, potentially risking unauthorized Twitter integrations and data breaches."
+    },
+    {
+      "name": "gl_twitter_access_token",
+      "regex": "[\\w.-]{0,50}?(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([0-9]{15,25}-[a-zA-Z0-9]{20,40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Twitter Access Token, posing a risk of unauthorized account operations and social media data exposure."
+    },
+    {
+      "name": "gl_twitter_api_key",
+      "regex": "[\\w.-]{0,50}?(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{25})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Twitter API Key, which may compromise Twitter application integrations and user data security."
+    },
+    {
+      "name": "gl_twitter_api_secret",
+      "regex": "[\\w.-]{0,50}?(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{50})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Twitter API Secret, risking the security of Twitter app integrations and sensitive data access."
+    },
+    {
+      "name": "gl_twitter_bearer_token",
+      "regex": "[\\w.-]{0,50}?(?:twitter)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(A{22}[a-zA-Z0-9%]{80,100})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Twitter Bearer Token, potentially compromising API access and data retrieval from Twitter."
+    },
+    {
+      "name": "gl_typeform_api_token",
+      "regex": "[\\w.-]{0,50}?(?:typeform)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(tfp_[a-z0-9\\-_\\.=]{59})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Typeform API token, which could lead to unauthorized survey management and data collection."
+    },
+    {
+      "name": "gl_vault_batch_token",
+      "regex": "\\b(hvb\\.[\\w-]{138,300})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Vault Batch Token, risking unauthorized access to secret management services and sensitive data."
+    },
+    {
+      "name": "gl_vault_service_token",
+      "regex": "\\b((?:hvs\\.[\\w-]{90,120}|s\\.(?i:[a-z0-9]{24})))(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Identified a Vault Service Token, potentially compromising infrastructure security and access to sensitive credentials."
+    },
+    {
+      "name": "gl_yandex_access_token",
+      "regex": "[\\w.-]{0,50}?(?:yandex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(t1\\.[A-Z0-9a-z_-]+[=]{0,2}\\.[A-Z0-9a-z_-]{86}[=]{0,2})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Found a Yandex Access Token, posing a risk to Yandex service integrations and user data privacy."
+    },
+    {
+      "name": "gl_yandex_api_key",
+      "regex": "[\\w.-]{0,50}?(?:yandex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(AQVN[A-Za-z0-9_\\-]{35,38})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Discovered a Yandex API Key, which could lead to unauthorized access to Yandex services and data manipulation."
+    },
+    {
+      "name": "gl_yandex_aws_access_token",
+      "regex": "[\\w.-]{0,50}?(?:yandex)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}(YC[a-zA-Z0-9_\\-]{38})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Uncovered a Yandex AWS Access Token, potentially compromising cloud resource access and data security on Yandex Cloud."
+    },
+    {
+      "name": "gl_zendesk_secret_key",
+      "regex": "[\\w.-]{0,50}?(?:zendesk)(?:[ \\t\\w.-]{0,20})[\\s'\"]{0,3}(?:=|>|:{1,3}=|\\|\\||:|=>|\\?=|,)[\\x60'\"\\s=]{0,5}([a-z0-9]{40})(?:[\\x60'\"\\s;]|\\\\[nr]|$)",
+      "level": 2,
+      "category": "secret_leak",
+      "description": "Detected a Zendesk Secret Key, risking unauthorized access to customer support services and sensitive ticketing data."
     }
   ],
-
   "keyword_lists": {
-    "instruction_override": [
+    "prompt_injection": [
       "ignore previous instructions",
-      "disregard your instructions",
-      "forget everything above",
+      "disregard all prior",
+      "forget everything",
       "new instructions follow",
-      "override system prompt",
-      "actual instructions are",
-      "real task is",
-      "ignore the above",
-      "do not follow previous",
-      "the real question is",
-      "bypass your rules",
-      "pretend the above never happened",
-      "start fresh",
-      "reset your context"
+      "system prompt override",
+      "you are now",
+      "your true purpose",
+      "jailbreak",
+      "bypass restrictions",
+      "no longer bound"
     ],
-    "exfil_verbs": [
+    "jailbreak": [
+      "DAN mode",
+      "do anything now",
+      "developer mode enabled",
+      "god mode",
+      "no restrictions",
+      "no limits",
+      "no filters",
+      "unrestricted AI",
+      "pretend you have no",
+      "villain mode",
+      "unfiltered response",
+      "jailbreak prompt"
+    ],
+    "data_exfil": [
+      "send to webhook",
+      "post to url",
       "exfiltrate",
-      "steal credentials",
-      "extract secrets",
-      "send to external",
-      "upload to server",
-      "transmit data",
-      "leak information",
-      "copy to remote",
-      "forward to webhook",
-      "pipe to netcat"
+      "leak data",
+      "send credentials",
+      "upload secrets",
+      "transmit to server",
+      "phone home",
+      "beacon out"
+    ],
+    "secret_leak": [
+      "api_key",
+      "secret_key",
+      "private_key",
+      "access_token",
+      "auth_token",
+      "bearer token",
+      "password =",
+      "passwd =",
+      "BEGIN PRIVATE KEY",
+      "BEGIN RSA PRIVATE KEY"
+    ],
+    "rag_poisoning": [
+      "when AI reads",
+      "for AI eyes only",
+      "attention AI",
+      "attention LLM",
+      "dear assistant",
+      "note for model",
+      "AI instruction",
+      "language model note",
+      "if you are an AI"
     ],
     "social_engineering": [
-      "pretend you are",
-      "roleplay as",
-      "act as if you have no",
-      "imagine you are free",
-      "behave as though",
-      "simulate being",
-      "you are now uncensored",
-      "in this scenario you can",
-      "for this exercise ignore",
-      "play the role of"
-    ],
-    "obfuscation_markers": [
-      "base64 decode",
-      "rot13 this",
-      "hex encode the",
-      "reverse the string",
-      "convert to binary",
-      "encode in morse",
-      "translate to pig latin",
-      "spell it backwards",
-      "use character codes",
-      "caesar cipher"
-    ],
-    "rag_poison_markers": [
-      "ignore the above context",
-      "the retrieved content is wrong",
-      "disregard previous documents",
-      "actual answer is",
-      "override retrieved information",
-      "the context above is outdated",
-      "real instructions follow",
-      "document says but actually",
-      "this supersedes the context",
-      "new priority instruction"
+      "don't tell the user",
+      "keep this secret",
+      "between us",
+      "for your eyes only",
+      "trust me I am admin",
+      "I am the developer",
+      "you can trust me"
     ]
   },
-
   "behavioral_rules": [
     {
-      "name": "rapid_multi_file_read_then_shell",
-      "description": "Reading 5+ files then immediate shell — possible reconnaissance + exfiltration",
-      "trigger_tool": "run_shell",
-      "condition": "file_reads_in_window >= 5",
-      "window_sec": 60.0,
-      "level": 2
+      "name": "rapid_file_sweep",
+      "trigger_tool": "file_read",
+      "condition": "count > 50",
+      "window_sec": 60,
+      "level": 2,
+      "description": "50+ file reads in 60s \u2014 possible data harvesting"
     },
     {
-      "name": "write_after_base64_decode",
-      "description": "Base64 content in tool output followed by file write — possible payload deployment",
-      "trigger_tool": "write_file",
-      "condition": "base64_in_recent_output",
-      "window_sec": 30.0,
-      "level": 2
+      "name": "credential_file_access",
+      "trigger_tool": "file_read",
+      "condition": "path_pattern matches (.env|secrets|credentials|id_rsa|.pem|.p12|.pfx|.key)",
+      "window_sec": 300,
+      "level": 3,
+      "description": "Repeated access to credential/key files within 5 min"
     },
     {
-      "name": "network_after_secret_scan",
-      "description": "Secret/credential detected then network tool call — possible exfiltration",
-      "trigger_tool": "run_shell",
-      "condition": "secret_detected_in_window",
-      "window_sec": 120.0,
-      "level": 3
+      "name": "read_then_shell",
+      "trigger_tool": "shell_exec",
+      "condition": "preceded_by file_read within 10s",
+      "window_sec": 10,
+      "level": 1,
+      "description": "Shell exec immediately after file read \u2014 possible exfil pipeline"
     },
     {
-      "name": "repeated_failure_then_escalation",
-      "description": "3+ tool failures then dangerous tool — possible brute force escalation",
-      "trigger_tool": "run_shell",
-      "condition": "failures_in_window >= 3",
-      "window_sec": 60.0,
-      "level": 2
+      "name": "network_after_secret",
+      "trigger_tool": "network_request",
+      "condition": "preceded_by secret_leak_detection within 30s",
+      "window_sec": 30,
+      "level": 3,
+      "description": "Network request within 30s of credential access \u2014 exfil risk"
     },
     {
-      "name": "context_flood_before_action",
-      "description": "Very large context injection then immediate tool call — possible attention dilution",
-      "trigger_tool": "run_shell",
-      "condition": "large_context_in_window",
-      "window_sec": 10.0,
-      "level": 1
+      "name": "mass_file_write",
+      "trigger_tool": "file_write",
+      "condition": "count > 20",
+      "window_sec": 60,
+      "level": 2,
+      "description": "20+ file writes in 60s \u2014 possible ransomware or exfil staging"
     }
-  ]
+  ],
+  "sha512": "eb9975d7bec678838603ea2d0a38fc9688758973f00ec8c75b9bbb48a3426e516d404e0538bed7865f5776fa128b2264b4fb696a05f980d25756646ea2a1f209"
 }

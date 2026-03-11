@@ -12,6 +12,12 @@ from forge.file_cache import FileCache
 # ---------------------------------------------------------------------------
 
 class TestStoreAndCheck:
+    """Verifies FileCache stores content-addressed entries and returns cache hits correctly.
+
+    store() then check() on same file → cached=True, tokens_saved==50.
+    check() on unknown file → None. Storing same file twice → read_count==2.
+    """
+
     def test_store_then_check_returns_cached(self, tmp_path):
         f = tmp_path / "hello.py"
         f.write_text("print('hello')", encoding="utf-8")
@@ -47,6 +53,12 @@ class TestStoreAndCheck:
 # ---------------------------------------------------------------------------
 
 class TestModifiedFile:
+    """Verifies FileCache invalidates entries when file content changes on disk.
+
+    Storing 'version 1' then changing the file to 'version 2' → check() returns None (stale).
+    Unmodified file → cache hit (cached=True).
+    """
+
     def test_modified_file_returns_none(self, tmp_path):
         f = tmp_path / "changing.py"
         f.write_text("version 1", encoding="utf-8")
@@ -77,6 +89,13 @@ class TestModifiedFile:
 # ---------------------------------------------------------------------------
 
 class TestSessionTracking:
+    """Verifies FileCache uses session-scoped reads to prevent stale cross-session hits.
+
+    A cache entry from a previous session (present in _cache but not _session_reads) must
+    return None until the file is explicitly read again this session. store() adds the
+    resolved path to _session_reads automatically.
+    """
+
     def test_not_read_this_session_is_miss(self, tmp_path):
         """A file from a previous session (loaded from disk cache) should
         not return a hit until it is read in the current session."""
@@ -114,6 +133,12 @@ class TestSessionTracking:
 # ---------------------------------------------------------------------------
 
 class TestIntegrityCheck:
+    """Verifies check_integrity() detects unexpected file modifications between reads.
+
+    Unchanged file → None. File modified after store() → dict with changed=True,
+    expected_hash and actual_hash. Unknown file → None. Deleted file → None.
+    """
+
     def test_unchanged_returns_none(self, tmp_path):
         f = tmp_path / "intact.py"
         f.write_text("safe", encoding="utf-8")
@@ -162,6 +187,8 @@ class TestIntegrityCheck:
 # ---------------------------------------------------------------------------
 
 class TestInvalidate:
+    """Verifies invalidate() removes the entry from both _cache and _session_reads."""
+
     def test_invalidate_removes_from_cache(self, tmp_path):
         f = tmp_path / "stale.py"
         f.write_text("content", encoding="utf-8")
@@ -206,6 +233,13 @@ class TestInvalidate:
 # ---------------------------------------------------------------------------
 
 class TestStats:
+    """Verifies stats() and cached_files_list() accurately reflect cache state.
+
+    Initial stats: cached_files==0, hits==0, misses==0, tokens_saved==0.
+    After 1 hit + 1 miss: cached_files==1, hits==1, misses==1, tokens_saved==100, hit_rate==50.0.
+    cached_files_list() returns entries with correct tokens and lines fields.
+    """
+
     def test_initial_stats(self):
         cache = FileCache()
         s = cache.stats()
@@ -251,6 +285,13 @@ class TestStats:
 # ---------------------------------------------------------------------------
 
 class TestPersistAndLoad:
+    """Verifies FileCache persists to a JSON file and reloads cache entries (but not session reads).
+
+    persist_path is created by store(). The JSON has version==1 and one cache entry.
+    A new FileCache loading from the same path has cached_files==1 but check() returns None
+    (session reads are not persisted). After re-storing the file, check() succeeds.
+    """
+
     def test_persist_creates_file(self, tmp_path):
         persist = tmp_path / "cache.json"
         f = tmp_path / "src.py"

@@ -6,6 +6,16 @@ from forge.billing import BillingMeter, DEFAULT_BALANCE, PRICING
 
 
 class TestAccumulation:
+    """Verifies BillingMeter correctly accumulates token counts and decrements the balance.
+
+    Initial state: balance==DEFAULT_BALANCE, all session/lifetime counters at 0.
+    Each record_turn() call adds input_tokens and output_tokens to both session and lifetime totals.
+    Multiple turns accumulate: 3 turns of (100,50), (200,100), (300,150) give session_input==600.
+    Balance decreases after a turn with non-trivial token counts (cost > 0).
+    cache_hit_tokens are tracked in session_cache_hits and lifetime_cache_savings.
+    After 5 turns, status()['turns'] == 5.
+    """
+
     def test_initial_state(self):
         bm = BillingMeter()
         assert bm.balance == DEFAULT_BALANCE
@@ -50,6 +60,12 @@ class TestAccumulation:
 
 
 class TestTopup:
+    """Verifies topup() adds funds to the balance and records lifetime topup total.
+
+    topup(50.0) adds exactly 50.0 to the current balance and sets lifetime_topups to 50.0.
+    topup() with no argument adds DEFAULT_BALANCE, so balance == DEFAULT_BALANCE * 2.
+    """
+
     def test_topup_increases_balance(self):
         bm = BillingMeter()
         bm.record_turn(input_tokens=1000000, output_tokens=500000)
@@ -65,6 +81,14 @@ class TestTopup:
 
 
 class TestComparison:
+    """Verifies get_comparison() produces correct cost comparisons against cloud model pricing.
+
+    The returned dict must have session_input_tokens, session_output_tokens, a 'comparisons'
+    dict with 'Claude Opus (with re-reads)' and 'Forge (local)' entries.
+    Forge (local) always costs $0.00. Claude Opus costs more than Claude Sonnet for the same
+    token counts. 500 cache_hit_tokens must produce savings_from_cache > 0.
+    """
+
     def test_comparison_keys(self):
         bm = BillingMeter()
         bm.record_turn(input_tokens=1000, output_tokens=500)
@@ -98,6 +122,13 @@ class TestComparison:
 
 
 class TestFloatPrecision:
+    """Verifies _compute_cost() uses the correct (tokens * price / 1M) formula without precision loss.
+
+    1 input token at $15/M + 1 output token at $75/M = $0.000090 exactly.
+    The result must match (1*15 + 1*75) / 1_000_000 within 1e-12.
+    Zero tokens must produce exactly $0.00.
+    """
+
     def test_small_token_counts_precise(self):
         """Verify float precision fix — tokens * price / 1M order."""
         bm = BillingMeter()
@@ -114,6 +145,14 @@ class TestFloatPrecision:
 
 
 class TestPersistence:
+    """Verifies lifetime billing stats survive process restarts via JSON persistence.
+
+    After recording 5000 input + 2000 output tokens and topping up $25, a new BillingMeter
+    loading the same file must have the same lifetime_input_tokens, lifetime_output_tokens,
+    and lifetime_topups. A missing persist_path must use DEFAULT_BALANCE without crashing.
+    reset_lifetime() must zero all lifetime counters and restore DEFAULT_BALANCE.
+    """
+
     def test_save_and_load(self, tmp_path):
         path = tmp_path / "billing.json"
         bm1 = BillingMeter(persist_path=path)
@@ -140,6 +179,12 @@ class TestPersistence:
 
 
 class TestStatus:
+    """Verifies status() returns a dict with correct session totals and balance.
+
+    After 1000 input + 500 output tokens in one turn: session_tokens==1500, session_input==1000,
+    session_output==500, turns==1, and balance is a float.
+    """
+
     def test_status_format(self):
         bm = BillingMeter()
         bm.record_turn(input_tokens=1000, output_tokens=500)

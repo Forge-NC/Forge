@@ -34,7 +34,10 @@ method itself::
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from forge.event_bus import ForgeEvent
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +73,25 @@ class ForgePlugin:
     _loaded: bool = False
 
     # ------------------------------------------------------------------
+    # Event subscriptions
+    # ------------------------------------------------------------------
+
+    # Declare which event types this plugin wants to receive.
+    # An empty list means "subscribe to all events via on_event()".
+    # Listing specific types (e.g. ["session.end", "turn.end"]) skips
+    # dispatch for unrelated high-frequency events — useful for performance.
+    event_subscriptions: list[str] = []
+
+    # Glob-style event patterns for broader subscriptions.
+    # Supports "*" wildcards using fnmatch rules, e.g.:
+    #   event_patterns = ["tool.*"]          # all tool events
+    #   event_patterns = ["model.*"]         # all model events
+    #   event_patterns = ["tool.*", "file.*"]  # tools and file events
+    # Patterns are checked in addition to event_subscriptions.
+    # An empty list applies no pattern filter.
+    event_patterns: list[str] = []
+
+    # ------------------------------------------------------------------
     # Lifecycle hooks
     # ------------------------------------------------------------------
 
@@ -86,6 +108,65 @@ class ForgePlugin:
 
         Clean up any resources your plugin holds (open files, threads,
         network connections, etc.).
+        """
+
+    # ------------------------------------------------------------------
+    # Event observer hooks  (observe without transforming)
+    # ------------------------------------------------------------------
+
+    def on_event(self, event: "ForgeEvent") -> None:
+        """Catch-all observer.  Called for every event if event_subscriptions is empty.
+
+        Override to receive all events without filtering.  For selective
+        listening, override the specific methods below or set event_subscriptions.
+        """
+
+    def on_session_start(self, data: dict) -> None:
+        """Session began.
+
+        data keys: session_id, model, cwd, config_summary
+        """
+
+    def on_session_end(self, data: dict) -> None:
+        """Session ended cleanly or via /quit.
+
+        data keys: session_id, turns, tokens_prompt, tokens_generated,
+                   duration_s, tool_calls, files_modified
+        """
+
+    def on_turn_start(self, data: dict) -> None:
+        """A new user turn began (input received, agent loop starting).
+
+        data keys: turn_id, user_input_preview, context_pct
+        """
+
+    def on_turn_end(self, data: dict) -> None:
+        """Turn completed (agent loop finished, response displayed).
+
+        data keys: turn_id, tokens_prompt, tokens_generated, duration_ms,
+                   tool_calls_count, had_errors
+        """
+
+    def on_model_switch(self, from_model: str, to_model: str) -> None:
+        """Model router switched from one model to another.
+
+        Args:
+            from_model: Model name before switch.
+            to_model:   Model name after switch.
+        """
+
+    def on_context_pressure(self, used_pct: float, data: dict) -> None:
+        """Context window is filling up.
+
+        Args:
+            used_pct: Fraction used, 0.0–1.0.
+        data keys: used_pct, tokens_used, tokens_max, swap_imminent
+        """
+
+    def on_threat_detected(self, threat: dict) -> None:
+        """Crucible detected a security threat in model output or recall.
+
+        threat keys: level, rule, source, preview, action
         """
 
     # ------------------------------------------------------------------
@@ -182,6 +263,10 @@ class ForgePlugin:
             "on_tool_call", "on_tool_result",
             "on_file_read", "on_file_write",
             "on_command", "register_tools",
+            # event observer hooks
+            "on_event", "on_session_start", "on_session_end",
+            "on_turn_start", "on_turn_end", "on_model_switch",
+            "on_context_pressure", "on_threat_detected",
         ):
             # A hook is "overridden" if the subclass provides its own.
             if getattr(type(self), attr_name) is not getattr(base, attr_name):
@@ -193,6 +278,8 @@ class ForgePlugin:
             "description": self.description,
             "author": self.author,
             "hooks": overridden,
+            "event_subscriptions": list(self.event_subscriptions),
+            "event_patterns": list(self.event_patterns),
         }
 
     # ------------------------------------------------------------------

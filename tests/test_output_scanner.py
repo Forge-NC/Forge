@@ -25,6 +25,17 @@ def _make_engine(safety_level=1, output_scanning=True, crucible_enabled=True):
 
 
 class TestOutputScanner:
+    """Verifies _scan_llm_output() escalates threat responses based on safety level.
+
+    L0: scan_content never called (output scanning skipped entirely).
+    L1: threats logged to forensics.record but no io.print_warning (silent).
+    L2: io.print_warning called with 'Output scan' in the message.
+    L3: multiple print_warning calls with at least one containing 'Safety L3'.
+    Clean output with no threats → no warnings, no forensics records.
+    output_scanning=False or crucible disabled → scan_content never called.
+    Only WARNING+ threats trigger actions; SUSPICIOUS threats are filtered out.
+    """
+
     def test_safety_l0_no_scan(self):
         engine = _make_engine(safety_level=0)
         engine._scan_llm_output("AKIAIOSFODNN7EXAMPLE1")

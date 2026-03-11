@@ -40,6 +40,14 @@ def _make_scenario(**overrides):
 # ── Scenario parsing ──
 
 class TestScenarioParsing:
+    """Verifies BenchmarkRunner._parse_scenario() correctly deserializes scenario dicts.
+
+    A minimal dict with only 'id' and 'name' must produce a valid BenchmarkScenario
+    with default category='refactor' and difficulty='easy'. A dict with a 'validation'
+    key must populate expected_patterns and forbidden_patterns on the ValidationConfig.
+    A 'files' dict with multiple entries must produce a scenario with len(files)==n.
+    """
+
     def test_parse_minimal(self):
         data = {"id": "t1", "name": "T1"}
         s = BenchmarkRunner._parse_scenario(data)
@@ -72,6 +80,15 @@ class TestScenarioParsing:
 # ── Validation ──
 
 class TestValidation:
+    """Verifies the validation engine correctly checks file content against expected/forbidden patterns.
+
+    Empty ValidationConfig always passes. expected_patterns requires the pattern to be present
+    in the target file — if the file contains it, pass; if the file doesn't have it OR the file
+    doesn't exist at all, fail with a 'pattern_missing_{file}' or 'missing_{file}' detail key.
+    forbidden_patterns require the pattern to be ABSENT — if it's found in the file, fail with
+    'forbidden_found_{file}'. If neither forbidden nor expected match, validation passes.
+    """
+
     def test_empty_validation_passes(self, tmp_path):
         v = ValidationConfig()
         ok, details = BenchmarkRunner._run_validation(v, str(tmp_path))
@@ -114,6 +131,14 @@ class TestValidation:
 # ── File scope accuracy ──
 
 class TestFileScope:
+    """Verifies _compute_file_scope() measures how accurately the model targeted the right files.
+
+    Perfect match (modified == expected) → 1.0. No overlap → 0.0. Partial overlap uses
+    intersection-over-union: {a,b} ∩ {a,c} = {a}, union = {a,b,c} → 1/3 ≈ 0.333.
+    Empty expected with no modifications → 1.0 (didn't touch anything, which was correct).
+    Empty expected with modifications → 0.0 (touched files when no files were supposed to change).
+    """
+
     def test_perfect_match(self):
         assert BenchmarkRunner._compute_file_scope(
             ["a.py", "b.py"], ["a.py", "b.py"]) == 1.0
@@ -137,6 +162,14 @@ class TestFileScope:
 # ── Run scenario ──
 
 class TestRunScenario:
+    """Verifies run_scenario() returns a valid BenchmarkResult for any scenario.
+
+    A basic scenario with no validation constraints must return a BenchmarkResult
+    with the correct scenario_id and a non-negative duration_s. A scenario whose
+    ValidationConfig references a file not present in scenario.files must fail
+    pre-validation (passed=False) — the runner doesn't create phantom files.
+    """
+
     def test_basic_run(self, runner):
         s = _make_scenario()
         result = runner.run_scenario(s)
@@ -156,6 +189,12 @@ class TestRunScenario:
 # ── Suite operations ──
 
 class TestSuiteOperations:
+    """Verifies suite listing and scenario listing return empty collections for missing dirs.
+
+    list_suites() on a runner whose scenarios_dir doesn't exist yet must return [].
+    list_scenarios() for a nonexistent suite name must return [] rather than raising.
+    """
+
     def test_list_empty_suites(self, runner):
         assert runner.list_suites() == []
 
@@ -166,6 +205,13 @@ class TestSuiteOperations:
 # ── Result persistence ──
 
 class TestResultPersistence:
+    """Verifies benchmark results are saved to disk and reloaded with all fields intact.
+
+    save_result() must write a file that exists after the call. load_results(suite='test')
+    must return exactly one entry with suite_name='test' and model='test-model'. The
+    round-trip must preserve all top-level fields needed for comparison and reporting.
+    """
+
     def test_save_and_load(self, runner):
         suite_result = BenchmarkSuiteResult(
             suite_name="test",
@@ -188,6 +234,14 @@ class TestResultPersistence:
 # ── Config hash ──
 
 class TestConfigHash:
+    """Verifies compute_config_hash() produces stable, unique, fixed-length fingerprints.
+
+    The same model+context_size inputs must always produce the same hash (deterministic).
+    Different inputs must produce different hashes (no collision for model='a' vs 'b').
+    The hash is always exactly 16 hex characters — long enough to be unique across
+    reasonable benchmark configurations, short enough to embed in filenames.
+    """
+
     def test_deterministic(self):
         h1 = BenchmarkRunner.compute_config_hash(model="m", context_size=8000)
         h2 = BenchmarkRunner.compute_config_hash(model="m", context_size=8000)
@@ -206,6 +260,13 @@ class TestConfigHash:
 # ── Result comparison ──
 
 class TestComparison:
+    """Verifies compare_results() correctly computes deltas between two benchmark runs.
+
+    pass_rate_delta = b.pass_rate - a.pass_rate: 0.8 - 0.5 = +0.3 (model B is better).
+    duration_delta = b.avg_duration_s - a.avg_duration_s: 1.5 - 2.0 = -0.5 (B is faster).
+    Both values must be within 0.01 of the expected delta.
+    """
+
     def test_compare_results(self, runner):
         a = {"pass_rate": 0.5, "avg_duration_s": 2.0,
              "avg_iterations": 3.0, "avg_file_scope_accuracy": 0.8,
@@ -221,8 +282,16 @@ class TestComparison:
 # ── YAML scenario loading ──
 
 class TestYAMLLoading:
+    """Verifies scenarios can be loaded from both YAML and JSON files on disk.
+
+    YAML loading is skipped when pyyaml isn't installed rather than failing hard.
+    A valid YAML scenario file must parse into a BenchmarkScenario with the correct
+    id and files dict. JSON loading must always work (no optional dependency) and
+    produce a scenario with the correct id.
+    """
+
     def test_load_from_file(self, tmp_path):
-        """Test loading a scenario from YAML file."""
+        """Loads a YAML scenario file; skips if pyyaml isn't installed."""
         yaml_content = (
             "id: test-load\n"
             "name: Test Load\n"
@@ -246,7 +315,7 @@ class TestYAMLLoading:
             pytest.skip("pyyaml not installed")
 
     def test_load_from_json(self, tmp_path):
-        """Test loading a scenario from JSON file."""
+        """Loads a JSON scenario file — no optional dependencies required."""
         data = {"id": "json-test", "name": "JSON Test",
                 "files": {"a.py": "x = 1\n"}}
         scenario_file = tmp_path / "test.json"

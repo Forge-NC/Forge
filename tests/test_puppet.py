@@ -16,6 +16,14 @@ def pm(tmp_path):
 
 
 class TestStandalone:
+    """Verifies PuppetManager defaults for a fresh standalone instance.
+
+    A new PuppetManager with no init call has role==STANDALONE, sync_dir==None,
+    list_puppets()==[], format_status() contains 'Standalone', audit dict has
+    role=='standalone' and puppet_count==0, and seat_summary reports
+    seats_total=1 / puppet_limit=0 / seats_available=0 (one seat = the local machine).
+    """
+
     def test_default_role_is_standalone(self, pm):
         assert pm.role == PuppetRole.STANDALONE
 
@@ -42,7 +50,15 @@ class TestStandalone:
 
 
 class TestMaster:
-    """Backward-compat local fleet master mode."""
+    """Verifies PuppetManager master-mode initialization and passport generation.
+
+    init_as_master(sync_dir) sets role=MASTER, stores the sync_dir, creates master/
+    and puppets/ subdirectories, and writes a manifest.json containing master_id.
+    generate_puppet_passport() returns None if not yet master; succeeds when master,
+    writing a passport JSON with tier, puppet_name, role='puppet', and master_signature.
+    Seat limit enforcement: with _seats_total=2 and _seats_used=1, the one puppet slot
+    is full and generate_puppet_passport() returns None.
+    """
 
     def test_init_as_master(self, pm, tmp_path):
         sync = tmp_path / "sync"
@@ -106,6 +122,16 @@ class TestMaster:
 
 
 class TestPuppet:
+    """Verifies puppet-mode join, sync, status reading, and passport validation.
+
+    Full join flow: master generates a passport, puppet calls init_as_puppet(passport_path)
+    → ok=True, role=PUPPET. sync_to_master(genome) writes genome.json and status.json
+    under sync/puppets/{machine_id}/. Master's refresh_puppet_status() reads those files
+    back into PuppetInfo objects with the correct name and genome_maturity_pct. Joining
+    with a non-existent passport path → ok=False. Joining with a master-role passport
+    (not puppet) → ok=False with 'not a puppet passport' in the message.
+    """
+
     def test_join_as_puppet(self, tmp_path):
         sync = tmp_path / "sync"
         sync.mkdir()
@@ -204,6 +230,12 @@ class TestPuppet:
 
 
 class TestRevoke:
+    """Verifies revoke_puppet() sets status='revoked' and handles missing puppet IDs.
+
+    revoke_puppet(machine_id) on a known puppet → returns True and sets
+    _puppets[machine_id].status == 'revoked'. revoke_puppet on an unknown ID → returns False.
+    """
+
     def test_revoke_puppet(self, tmp_path):
         sync = tmp_path / "sync"
         sync.mkdir()
@@ -220,6 +252,14 @@ class TestRevoke:
 
 
 class TestStaleDetection:
+    """Verifies staleness detection for puppets that haven't synced recently.
+
+    A puppet whose status.json timestamp is >24h ago is marked status='stale' when
+    the master calls refresh_puppet_status(). check_master_alive() returns False when
+    no manifest exists in the sync dir, and True when manifest.json contains a fresh
+    (current) timestamp.
+    """
+
     def test_stale_puppet(self, tmp_path):
         sync = tmp_path / "sync"
         sync.mkdir()
@@ -262,6 +302,15 @@ class TestStaleDetection:
 
 
 class TestPersistence:
+    """Verifies PuppetManager state is fully saved and restored across restarts.
+
+    Master roundtrip: after init_as_master + adding a puppet entry, _save() then
+    loading a new PuppetManager from the same data_dir restores role=MASTER,
+    the puppet dict, and genome_maturity_pct. Master-specific fields roundtrip:
+    account_id, passport_id, master_tier, seats_total, seats_used, telemetry_token.
+    Puppet-specific fields roundtrip: role=PUPPET, parent_account_id, seat_id.
+    """
+
     def test_save_load_roundtrip(self, tmp_path):
         sync = tmp_path / "sync"
         sync.mkdir()
@@ -321,7 +370,14 @@ class TestPersistence:
 
 
 class TestMasterActivation:
-    """Master online activation flow (mocked server)."""
+    """Verifies master online activation against a mocked license server.
+
+    activate_master() with a missing file → ok=False, 'not found' in message.
+    Successful activation: mock server returns valid=True then activation payload
+    (account_id, tier, seat_count, telemetry_token) → ok=True, role=MASTER,
+    account_id and seats_total set from server response, 'Master' in success message.
+    Server rejects passport (valid=False) → ok=False, 'invalid' in message.
+    """
 
     def test_activate_master_file_not_found(self, pm):
         ok, msg = pm.activate_master("/no/such/file.json")
@@ -397,6 +453,12 @@ class TestMasterActivation:
 
 
 class TestSeatEnforcement:
+    """Verifies seat accounting: puppet_limit = seats_total - 1 (master occupies one seat).
+
+    seats_total=3 → puppet_limit=2, seats_available=2. Community tier with seats_total=1
+    → puppet_limit=0 → generate_puppet_passport() returns None even when _seats_used=0.
+    """
+
     def test_seats_include_master(self, tmp_path):
         """seat_count=3 means 1 master + 2 puppet seats."""
         pm = PuppetManager(
@@ -424,6 +486,13 @@ class TestSeatEnforcement:
 
 
 class TestRoleEnum:
+    """Verifies PuppetRole enum values and PuppetInfo dataclass seat fields.
+
+    PuppetRole.MASTER.value == 'master'. The full set of role values is exactly
+    {'master', 'puppet', 'standalone'}. PuppetInfo accepts seat_id and parent_id
+    keyword args and exposes them as attributes.
+    """
+
     def test_master_role_exists(self):
         assert PuppetRole.MASTER.value == "master"
 
@@ -439,6 +508,14 @@ class TestRoleEnum:
 
 
 class TestAuditDict:
+    """Verifies to_audit_dict() produces schema_version=2 with all required fields.
+
+    A standalone manager's audit dict has schema_version=2 and includes account_id,
+    master_tier, seats_total, seats_used keys. A master manager's audit dict has
+    role='master', master_tier='power', and a 'puppets' sub-dict where each entry
+    contains its seat_id.
+    """
+
     def test_v2_audit_fields(self, pm):
         audit = pm.to_audit_dict()
         assert audit["schema_version"] == 2

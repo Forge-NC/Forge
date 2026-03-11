@@ -21,6 +21,13 @@ def _router(enabled=True):
 # ---------------------------------------------------------------------------
 
 class TestSimpleInputRoutesSmall:
+    """Verifies the router correctly sends simple, low-complexity inputs to the small model.
+
+    Short acknowledgments ('yes', 'ok', 'thanks'), single-file typo fixes, 'what does X do'
+    questions, format/comment requests all route to SMALL. estimate_complexity('done') → level='simple'
+    with score < 0 (negative score = small model territory).
+    """
+
     def test_yes(self):
         r = _router()
         model = r.route("yes")
@@ -68,6 +75,13 @@ class TestSimpleInputRoutesSmall:
 # ---------------------------------------------------------------------------
 
 class TestComplexInputRoutesBig:
+    """Verifies the router sends complex, high-reasoning inputs to the big model.
+
+    Refactoring requests, multi-file edits, 'think hard'/'investigate' language, inputs
+    with 250+ words, multiple question marks in one request, optimize/debug/multi-step tasks
+    all route to BIG.
+    """
+
     def test_refactor(self):
         r = _router()
         model = r.route("refactor the authentication module to use JWT")
@@ -119,6 +133,12 @@ class TestComplexInputRoutesBig:
 # ---------------------------------------------------------------------------
 
 class TestDisabledAlwaysBig:
+    """Verifies disabled router always returns BIG model and records no routing stats.
+
+    enabled=False routes every input to BIG regardless of complexity.
+    big_routes and small_routes both stay 0 (routing stats not recorded when disabled).
+    """
+
     def test_disabled_routes_big(self):
         r = _router(enabled=False)
         model = r.route("yes")
@@ -141,6 +161,12 @@ class TestDisabledAlwaysBig:
 # ---------------------------------------------------------------------------
 
 class TestNoSmallModelAlwaysBig:
+    """Verifies that when small_model is empty, the router always falls back to BIG.
+
+    An empty string small_model means there's no secondary model to route to —
+    all inputs regardless of complexity get routed to BIG.
+    """
+
     def test_no_small_model(self):
         r = ModelRouter(big_model=BIG, small_model="", enabled=True)
         model = r.route("yes")
@@ -157,6 +183,14 @@ class TestNoSmallModelAlwaysBig:
 # ---------------------------------------------------------------------------
 
 class TestComplexityScoring:
+    """Verifies estimate_complexity() assigns correct levels and scores, and explains its reasoning.
+
+    'ok' → level='simple', score < 0. 'refactor the entire multi-file authentication system' →
+    level='complex', score > 0. 250-word input adds score with 'long input' in reason.
+    Multiple .py file references boost score. Multiple question marks boost score with 'questions'
+    in reason. Higher context_entries or active_files both increase score. reason is always a string.
+    """
+
     def test_simple_classification(self):
         est = estimate_complexity("ok")
         assert est["level"] == "simple"
@@ -217,6 +251,14 @@ class TestComplexityScoring:
 # ---------------------------------------------------------------------------
 
 class TestRouteLogging:
+    """Verifies _route_log accumulates routing decisions with full metadata, capped at 100 entries.
+
+    After routing 2 inputs, _route_log has 2 entries. Each entry has input_preview, score, level,
+    model, and reason. After 120 routes, len(_route_log) <= 100 (oldest evicted).
+    small_routes and big_routes counters track the split correctly.
+    Entry model fields match the actual model selected ('yes' → SMALL, long refactor text → BIG).
+    """
+
     def test_route_log_populated(self):
         r = _router()
         r.route("yes")

@@ -5,6 +5,11 @@ import pytest
 
 
 class TestAuditSHA512:
+    """Verifies AuditExporter.export() uses SHA-512 for file hashes, not SHA-256.
+
+    Source inspection: 'sha512' present, 'sha256' absent. Hash format is 'sha512:{hex}'.
+    """
+
     def test_manifest_uses_sha512(self):
         """Verify audit.py uses sha512 for file hashes."""
         from forge.audit import AuditExporter
@@ -22,6 +27,12 @@ class TestAuditSHA512:
 
 
 class TestBugReporterSHA512:
+    """Verifies CrashFingerprint uses SHA-512 for deduplication hashes.
+
+    hash = sha512('exc_type|forge_frame|function|normalized_msg').hexdigest()[:16].
+    Confirmed by computing the expected hash independently and comparing.
+    """
+
     def test_fingerprint_uses_sha512(self):
         """Verify CrashFingerprint uses sha512."""
         from forge.bug_reporter import CrashFingerprint
@@ -38,6 +49,12 @@ class TestBugReporterSHA512:
 
 
 class TestProvenanceSHA512:
+    """Verifies Crucible provenance chain uses HMAC-SHA512 with 128-char hex digests.
+
+    record_provenance() entry HMAC is 128 hex chars (SHA-512 output = 64 bytes = 128 hex).
+    Internal _provenance_chain_hash is 64 bytes.
+    """
+
     def test_provenance_hmac_uses_sha512(self):
         """Verify provenance chain uses HMAC-SHA512."""
         from forge.crucible import Crucible

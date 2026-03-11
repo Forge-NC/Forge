@@ -7,6 +7,15 @@ from forge.tools.filesystem import edit_file, write_file
 
 
 class TestEditFileSyntaxValidation:
+    """Verifies edit_file() validates Python syntax before committing changes to disk.
+
+    If the edit would produce invalid Python (SyntaxError, IndentationError), the result
+    string must contain 'Error', 'SyntaxError', and 'File unchanged', and the file on disk
+    must be byte-for-byte identical to the original. Valid edits apply and report 'Replaced'.
+    Non-Python files (.txt, .js) skip syntax checking entirely.
+    Error message must include the line number of the syntax error.
+    """
+
     def test_rejects_broken_python(self, tmp_path):
         """edit_file that produces invalid Python syntax → error, file unchanged."""
         py = tmp_path / "example.py"
@@ -58,6 +67,13 @@ class TestEditFileSyntaxValidation:
 
 
 class TestWriteFileSyntaxValidation:
+    """Verifies write_file() validates Python syntax before creating a new file.
+
+    Writing invalid Python → 'Error', 'SyntaxError', 'not written' in result, file does not exist.
+    Writing valid Python → 'Wrote' in result, file exists with correct content.
+    Non-Python files skip validation and always write.
+    """
+
     def test_rejects_broken_python(self, tmp_path):
         py = tmp_path / "new.py"
 

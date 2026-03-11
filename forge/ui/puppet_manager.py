@@ -25,6 +25,7 @@ from forge.ui.themes import (
     get_colors, get_fonts, add_theme_listener, remove_theme_listener,
     recolor_widget_tree,
 )
+from forge.ui.window_geo import WindowGeo as _WG
 
 log = logging.getLogger(__name__)
 
@@ -74,11 +75,8 @@ class PuppetManagerDialog:
             0, self._apply_theme, cm)
         add_theme_listener(self._theme_cb)
 
-        # Center on parent
-        self._win.update_idletasks()
-        px = parent.winfo_x() + (parent.winfo_width() - 820) // 2
-        py = parent.winfo_y() + (parent.winfo_height() - 660) // 2
-        self._win.geometry(f"+{max(0, px)}+{max(0, py)}")
+        _WG.restore("fleet_manager", self._win, "820x660")
+        _WG.track("fleet_manager", self._win)
 
         try:
             ico = Path(__file__).parent / "assets" / "forge.ico"
@@ -591,12 +589,39 @@ class PuppetManagerDialog:
                      text_color=COLORS["white"],
                      width=40).pack(side="left")
 
-        self._detail_row(parent, "Sessions",
-                         str(bpos._genome.session_count))
-        self._detail_row(parent, "AMI Patterns",
-                         str(bpos._genome.ami_failure_catalog_size))
+        # Fall back to billing/reliability when genome hasn't accumulated data
+        session_count = bpos._genome.session_count
+        if session_count == 0:
+            try:
+                import json as _j
+                bp = bpos._data_dir / "billing.json"
+                if bp.exists():
+                    session_count = _j.loads(
+                        bp.read_text(encoding="utf-8")
+                    ).get("lifetime_sessions", 0)
+            except Exception:
+                pass
+
+        ami_patterns = bpos._genome.ami_failure_catalog_size
+        reliability = bpos._genome.reliability_score
+        if reliability == 0.0:
+            try:
+                import json as _j
+                rp = bpos._data_dir / "reliability.json"
+                if rp.exists():
+                    sessions = _j.loads(
+                        rp.read_text(encoding="utf-8")
+                    ).get("sessions", [])
+                    if sessions:
+                        scores = [s.get("composite_score", 0) for s in sessions[-5:]]
+                        reliability = sum(scores) / len(scores) if scores else 0.0
+            except Exception:
+                pass
+
+        self._detail_row(parent, "Sessions", str(session_count))
+        self._detail_row(parent, "AMI Patterns", str(ami_patterns))
         self._detail_row(parent, "Reliability",
-                         f"{bpos._genome.reliability_score:.1f}")
+                         f"{reliability:.1f}" if reliability else "—")
 
     def _show_puppet_detail(self, machine_id: str):
         """Show detail for a puppet node."""

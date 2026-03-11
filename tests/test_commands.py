@@ -48,6 +48,13 @@ class MockEngine(_Attr):
 # ---------------------------------------------------------------------------
 
 class TestDispatchTable:
+    """Verifies the command dispatch table contains all 46 expected slash commands with no duplicates.
+
+    Every command in the expected list must be present in CommandHandler._COMMANDS.
+    No two commands may share the same handler function name, with the intentional
+    exception of /quit and /exit which deliberately share _cmd_quit.
+    """
+
     def test_all_expected_commands_present(self):
         expected = [
             "/quit", "/exit", "/help", "/docs", "/context", "/drop",
@@ -80,6 +87,14 @@ class TestDispatchTable:
 # ---------------------------------------------------------------------------
 
 class TestHandleDispatch:
+    """Verifies handle() dispatches to the correct handler and returns the right sentinel.
+
+    Known commands return True. Unknown commands return False.
+    Commands are case-insensitive ('/HELP' == '/help'). Arguments after the command
+    are passed to the handler. Every command except /quit and /exit must have a
+    callable handler. /quit and /exit raise SystemExit.
+    """
+
     def test_known_command_returns_true(self):
         h = CommandHandler(MockEngine())
         assert h.handle("/help") is True

@@ -40,6 +40,15 @@ class CrashPlugin(ForgePlugin):
 
 
 class TestPluginManagerLock:
+    """Verifies PluginManager uses an RLock for thread-safe plugin dispatch.
+
+    Has _lock attribute of RLock type. get_loaded() returns a copy (clearing it doesn't
+    affect internal list). 10 concurrent dispatch_user_input() calls with slow+fast plugins →
+    no errors, 10 results. CrashPlugin at error_count=4 (one from auto-disable) + concurrent
+    dispatch → no crashes. _sorted_by_priority() under 10 concurrent threads always returns
+    same count (2 plugins, no races).
+    """
+
     def test_has_lock(self):
         pm = PluginManager(plugin_dir=Path("/nonexistent"))
         assert hasattr(pm, "_lock")

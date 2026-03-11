@@ -11,6 +11,15 @@ def crucible():
 
 
 class TestProvenanceChain:
+    """Verifies the HMAC-SHA512 provenance chain detects tampering with forensic accuracy.
+
+    Empty chain and any unmodified chain → verify returns (True, -1).
+    Each entry has 'hmac' (128 hex chars) and 'prev_hash' fields.
+    Genesis block's prev_hash is 128 zero chars ('00' * 64).
+    Directly mutating entry[1]['tool'] or entry[0]['args_summary'] breaks the chain:
+    verify returns (False, tampered_index). Chain survives 100 entries intact.
+    """
+
     def test_empty_chain_valid(self, crucible):
         valid, idx = crucible.verify_provenance_chain()
         assert valid is True

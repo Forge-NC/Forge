@@ -4,6 +4,7 @@
     <div class="footer-links">
         <a href="/Forge/">Home</a>
         <a href="docs.php">Documentation</a>
+        <a href="scoreboard.php">Scoreboard</a>
         <a href="status.php">Status</a>
         <a href="support.php">Support</a>
         <a href="account.php">Account</a>

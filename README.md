@@ -1,8 +1,8 @@
 # Forge
 
-Local AI coding assistant powered by [Ollama](https://ollama.com). Runs entirely on your machine -- no cloud APIs, no API keys, no data leaves your box unless you opt in. Manages its own context window with automatic swap and summarization, scans every interaction through a 4-layer security system, records forensic audit logs, tracks token-level billing, and wraps it all in a Neural Cortex GUI with 12 visual themes.
+Local AI coding assistant powered by [Ollama](https://ollama.com). Runs entirely on your machine -- no cloud APIs, no API keys, no data leaves your box unless you opt in. Manages its own context window with automatic swap and summarization, scans every interaction through a 9-layer security system, records forensic audit logs, tracks token-level billing, and wraps it all in a Neural Cortex GUI with 14 visual themes.
 
-42,000+ lines of Python across 136 files. 593 tests passing.
+58,000+ lines of Python across 131 source files. 1,280 tests passing.
 
 ## Architecture
 
@@ -90,8 +90,8 @@ Drop Python files in `~/.forge/plugins/`. Plugins hook into: `on_command`, `on_u
 ### Voice Input
 Push-to-talk (hold backtick) and VOX (voice-activated) modes via faster-whisper. Optional install: `pip install forge[voice]`.
 
-### 12 Visual Themes
-midnight, obsidian, dracula, solarized_dark, nord, monokai, cyberpunk, matrix, amber, phosphor, arctic, sunset. Hot-swap with `/theme <name>` or from Settings.
+### 14 Visual Themes
+midnight, obsidian, dracula, solarized_dark, nord, monokai, cyberpunk, matrix, amber, phosphor, arctic, sunset, od_green, plasma. Hot-swap with `/theme <name>` or from Settings.
 
 ## Adaptive Nightly Testing
 
@@ -113,23 +113,25 @@ PHP backend processes telemetry uploads into fleet-wide analytics:
 
 ## Commands
 
-49 commands organized by category. Run `/help` in-session for the full list.
+59 commands organized by category. Run `/help` in-session for the full list.
 
 | Category | Commands |
 |----------|----------|
 | **Session** | `/save`, `/load`, `/clear`, `/reset`, `/quit` |
 | **Context** | `/context`, `/pin`, `/unpin`, `/drop` |
-| **Models** | `/model`, `/models`, `/router` |
-| **Development** | `/tools`, `/cd`, `/scan`, `/digest`, `/index`, `/search`, `/tasks`, `/plan` |
+| **Models** | `/model`, `/models`, `/router`, `/ami` |
+| **Development** | `/tools`, `/cd`, `/scan`, `/digest`, `/index`, `/search`, `/tasks`, `/plan`, `/dedup` |
 | **Memory** | `/memory`, `/journal`, `/recall` |
 | **Billing** | `/billing`, `/compare`, `/topup` |
-| **Safety** | `/safety`, `/crucible`, `/forensics`, `/provenance` |
-| **Continuity** | `/continuity`, `/dedup` |
-| **Audit** | `/export`, `/benchmark`, `/stats` |
+| **Safety** | `/safety`, `/crucible`, `/forensics`, `/provenance`, `/threats` |
+| **Continuity** | `/continuity` |
+| **Reliability** | `/break`, `/autopsy`, `/stress`, `/assure` |
+| **Audit** | `/export`, `/benchmark`, `/stats`, `/report` |
+| **Release** | `/ship`, `/autocommit`, `/license` |
+| **Fleet** | `/puppet`, `/admin` |
 | **UI** | `/theme`, `/dashboard`, `/docs`, `/voice`, `/plugins`, `/synapse` |
 | **Config** | `/config`, `/hardware`, `/cache` |
-| **Updates** | `/update`, `/update --yes` |
-| **Admin** | `/admin`, `/admin invite <user>`, `/admin remove <user>`, `/admin pending`, `/admin token <label>` |
+| **Updates** | `/update` |
 
 ## Configuration
 
@@ -198,10 +200,10 @@ Requires [GitHub CLI](https://cli.github.com) authenticated with `repo` scope.
 ## Development and Testing
 
 ```bash
-# Unit tests (530 tests)
+# Unit tests (1,215 tests)
 pytest tests/ -v --timeout=300
 
-# Integration stress tests -- stub mode (63 tests, no Ollama needed)
+# Integration stress tests -- stub mode (65 tests, no Ollama needed)
 pytest tests/integration/ -v --timeout=600
 
 # Integration stress tests -- live mode (requires running Ollama)
@@ -227,7 +229,7 @@ forge/
   __main__.py              # CLI entry point (--fnc, --gui-terminal, --model, --dir)
   engine.py                # ForgeEngine -- core orchestrator (3,287 lines)
   context.py               # Context window with swap/summarize/pin
-  commands.py              # 49 slash commands
+  commands.py              # 59 slash commands
   config.py                # YAML config loader with validation
   safety.py                # 4-tier safety guard with sandbox
   crucible.py              # 4-layer security scanner (1,183 lines)
@@ -276,7 +278,7 @@ forge/
     terminal.py            # Console terminal I/O with ANSI
     gui_terminal.py        # GUI terminal with visual effects
     effects.py             # Animation engine (1,273 lines)
-    themes.py              # 12 color themes with hot-swap
+    themes.py              # 14 color themes with hot-swap
     settings_dialog.py     # 8-tab settings (Safety thru Telemetry)
     admin_panel.py         # GitHub collaborator + token management
     model_manager.py       # VRAM-aware model browser (1,271 lines)
@@ -308,9 +310,9 @@ server/
   token_admin.php          # Admin token management API
 
 tests/
-  22 unit test files        # 530 tests covering all subsystems
+  57 unit test files        # 1,215 tests covering all subsystems
   integration/
-    13 scenario tests       # 63 integration tests
+    12 scenario tests       # 65 integration tests
     harness.py             # Stress test framework
     ollama_stub.py         # Fake Ollama for deterministic testing
     state_verifier.py      # 8-invariant checker

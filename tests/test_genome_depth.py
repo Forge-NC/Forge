@@ -27,6 +27,13 @@ def _activate_pro(bpos):
 # ── Quality trend tracking ──
 
 class TestQualityTrend:
+    """Verifies BPoS genome quality_trend list is populated and capped correctly.
+
+    update_genome() with quality_trend=[0.8, 0.85, 0.9] → appends one averaged value
+    in [0.8, 0.9]. With ami_average_quality=0.75 → appends exactly 0.75.
+    After 60 updates → list capped at 50 entries. No quality data → list stays empty.
+    """
+
     def test_trend_appended_from_quality_scores(self, bpos):
         _activate_pro(bpos)
         snapshot = GenomeSnapshot(
@@ -67,6 +74,13 @@ class TestQualityTrend:
 # ── Per-model quality tracking ──
 
 class TestPerModelQuality:
+    """Verifies per-model quality tracking uses EMA smoothing across update calls.
+
+    Single model update populates per_model_quality dict. Multiple distinct models
+    accumulate independently. Two updates for same model with values 0.9 then 0.3 →
+    EMA result is between 0.3 and 0.9 (smoothed, not replaced).
+    """
+
     def test_single_model(self, bpos):
         _activate_pro(bpos)
         snapshot = GenomeSnapshot(
@@ -100,6 +114,12 @@ class TestPerModelQuality:
 # ── AMI routing accuracy ──
 
 class TestAMIRoutingAccuracy:
+    """Verifies ami_routing_accuracy uses EMA with alpha=0.3.
+
+    First update from 0: 0.3*1.0 + 0.7*0 = 0.3 (approx). Second update toward 0.5:
+    smoothed between first and new input (0.3 < result < 0.5).
+    """
+
     def test_routing_accuracy_tracked(self, bpos):
         _activate_pro(bpos)
         bpos.update_genome(GenomeSnapshot(
@@ -123,6 +143,12 @@ class TestAMIRoutingAccuracy:
 # ── Threat pattern distribution ──
 
 class TestThreatPatternDistribution:
+    """Verifies threat_pattern_distribution accumulates counts across genome updates.
+
+    Single category update → exact count stored. Two updates for same category
+    (2 then 3) → total 5. New category in second update → added independently.
+    """
+
     def test_single_category(self, bpos):
         _activate_pro(bpos)
         bpos.update_genome(GenomeSnapshot(
@@ -148,6 +174,12 @@ class TestThreatPatternDistribution:
 # ── Models tested tracking ──
 
 class TestModelsTested:
+    """Verifies models_tested list is populated and deduplicated across updates.
+
+    Two model names added → both in list. Same model added twice → count remains 1.
+    Second update with new model → both original and new model in list.
+    """
+
     def test_models_tracked(self, bpos):
         _activate_pro(bpos)
         bpos.update_genome(GenomeSnapshot(
@@ -168,6 +200,8 @@ class TestModelsTested:
 # ── Tool success rate ──
 
 class TestToolSuccessRate:
+    """Verifies tool_success_rate EMA tracking. Two updates (1.0 then 0.5) → second > first (converging up)."""
+
     def test_tracked(self, bpos):
         _activate_pro(bpos)
         bpos.update_genome(GenomeSnapshot(
@@ -189,6 +223,8 @@ class TestToolSuccessRate:
 # ── Continuity recovery rate ──
 
 class TestContinuityRecoveryRate:
+    """Verifies continuity_recovery_rate is tracked and non-zero after an update."""
+
     def test_tracked(self, bpos):
         _activate_pro(bpos)
         bpos.update_genome(GenomeSnapshot(
@@ -199,6 +235,13 @@ class TestContinuityRecoveryRate:
 # ── Persistence roundtrip with deep fields ──
 
 class TestDeepGenomePersistence:
+    """Verifies all deep genome fields survive a BPoS save/load roundtrip.
+
+    After update_genome() with all fields set, a new BPoS from same data_dir restores:
+    session_count, quality_trend, per_model_quality, ami_routing_accuracy,
+    threat_pattern_distribution, models_tested, and tool_success_rate.
+    """
+
     def test_roundtrip(self, tmp_path):
         bpos1 = BPoS(data_dir=tmp_path, machine_id="m1")
         _activate_pro(bpos1)
@@ -226,6 +269,15 @@ class TestDeepGenomePersistence:
 # ── Collect genome from mock engine ──
 
 class TestCollectGenomeDeep:
+    """Verifies collect_genome() correctly extracts all deep fields from a mock engine.
+
+    ami_routing_accuracy = retries_succeeded/retries_triggered (8/10 = 0.8).
+    quality_trend extracted from turn_history quality_score values.
+    per_model_quality populated from model_capabilities avg_tool_compliance.
+    threat_pattern_distribution extracted from threat_intel by_category.
+    tool_success_rate and models_tested both populated.
+    """
+
     def test_collects_routing_accuracy(self, bpos):
         engine = MagicMock()
         engine.ami.to_audit_dict.return_value = {

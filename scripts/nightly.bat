@@ -9,5 +9,5 @@ REM   Conditions: Start only if computer is on AC power (optional)
 
 cd /d "%~dp0\.."
 set PYTHON=.venv\Scripts\python.exe
-%PYTHON% scripts/nightly_smart.py %*
+%PYTHON% scripts/nightly_smart.py --non-interactive %*
 exit /b %ERRORLEVEL%

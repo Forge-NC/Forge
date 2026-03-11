@@ -12,6 +12,13 @@ from forge.config import (
 # ---------------------------------------------------------------------------
 
 class TestDefaults:
+    """Verifies ForgeConfig initializes with all DEFAULTS and handles missing/unknown keys.
+
+    Every key in DEFAULTS must be accessible via get() with its default value after init.
+    get() on a nonexistent key returns None, or the provided fallback value.
+    __contains__ must work for known keys. __getitem__ must raise KeyError for unknowns.
+    """
+
     def test_all_defaults_present(self, tmp_path):
         cfg = ForgeConfig(config_dir=tmp_path)
         for key, default_val in DEFAULTS.items():
@@ -40,6 +47,14 @@ class TestDefaults:
 # ---------------------------------------------------------------------------
 
 class TestCreateDefaultFile:
+    """Verifies ForgeConfig creates config.yaml and missing parent directories on first use.
+
+    Instantiating ForgeConfig creates config.yaml in config_dir if it doesn't exist.
+    The file must be parseable by _parse_yaml_simple() with safety_level==1.
+    Deeply nested config_dir paths are created automatically (mkdir parents).
+    cfg.path must return the expected config.yaml path.
+    """
+
     def test_creates_config_file(self, tmp_path):
         ForgeConfig(config_dir=tmp_path)
         config_path = tmp_path / "config.yaml"
@@ -68,6 +83,13 @@ class TestCreateDefaultFile:
 # ---------------------------------------------------------------------------
 
 class TestLoadAndOverride:
+    """Verifies ForgeConfig loads and overrides all value types from YAML files.
+
+    int, bool, float, string, and list values in config.yaml override their defaults.
+    Unrecognized keys in the YAML file are silently ignored (not loaded into config).
+    Keys absent from the file retain their DEFAULTS values.
+    """
+
     def test_override_int(self, tmp_path):
         config_file = tmp_path / "config.yaml"
         config_file.write_text("safety_level: 3\n", encoding="utf-8")
@@ -128,6 +150,12 @@ class TestLoadAndOverride:
 # ---------------------------------------------------------------------------
 
 class TestSetAndSave:
+    """Verifies set() updates in-memory state and save() persists to disk correctly.
+
+    set() immediately updates get() without touching the file. save() + new ForgeConfig
+    must reflect the saved values. Saving one key must not lose other keys' defaults.
+    """
+
     def test_set_in_memory(self, tmp_path):
         cfg = ForgeConfig(config_dir=tmp_path)
         cfg.set("safety_level", 3)
@@ -160,6 +188,13 @@ class TestSetAndSave:
 # ---------------------------------------------------------------------------
 
 class TestReload:
+    """Verifies reload() discards in-memory state and re-reads from disk.
+
+    Externally modifying config.yaml and calling reload() must reflect the new values.
+    In-memory set() changes that weren't saved are discarded by reload() (file wins).
+    If the file was deleted, reload() recreates it from defaults and loads the defaults.
+    """
+
     def test_reload_picks_up_changes(self, tmp_path):
         cfg = ForgeConfig(config_dir=tmp_path)
         assert cfg.get("safety_level") == 1
@@ -195,6 +230,15 @@ class TestReload:
 # ---------------------------------------------------------------------------
 
 class TestYamlParser:
+    """Verifies _parse_yaml_simple() correctly parses all value types and edge cases.
+
+    Parses: int, float, quoted/unquoted string, bool (true/false/True/FALSE case-insensitive),
+    empty list ([]), multi-item lists with '- item' syntax, inline comments (# stripped),
+    blank lines (ignored), multiple keys. Lists terminate at blank lines or end of file.
+    Quoted list items (single and double quotes) are stripped. The actual default config
+    template must parse without errors with safety_level==1 and sandbox_enabled==False.
+    """
+
     def test_simple_int(self):
         result = _parse_yaml_simple("safety_level: 1\n")
         assert result["safety_level"] == 1
@@ -288,6 +332,14 @@ class TestYamlParser:
 # ---------------------------------------------------------------------------
 
 class TestYamlDumper:
+    """Verifies _dump_yaml_simple() serializes all types to correct YAML syntax.
+
+    int → 'x: 42', float → 'x: 3.14', string → 'name: "hello"' (quoted),
+    True → 'flag: true', False → 'flag: false', [] → 'items: []',
+    list with items → 'key:\n  - item1\n  - item2'. Output always ends with newline.
+    Full roundtrip: dump(original) → parse() must produce equal dict.
+    """
+
     def test_dump_int(self):
         out = _dump_yaml_simple({"x": 42})
         assert "x: 42" in out

@@ -85,6 +85,7 @@ class VoiceInput:
                  hotkey: str = "`",
                  mode: str = "ptt",
                  language: str = "en",
+                 device: str = "auto",
                  on_transcription: Optional[Callable[[str], None]] = None,
                  on_state_change: Optional[Callable[[str], None]] = None):
         """
@@ -101,6 +102,7 @@ class VoiceInput:
         self._hotkey = hotkey
         self._mode = mode
         self._language = language
+        self._device = device
         self._on_transcription = on_transcription
         self._on_state_change = on_state_change
 
@@ -159,16 +161,20 @@ class VoiceInput:
             log.warning("Failed to enumerate audio devices: %s", e)
 
         # Detect CUDA for GPU-accelerated transcription
-        device = "cpu"
-        compute_type = "int8"
-        try:
-            import torch
-            if torch.cuda.is_available():
-                device = "cuda"
-                compute_type = "float16"
-                log.info("CUDA detected — using GPU for Whisper")
-        except ImportError:
-            pass
+        if self._device == "cpu":
+            device = "cpu"
+            compute_type = "int8"
+        else:
+            device = "cpu"
+            compute_type = "int8"
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    device = "cuda"
+                    compute_type = "float16"
+                    log.info("CUDA detected — using GPU for Whisper")
+            except ImportError:
+                pass
 
         try:
             self._model = WhisperModel(

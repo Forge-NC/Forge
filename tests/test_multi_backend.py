@@ -12,6 +12,11 @@ from forge.models.anthropic_backend import AnthropicBackend
 # ── Base protocol ──
 
 class TestLLMBackendProtocol:
+    """Verifies all three LLM backends implement the LLMBackend base protocol.
+
+    OllamaBackend, OpenAIBackend, and AnthropicBackend all pass isinstance(backend, LLMBackend).
+    """
+
     def test_ollama_is_backend(self):
         from forge.models.ollama import OllamaBackend
         backend = OllamaBackend.__new__(OllamaBackend)
@@ -32,6 +37,13 @@ class TestLLMBackendProtocol:
 # ── collect_response helper ──
 
 class TestCollectResponse:
+    """Verifies collect_response() aggregates token/tool_call chunks into a result dict.
+
+    Token chunks concatenated → text='Hello world', tokens_out=2, tokens_in=10, error=None.
+    tool_call chunk → tool_calls list with function.name. Error chunk → error field set.
+    Exception from backend.chat → error field contains exception message.
+    """
+
     def test_collects_text(self):
         mock = MagicMock()
         mock.chat.return_value = iter([
@@ -73,6 +85,14 @@ class TestCollectResponse:
 # ── OpenAI backend ──
 
 class TestOpenAIBackend:
+    """Verifies OpenAIBackend availability, context lengths, error handling, and response parsing.
+
+    Empty api_key → is_available()=False, list_models()=[], chat() yields error chunk with
+    'OPENAI_API_KEY' in content. gpt-4o → context 128K; unknown model → 128K fallback.
+    _convert_tools() preserves type and name. _parse_non_stream() yields token+done chunks;
+    with tool_calls → tool_call chunk with correct function name.
+    """
+
     def test_no_api_key_unavailable(self):
         backend = OpenAIBackend(api_key="")
         assert not backend.is_available()
@@ -130,6 +150,15 @@ class TestOpenAIBackend:
 # ── Anthropic backend ──
 
 class TestAnthropicBackend:
+    """Verifies AnthropicBackend availability, message normalization, and response parsing.
+
+    Empty api_key → is_available()=False, chat() yields error chunk. list_models() includes
+    'claude-sonnet-4-6'. claude-opus-4-6 → context 200K. _fix_alternation() handles empty input
+    (returns synthetic user msg), consecutive user msgs (merged), assistant-first (prepends user).
+    _convert_tools() uses 'input_schema' instead of 'parameters'. _parse_non_stream() with text
+    → token+done (eval_count=output tokens). With tool_use → tool_call chunk with correct name.
+    """
+
     def test_no_api_key_unavailable(self):
         backend = AnthropicBackend(api_key="")
         assert not backend.is_available()

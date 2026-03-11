@@ -5,6 +5,15 @@ from forge.quality import ResponseQualityScorer, ResponseQuality
 
 
 class TestRefusalDetection:
+    """Verifies refusal scoring assigns high scores for 'I cannot' language and low for action language.
+
+    'I cannot modify files directly' with tools available scores > 0.5 (clear refusal).
+    'I'll read the file and make the changes' scores < 0.3 (no refusal signal).
+    'You should run this manually' (delegation) scores > 0.
+    Refusal phrases near the start of the response score >= the same phrase at the end.
+    Without tools, refusing to modify files is less penalized (score <= score_with_tools).
+    """
+
     def test_clear_refusal(self):
         score = ResponseQualityScorer.score_refusal(
             "I cannot modify files directly.", has_tools=True)
@@ -37,6 +46,14 @@ class TestRefusalDetection:
 
 
 class TestRepetitionDetection:
+    """Verifies repetition scoring catches recycled responses and intra-response repetition.
+
+    Identical response to recent_responses scores > 0.5. A novel response scores < 0.3.
+    Empty recent_responses returns 0.0 (no history = no repetition possible).
+    A response that repeats the same paragraph 5+ times scores > 0.0 for intra-response
+    repetition — this catches the model looping on the same explanation.
+    """
+
     def test_identical_response(self):
         recent = ["The answer is 42."]
         score = ResponseQualityScorer.score_repetition(
@@ -65,6 +82,14 @@ class TestRepetitionDetection:
 
 
 class TestProgressScoring:
+    """Verifies progress scoring rewards concrete action signals and penalizes rehashing.
+
+    A response with a code block scores > 0.5 (produced output toward the goal).
+    A response that mentions file paths to be modified scores >= 0.5.
+    A response that repeats the previous turn's opening sentence scores <= 0.5 (no progress).
+    Completion signals ('Done!', 'I've created') score >= 0.5.
+    """
+
     def test_code_block_progress(self):
         response = "Here's the fix:\n```python\ndef foo(): pass\n```"
         score = ResponseQualityScorer.score_progress(
@@ -92,6 +117,13 @@ class TestProgressScoring:
 
 
 class TestToolCompliance:
+    """Verifies tool compliance scoring penalizes printing code when tools are available.
+
+    When tools are available and at least one tool was called: score == 1.0.
+    When tools are available but none were called and the user asked to edit a file: score < 0.5.
+    When no tools are available at all: score == 1.0 (can't penalize what isn't possible).
+    """
+
     def test_tools_used_when_needed(self):
         score = ResponseQualityScorer.score_tool_compliance(
             "I'll edit the file", [{"name": "edit_file"}],
@@ -112,6 +144,12 @@ class TestToolCompliance:
 
 
 class TestVerbosityScoring:
+    """Verifies verbosity scoring rewards concise responses when tools did the work.
+
+    'Done.' with 3 tool calls scores < 0.3 (text is concise because the work happened in tools).
+    500 words with 0 tool calls scores > 0.5 (all talk, no action — problematically verbose).
+    """
+
     def test_concise_with_tools(self):
         score = ResponseQualityScorer.score_verbosity(
             "Done.", tool_calls_count=3)
@@ -124,6 +162,14 @@ class TestVerbosityScoring:
 
 
 class TestFullAssessment:
+    """Verifies the full assess() pipeline combines sub-scores into a correct final decision.
+
+    A response with a code block and an edit_file tool call scores > 0.6 with recommended_action
+    == 'accept'. A flat refusal ('I cannot modify files') with no tool calls scores < 0.7 with
+    a non-'accept' action and at least one issue in result.issues. A response identical to the
+    most recent previous response must have repetition_score > 0.2.
+    """
+
     def test_high_quality_response(self):
         result = ResponseQualityScorer.assess(
             response="I'll fix this now.\n```python\ndef fixed(): pass\n```",

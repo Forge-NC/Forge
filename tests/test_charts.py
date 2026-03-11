@@ -26,6 +26,13 @@ def renderer():
 # ── Line Chart ──
 
 class TestLineChart:
+    """Verifies ChartRenderer.line_chart() produces correctly sized RGBA PIL images.
+
+    Returns Image.Image in RGBA mode. Custom ChartConfig dimensions are honored (400x200).
+    Empty series, single data point, constant values, and multiple overlapping series
+    all produce valid images without errors.
+    """
+
     def test_returns_image(self, renderer):
         series = [ChartSeries("test", [1, 2, 3, 4, 5])]
         img = renderer.line_chart(series)
@@ -62,6 +69,12 @@ class TestLineChart:
 # ── Bar Chart ──
 
 class TestBarChart:
+    """Verifies ChartRenderer.bar_chart() produces correctly sized images for all edge cases.
+
+    Returns Image.Image with correct dimensions from ChartConfig. Empty data and
+    zero-value bars both produce valid images without errors.
+    """
+
     def test_returns_image(self, renderer):
         data = [ChartDataPoint(10, "A"), ChartDataPoint(20, "B")]
         img = renderer.bar_chart(data)
@@ -86,6 +99,8 @@ class TestBarChart:
 # ── Donut Chart ──
 
 class TestDonutChart:
+    """Verifies ChartRenderer.donut_chart() handles normal, single-segment, and empty data."""
+
     def test_returns_image(self, renderer):
         data = [ChartDataPoint(30, "A"), ChartDataPoint(70, "B")]
         img = renderer.donut_chart(data)
@@ -104,6 +119,13 @@ class TestDonutChart:
 # ── Sparkline ──
 
 class TestSparkline:
+    """Verifies ChartRenderer.sparkline() returns correctly sized images or None for insufficient data.
+
+    [1,3,2,5,4] with width=100, height=20 → Image.Image of exactly (100,20).
+    Empty list or single-value list → None (can't draw a trend line).
+    Constant values and custom color both succeed.
+    """
+
     def test_returns_image(self, renderer):
         img = renderer.sparkline([1, 3, 2, 5, 4], width=100, height=20)
         assert isinstance(img, Image.Image)
@@ -125,6 +147,12 @@ class TestSparkline:
 # ── ASCII Sparkline ──
 
 class TestAsciiSparkline:
+    """Verifies ChartRenderer.ascii_sparkline() maps values to block characters with correct length.
+
+    [0, 25, 50, 75, 100] width=5 → 5-char string, first char=' ' (min), last='\u2588' (max).
+    Empty list → ''. Constant values → len==width. 100-element input resampled to width=10.
+    """
+
     def test_basic(self):
         result = ChartRenderer.ascii_sparkline([0, 25, 50, 75, 100], width=5)
         assert len(result) == 5
@@ -148,6 +176,12 @@ class TestAsciiSparkline:
 # ── ASCII Bar Chart ──
 
 class TestAsciiBarChart:
+    """Verifies ChartRenderer.ascii_bar_chart() produces text with labels and values.
+
+    {'A': 10, 'B': 20} → output contains 'A', 'B', '10', '20'. Empty dict → ''.
+    Zero-value entry still appears in output.
+    """
+
     def test_basic(self):
         result = ChartRenderer.ascii_bar_chart({"A": 10, "B": 20}, width=20)
         assert "A" in result

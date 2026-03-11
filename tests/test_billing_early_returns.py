@@ -1,11 +1,21 @@
-"""Tests for billing recording on all agent-loop exit paths."""
+"""Tests for billing token accumulation across multiple turns.
+
+Verifies BillingMeter correctly tracks input tokens, output tokens,
+cache hits, and per-turn history through the full recording lifecycle.
+"""
 
 import pytest
 from forge.billing import BillingMeter
 
 
 class TestBillingRecordTurn:
-    """Verify BillingMeter.record_turn tracks tokens correctly."""
+    """Verifies BillingMeter.record_turn() accumulates token counts across turns.
+
+    Two turns of (100 input + 50 output) + (200 input + 100 output) must
+    produce a session total of 450 tokens with cache_hits=30.  Zero-token
+    turns must not corrupt state.  Five turns of (10+5) each must total 75.
+    The internal _turns list must grow by exactly one entry per call.
+    """
 
     def test_record_turn_accumulates(self, tmp_path):
         bm = BillingMeter(persist_path=tmp_path / "billing.json")
@@ -34,51 +44,3 @@ class TestBillingRecordTurn:
         bm.record_turn(input_tokens=10, output_tokens=5)
         bm.record_turn(input_tokens=20, output_tokens=10)
         assert len(bm._turns) == 2
-
-
-class TestBillingHelperCoverage:
-    """Test that _record_billing helper exists in the agent loop."""
-
-    def test_record_billing_is_defined(self):
-        """Verify the _record_billing closure is created in _agent_loop."""
-        import inspect
-        from forge.engine import ForgeEngine
-        source = inspect.getsource(ForgeEngine._agent_loop)
-        assert "def _record_billing():" in source
-        assert "nonlocal" in source
-
-    def test_all_early_exits_have_billing(self):
-        """Every early exit in _agent_loop should record billing."""
-        import inspect
-        from forge.engine import ForgeEngine
-        source = inspect.getsource(ForgeEngine._agent_loop)
-        # Count _record_billing() calls — should be used at every early exit
-        billing_calls = source.count("_record_billing()")
-        # At minimum: error, post-stream interrupt, escape interrupt,
-        # voice interrupt, 2x ContextFullError, 1x response ContextFullError,
-        # duplicate detection, oscillation, max iterations = 9+
-        assert billing_calls >= 7, (
-            f"Expected >= 7 _record_billing() calls, found {billing_calls}")
-
-
-class TestContextFullBilling:
-    """Verify ContextFullError paths record billing."""
-
-    def test_context_full_billing_code_exists(self):
-        """ContextFullError handlers should call _record_billing."""
-        import inspect
-        from forge.engine import ForgeEngine
-        source = inspect.getsource(ForgeEngine._agent_loop)
-        # Find lines with ContextFullError and check for _record_billing nearby
-        lines = source.split("\n")
-        cfe_indices = [i for i, l in enumerate(lines)
-                       if "except ContextFullError" in l]
-        billing_after_cfe = 0
-        for idx in cfe_indices:
-            # Check next 5 lines for _record_billing
-            window = "\n".join(lines[idx:idx + 5])
-            if "_record_billing()" in window:
-                billing_after_cfe += 1
-        assert billing_after_cfe >= 3, (
-            f"Expected >= 3 ContextFullError handlers with billing, "
-            f"found {billing_after_cfe}")

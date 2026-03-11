@@ -32,6 +32,15 @@ def monitor():
 # ── Swap freshness formula ──
 
 class TestSwapFreshness:
+    """Verifies _signal_swap_freshness() decays after context swaps and recovers over turns.
+
+    No swaps → 1.0 (pristine). Immediately after 1 swap (turns_since_swap=0) → clamped to 0.2.
+    5 turns after a swap → > 0.5 (partial recovery). 20 turns after → > 0.8 (near full recovery).
+    More swaps degrade the score further for the same turn count: f(swaps=1) > f(swaps=10).
+    Formula is: max(0.2, (1 - exp(-0.4*t)) * (1 / (1 + 0.05*s))) — tested for mathematical
+    correctness at t=5, s=2. Floor is always >= 0.2 even with 100 swaps at turn 0.
+    """
+
     def test_no_swaps_returns_one(self, monitor):
         # No swaps yet → pristine = 1.0
         f = monitor._signal_swap_freshness()
@@ -82,6 +91,12 @@ class TestSwapFreshness:
 # ── File coverage ──
 
 class TestFileCoverage:
+    """Verifies _signal_file_coverage() measures whether modified files are mentioned in context.
+
+    All files mentioned → 1.0. None mentioned → 0.0. 1 of 3 mentioned → 0.2–0.5 (partial).
+    No modified files at all → 1.0 (nothing to track).
+    """
+
     def test_all_files_present(self, monitor):
         entries = [_Entry(content="Working on a.py and b.py with some changes")]
         task = _TaskState(files_modified=["a.py", "b.py"])
@@ -110,6 +125,12 @@ class TestFileCoverage:
 # ── Decision retention ──
 
 class TestDecisionRetention:
+    """Verifies _signal_decision_retention() checks whether key decisions are still in context.
+
+    Both decisions present → > 0.5. No decisions to check → 1.0. Exactly 1 of 2 decisions
+    mentioned → 0.5. Uses substring matching of decision text within context entry content.
+    """
+
     def test_all_decisions_retained(self, monitor):
         entries = [_Entry(
             content="We decided to use HashMap for caching and refactor the parser")]
@@ -136,6 +157,14 @@ class TestDecisionRetention:
 # ── Working memory depth ──
 
 class TestWorkingMemoryDepth:
+    """Verifies _signal_working_memory_depth() measures substantive context after swaps.
+
+    No swaps → 1.0 (context was never disrupted). After a swap with no entries → 0.0.
+    3 entries all with token_count >= 100 → 1.0 (all substantive). 3 entries all with
+    token_count <= 50 → 0.0 (all shallow). 2 substantive + 2 shallow → 0.5.
+    Threshold for 'substantive' is 100 tokens per working-partition entry.
+    """
+
     def test_no_swaps_returns_one(self, monitor):
         # No swaps → pristine context
         score = monitor._signal_working_memory_depth([])
@@ -181,6 +210,12 @@ class TestWorkingMemoryDepth:
 # ── Grade computation ──
 
 class TestGradeComputation:
+    """Verifies score_to_grade() maps numeric scores to letter grades correctly.
+
+    95 → A, 80 → B, 65 → C, 45 → D, 30 → F. These thresholds define the
+    grade boundaries for continuity health display in the UI.
+    """
+
     def test_grade_a(self):
         assert score_to_grade(95) == "A"
 
@@ -200,6 +235,11 @@ class TestGradeComputation:
 # ── to_audit_dict ──
 
 class TestAuditDict:
+    """Verifies to_audit_dict() returns a dict with all required audit fields.
+
+    Must include: schema_version, current_score, current_grade, swaps_total.
+    """
+
     def test_has_required_keys(self, monitor):
         audit = monitor.to_audit_dict()
         assert "schema_version" in audit
@@ -211,6 +251,14 @@ class TestAuditDict:
 # ── Recovery logic ──
 
 class TestRecoveryLogic:
+    """Verifies needs_recovery() correctly maps continuity health to recovery mode or None.
+
+    Grade A (score=92) → None (no recovery needed). Grade C (score=55) with at least 1 swap
+    → 'mild' recovery. Recovery is suppressed during cooldown period (_recovery_cooldown_until
+    in the future) even with grade F. Recovery is also suppressed when _recovery_attempts >= 6
+    (max attempts exhausted) to prevent infinite recovery loops.
+    """
+
     def test_no_recovery_at_grade_a(self, monitor):
         from forge.continuity import ContinuitySnapshot
         snap = ContinuitySnapshot(

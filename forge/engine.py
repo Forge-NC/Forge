@@ -371,6 +371,15 @@ class ForgeEngine:
         # Command handler (slash commands live in forge/commands.py)
         self._command_handler = CommandHandler(self)
 
+        # Event bus — in-process pub/sub for lifecycle events.
+        # Must be initialized before the plugin manager so plugins can
+        # subscribe during on_load().
+        from forge.event_bus import ForgeEventBus
+        self.event_bus = ForgeEventBus()
+        # Bridge plugin manager dispatch through the bus (wildcard, low priority
+        # so internal subscribers run first at priority < 90).
+        # We defer this until after plugin_manager is created below.
+
         # Plugin system
         try:
             from forge.plugins import PluginManager
@@ -386,6 +395,52 @@ class ForgeEngine:
             from forge.plugins import PluginManager
             self.plugin_manager = PluginManager(
                 plugin_dir=self._config_dir / "plugins")
+
+        # Wire plugin manager into the event bus (priority 90 — runs after
+        # internal subscribers which use priority 80).
+        self.event_bus.subscribe(
+            "*",
+            lambda ev: self.plugin_manager.dispatch_event(ev),
+            priority=90,
+        )
+
+        # Wire bundled internal event bridges (need engine internals, so
+        # they bypass the restricted proxy and register directly).
+        try:
+            from forge.plugins.bundled.cortex_plugin import register_cortex_handlers
+            register_cortex_handlers(self.event_bus, self._write_dashboard_state)
+        except Exception as e:
+            log.debug("Cortex event bridge: %s", e)
+
+        try:
+            from forge.plugins.bundled.telemetry_plugin import register_telemetry_handlers
+            register_telemetry_handlers(self.event_bus, self)
+        except Exception as e:
+            log.debug("Telemetry event bridge: %s", e)
+
+        try:
+            from forge.plugins.bundled.fingerprint_plugin import register_fingerprint_handlers
+            register_fingerprint_handlers(self.event_bus, self)
+        except Exception as e:
+            log.debug("Fingerprint event bridge: %s", e)
+
+        try:
+            from forge.plugins.bundled.adaptive_pressure_plugin import register_adaptive_pressure_handlers
+            register_adaptive_pressure_handlers(self.event_bus, self)
+        except Exception as e:
+            log.debug("Adaptive pressure event bridge: %s", e)
+
+        try:
+            from forge.plugins.bundled.poi_plugin import register_poi_handlers
+            register_poi_handlers(self.event_bus, self)
+        except Exception as e:
+            log.debug("Proof of Inference event bridge: %s", e)
+
+        try:
+            from forge.plugins.bundled.assurance_plugin import register_assurance_handlers
+            register_assurance_handlers(self.event_bus, self)
+        except Exception as e:
+            log.debug("Assurance event bridge: %s", e)
 
         # Episodic memory — persistent journal across sessions
         self.memory = EpisodicMemory(
@@ -424,6 +479,14 @@ class ForgeEngine:
         except Exception as e:
             log.debug("BPoS init: %s", e)
 
+        # Team genome: pull shared genome at session start (Pro/Power)
+        try:
+            if self._bpos and self._bpos.is_feature_allowed("genome_sync"):
+                self._bpos.pull_team_genome()
+                log.debug("Team genome pulled at session start")
+        except Exception as e:
+            log.debug("Team genome pull: %s", e)
+
         # AutoForge — smart auto-commit for file edits (Pro/Power only)
         self._autoforge = None
         try:
@@ -449,6 +512,7 @@ class ForgeEngine:
                     project_dir=self.cwd,
                     llm_backend=self.llm,
                     data_dir=self._config_dir / "shipwright",
+                    push_after_release=self.config.get("push_on_ship", False),
                 )
             except Exception as e:
                 log.debug("Shipwright init: %s", e)
@@ -505,6 +569,9 @@ class ForgeEngine:
         self._last_build_error: str = ""   # cross-turn build loop detection
         self._build_error_streak: int = 0  # consecutive turns with same error
 
+        # Session-level tool call counter (not reset per turn)
+        self._session_tool_count: int = 0
+
         # Rate limiter state (circuit breaker for runaway tool loops)
         self._rate_limit_window: list[float] = []  # timestamps in sliding minute
         self._turn_tool_counts: dict[str, int] = {}  # per-tool counts this turn
@@ -527,8 +594,13 @@ class ForgeEngine:
                        or os.environ.get("ANTHROPIC_API_KEY", ""))
             return AnthropicBackend(model=model, api_key=api_key)
         else:
-            return OllamaBackend(
-                model=model)
+            # Thinking models (qwen3, deepseek-r1, etc.) generate extended
+            # internal reasoning chains and need a longer HTTP timeout.
+            _is_thinking = any(kw in model.lower() for kw in (
+                "qwen3", "deepseek-r1", "thinking", "reason"))
+            _default_timeout = 600.0 if _is_thinking else 120.0
+            _timeout = float(self.config.get("llm_timeout", _default_timeout))
+            return OllamaBackend(model=model, timeout=_timeout)
 
     def _apply_enterprise_defaults(self):
         """Override settings for enterprise/governance mode."""
@@ -800,6 +872,11 @@ class ForgeEngine:
             self.cache.store(file_path, result, token_count)
             self.forensics.record("file_read", f"Read {file_path}",
                                   {"path": file_path, "tokens": token_count})
+            self.event_bus.emit("file.read", {
+                "path": file_path,
+                "tokens": token_count,
+                "cached": False,
+            })
 
         return result
 
@@ -832,6 +909,10 @@ class ForgeEngine:
         result = filesystem.write_file(file_path, content)
         self.forensics.record("file_write", f"Write {file_path}",
                               {"path": file_path, "created": created})
+        self.event_bus.emit("file.write", {
+            "path": file_path,
+            "created": created,
+        })
         # AutoForge: record edit for auto-commit
         if hasattr(self, '_autoforge') and self._autoforge and self._autoforge.enabled:
             self._autoforge.record_edit(file_path, "write")
@@ -932,9 +1013,18 @@ class ForgeEngine:
 
         try:
             _sp.run(["git", "fetch", "origin"], cwd=forge_root,
-                     capture_output=True, timeout=10, **flags)
+                     stdout=_sp.DEVNULL, stderr=_sp.DEVNULL, timeout=10, **flags)
+
+            # Detect current branch — don't assume master
+            branch_result = _sp.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=forge_root, capture_output=True, text=True,
+                timeout=5, **flags)
+            branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "main"
+            remote_ref = f"origin/{branch}"
+
             result = _sp.run(
-                ["git", "rev-list", "--count", "HEAD..origin/master"],
+                ["git", "rev-list", "--count", f"HEAD..{remote_ref}"],
                 cwd=forge_root, capture_output=True, text=True,
                 timeout=5, **flags)
             if result.returncode != 0:
@@ -945,7 +1035,7 @@ class ForgeEngine:
 
             # Get remote version
             ver_result = _sp.run(
-                ["git", "show", "origin/master:pyproject.toml"],
+                ["git", "show", f"{remote_ref}:pyproject.toml"],
                 cwd=forge_root, capture_output=True, text=True,
                 timeout=5, **flags)
             remote_ver = ""
@@ -956,7 +1046,7 @@ class ForgeEngine:
 
             # Get changelog
             log_result = _sp.run(
-                ["git", "log", "--oneline", "HEAD..origin/master"],
+                ["git", "log", "--oneline", f"HEAD..{remote_ref}"],
                 cwd=forge_root, capture_output=True, text=True,
                 timeout=5, **flags)
             changes = []
@@ -979,7 +1069,7 @@ class ForgeEngine:
             if self.io.prompt_yes_no("Update now?", default=False):
                 self.io.print_info("Pulling updates...")
                 pull = _sp.run(
-                    ["git", "pull", "--ff-only", "origin", "master"],
+                    ["git", "pull", "--ff-only", "origin", branch],
                     cwd=forge_root, capture_output=True, text=True,
                     timeout=30, **flags)
                 if pull.returncode != 0:
@@ -1183,6 +1273,46 @@ class ForgeEngine:
 
         self.io.print_context_bar(self.ctx.status())
 
+        # Announce session start to the event bus
+        _sid = getattr(self.memory, "_session_id", "") if hasattr(self, "memory") else ""
+        self.event_bus.set_session_id(_sid)
+
+        # Event replay log — write every event to a session JSONL file
+        if self.config.get("event_log_enabled", False):
+            _log_dir = self._config_dir / "events"
+            _log_file = _log_dir / f"session_{_sid[:12] or 'unknown'}.jsonl"
+            self.event_bus.set_event_log(_log_file)
+        self.event_bus.emit("session.start", {
+            "session_id": _sid,
+            "model": self.llm.model,
+            "cwd": self.cwd,
+            "config_summary": {
+                "safety_level": self.safety.level,
+                "plan_mode": self.planner.mode,
+                "router_enabled": self.router.enabled,
+                "crucible_enabled": self.crucible.enabled,
+            },
+        })
+
+        # Write initial state so dashboard cards populate immediately
+        self._engine_busy = False
+        self._write_dashboard_state("idle")
+
+        # Heartbeat: keep the state file's timestamp fresh while idle so the
+        # dashboard's 5-second stale check never discards it between turns.
+        def _heartbeat():
+            import time as _time
+            while getattr(self, "_running", True):
+                _time.sleep(3)
+                if not getattr(self, "_engine_busy", False):
+                    try:
+                        self._write_dashboard_state("idle")
+                    except Exception:
+                        pass
+
+        threading.Thread(target=_heartbeat, daemon=True,
+                         name="dash-heartbeat").start()
+
         while True:
             user_input = self._get_input()
             if not user_input:
@@ -1249,8 +1379,14 @@ class ForgeEngine:
                     model_quality=_ami_avg_q,
                 )
                 if routed_model != self.llm.model:
+                    _prev_model = self.llm.model
                     log.debug("Router: %s -> %s", self.llm.model, routed_model)
                     self.llm.model = routed_model
+                    self.event_bus.emit("model.switch", {
+                        "from_model": _prev_model,
+                        "to_model": routed_model,
+                        "reason": "router",
+                    })
 
             # Plan mode — generate plan before execution
             if self.planner.should_plan(user_input, complexity_score):
@@ -1286,10 +1422,31 @@ class ForgeEngine:
             self._escape_monitor.reset()
             self._escape_monitor.start()
 
-            redirect = self._agent_loop()
+            _turn_start_ts = time.time()
+            self.event_bus.emit("turn.start", {
+                "turn_id": self._turn_count,
+                "user_input_preview": user_input[:100],
+                "context_pct": round(self.ctx.usage_fraction * 100, 1)
+                               if hasattr(self.ctx, "usage_fraction") else 0,
+            })
+
+            self._engine_busy = True
+            try:
+                redirect = self._agent_loop()
+            finally:
+                self._engine_busy = False
 
             # Stop escape monitoring before waiting for input
             self._escape_monitor.stop()
+
+            self.event_bus.emit("turn.end", {
+                "turn_id": self._turn_count,
+                "tokens_prompt": self._turn_prompt_tokens,
+                "tokens_generated": self._turn_eval_count,
+                "duration_ms": int((time.time() - _turn_start_ts) * 1000),
+                "tool_calls_count": len(self._current_turn_tools),
+                "had_errors": bool(self._turn_error_counts),
+            })
             # Preserve for redirect resume context injection before clearing
             completed_checkpoint = self._current_checkpoint
             self._current_checkpoint = None
@@ -1613,6 +1770,13 @@ class ForgeEngine:
                 self._dashboard.set_state("thinking")
 
             print()
+            _model_req_t0 = time.time()
+            self.event_bus.emit("model.request", {
+                "model": self.llm.model,
+                "tokens_prompt": getattr(self.ctx, "total_tokens", 0),
+                "context_pct": round(
+                    getattr(self.ctx, "usage_fraction", 0) * 100, 1),
+            })
             for chunk in self.llm.chat(messages, tools=tools):
                 # Point B: check escape or voice interrupt after each chunk
                 if self._escape_monitor.interrupted:
@@ -1665,6 +1829,14 @@ class ForgeEngine:
                     model=self.llm.model,
                 )
                 self.stats.record_context_usage(self.ctx.usage_pct)
+
+            self.event_bus.emit("model.response", {
+                "model": self.llm.model,
+                "tokens_generated": eval_count,
+                "latency_ms": (int(duration_ns / 1_000_000) if duration_ns
+                               else int((time.time() - _model_req_t0) * 1000)),
+                "had_tool_calls": bool(tool_calls),
+            })
 
             if full_response:
                 print()
@@ -1953,15 +2125,33 @@ class ForgeEngine:
                                                 {"tool": fn_name})
                     if self._dashboard and self._dashboard._running:
                         self._dashboard.set_state("tool_exec")
+                    self.event_bus.emit("tool.call", {
+                        "tool_name": fn_name,
+                        "args_summary": str(fn_args)[:120],
+                        "turn_id": self._turn_count,
+                    })
+                    _tool_t0 = time.time()
                     tool_result = self.tools.call(fn_name, fn_args)
                     result = tool_result.output
                     is_error = not tool_result.success
+                    _tool_latency_ms = int((time.time() - _tool_t0) * 1000)
                     if is_error:
                         self.io.print_tool_error(result)
                         capture_ghost("tool_fail", f"{fn_name}: {result[:100]}")
+                        self.event_bus.emit("tool.error", {
+                            "tool_name": fn_name,
+                            "error_msg": result[:200],
+                            "turn_id": self._turn_count,
+                        })
                     else:
                         self.io.print_tool_result(result)
                         capture_ghost("tool_success", fn_name)
+                        self.event_bus.emit("tool.result", {
+                            "tool_name": fn_name,
+                            "success": True,
+                            "latency_ms": _tool_latency_ms,
+                            "output_size": len(result),
+                        })
 
                 # Plugin hook: transform tool result after execution
                 if hasattr(self, 'plugin_manager') and fn_name != "think":
@@ -2035,6 +2225,7 @@ class ForgeEngine:
                     "name": fn_name,
                     "args": fn_args,
                 })
+                self._session_tool_count += 1
                 self.stats.record_tool_call(fn_name)
                 self.forensics.record("tool", f"{fn_name}",
                                       {"name": fn_name})
@@ -2175,6 +2366,11 @@ class ForgeEngine:
         plan_display = self.planner.format_plan(plan)
         print(plan_display)
 
+        self.event_bus.emit("plan.created", {
+            "step_count": len(plan.steps),
+            "model_used": self.llm.model,
+        })
+
         # Step 3: Get user approval
         choice = self.io.prompt_choice(
             "Choice",
@@ -2204,6 +2400,10 @@ class ForgeEngine:
 
         step_by_step = choice == "s"
         self.planner.approve(step_by_step=step_by_step)
+        self.event_bus.emit("plan.approved", {
+            "method": "user",
+            "step_by_step": step_by_step,
+        })
 
         # Step 4: Execute the plan
         print(f"\n  {GREEN}{BOLD}Plan approved. Executing...{RESET}\n")
@@ -2250,6 +2450,11 @@ class ForgeEngine:
         self._escape_monitor.stop()
         self._current_checkpoint = None
         self.planner.complete()
+        self.event_bus.emit("plan.complete", {
+            "steps": len(self.planner.current_plan.steps)
+                     if self.planner.current_plan else 0,
+            "all_passed": True,
+        })
 
         # Record turn
         last_response = self._get_last_assistant_response()
@@ -2703,40 +2908,75 @@ class ForgeEngine:
     def _write_dashboard_state(self, state: str, extra: dict = None):
         """Write animation state to cross-process file for FNC launcher.
 
-        Uses atomic write (temp + rename) to avoid partial reads.
+        Two-phase write:
+          1. Immediately write state+timestamp so the animation updates
+             without any delay on the engine thread.
+          2. Background thread builds the full card-data snapshot and
+             overwrites the file — never blocks the engine thread.
         """
         state_file = self._config_dir / "dashboard_state.json"
-        payload = {
-            "state": state,
-            "timestamp": time.time(),
-        }
-        # Merge dashboard snapshot for launcher to display
+
+        _debug_log = self._config_dir / "snap_debug.log"
+
+        def _log_err(context: str, err: str):
+            try:
+                import traceback as _tb
+                with open(_debug_log, "a", encoding="utf-8") as _f:
+                    _f.write(f"[{context}] {err}\n")
+            except Exception:
+                pass
+
+        def _atomic_write(payload: dict, context: str = "write"):
+            tmp_path = None
+            try:
+                fd, tmp_path = tempfile.mkstemp(
+                    dir=str(self._config_dir), suffix=".tmp")
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(payload, f)
+                os.replace(tmp_path, str(state_file))
+                tmp_path = None
+            except Exception as _e:
+                _log_err(context, str(_e))
+                if tmp_path is not None:
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
+
+        # Phase 1 — instant, on the engine thread
+        now = time.time()
+        immediate = {"state": state, "timestamp": now}
+        if extra:
+            immediate["extra"] = extra
+        _atomic_write(immediate, "phase1")
+
+        # Notify terminal IO immediately — drives the GUI terminal mini brain
+        # (GuiTerminalIO.set_state → update_status → set_brain_state).
+        # For plain terminal IO this is a no-op or spinner update.
         try:
-            snapshot = self._get_dashboard_snapshot()
-            if snapshot:
-                payload.update(snapshot)
+            self.io.set_state(state)
         except Exception:
             pass
-        if extra:
-            payload["extra"] = extra
 
-        tmp_path = None
-        try:
-            # Atomic write: write to temp file, then rename
-            fd, tmp_path = tempfile.mkstemp(
-                dir=str(self._config_dir), suffix=".tmp")
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(payload, f)
-            # On Windows, os.replace is atomic within same volume
-            os.replace(tmp_path, str(state_file))
-            tmp_path = None  # rename succeeded, nothing to clean up
-        except Exception:
-            # Non-critical — dashboard just won't update
-            if tmp_path is not None:
-                try:
-                    os.unlink(tmp_path)
-                except Exception:
-                    pass
+        # Phase 2 — background, never blocks the engine
+        _state = state
+        _extra = extra
+
+        def _snap_worker():
+            try:
+                snapshot = self._get_dashboard_snapshot()
+                if snapshot:
+                    full = {"state": _state, "timestamp": now}
+                    if _extra:
+                        full["extra"] = _extra
+                    full.update(snapshot)
+                    _atomic_write(full, "phase2")
+            except Exception:
+                pass
+
+        threading.Thread(
+            target=_snap_worker, daemon=True, name="dash-snap"
+        ).start()
 
     def _inject_session_recap(self):
         """Load prior session journal entries and inject a recap into context.
@@ -3030,6 +3270,12 @@ class ForgeEngine:
                 "level": t.level_name, "category": t.category,
                 "pattern": t.pattern_name,
             })
+            self.event_bus.emit("threat.detected", {
+                "source": "<llm_output>",
+                "rule": t.pattern_name,
+                "level": t.level_name,
+                "category": t.category,
+            })
         if self.safety.level == 1:
             log.warning("Output scan: %d threats in LLM response (logged)",
                         len(serious))
@@ -3064,6 +3310,12 @@ class ForgeEngine:
             self.forensics.record("rag_scan", "flagged", {
                 "source": source, "level": t.level_name,
                 "pattern": t.pattern_name,
+            })
+            self.event_bus.emit("threat.detected", {
+                "source": source,
+                "rule": t.pattern_name,
+                "level": t.level_name,
+                "category": t.category,
             })
         if self.safety.level <= 1:
             log.warning("RAG scan flagged %s (%d threats) — injecting (L%d)",
@@ -3371,6 +3623,10 @@ class ForgeEngine:
         if pct < SWAP_THRESHOLD:
             return
 
+        self.event_bus.emit("context.pressure", {
+            "used_pct": pct / 100.0,
+            "threshold": SWAP_THRESHOLD,
+        })
         self._write_dashboard_state("swapping")
 
         print()
@@ -3471,7 +3727,14 @@ class ForgeEngine:
                 pass
         self.continuity.record_swap(self._turn_count, recall_scores)
 
-        self._write_dashboard_state("idle")
+        self.event_bus.emit("context.swap", {
+            "freed_tokens": freed,
+            "pre_entries": pre_entries,
+            "post_entries": post_entries,
+            "swaps_total": ts.context_swaps if ts else 0,
+            "reason": "context_full",
+        })
+        # "idle" revert handled by cortex_plugin on_context_swap after 2s delay
 
     def _get_last_assistant_response(self) -> str:
         """Extract the last assistant response from context."""
@@ -3857,90 +4120,135 @@ class ForgeEngine:
     # _handle_command_LEGACY removed — all commands now in forge.commands.CommandHandler
 
     def _get_scheduler_info(self) -> dict:
-        """Get nightly schedule status for dashboard display."""
-        try:
-            from forge.scheduler import get_schedule_info
-            return get_schedule_info()
-        except Exception:
-            return {"scheduled": False}
+        """Get nightly schedule status for dashboard display (cached 5 min).
+
+        schtasks /query is prone to the Windows pipe-hang bug (timeout fires
+        but grandchild processes keep pipes open → communicate() blocks
+        forever). We run it in an inner thread with a hard 1.5 s limit and
+        ALWAYS write the cache afterwards so we never retry within 5 minutes.
+        """
+        now = time.time()
+        if (hasattr(self, "_sched_cache")
+                and now - getattr(self, "_sched_cache_ts", 0) < 300):
+            return self._sched_cache
+
+        _res: list = [{"scheduled": False}]
+
+        def _worker():
+            try:
+                from forge.scheduler import get_schedule_info
+                _res[0] = get_schedule_info()
+            except Exception:
+                pass
+
+        _t = threading.Thread(target=_worker, daemon=True)
+        _t.start()
+        _t.join(timeout=1.5)   # must finish well under the outer 2 s limit
+        # Always cache — even if the thread timed out we have the default
+        self._sched_cache = _res[0]
+        self._sched_cache_ts = now
+        return self._sched_cache
 
     def _get_dashboard_snapshot(self) -> dict:
         """Build a snapshot dict for the GUI dashboard's polling callback."""
-        try:
-            ctx_status = self.ctx.status()
-            bs = self.billing.status()
-            cs = self.cache.stats()
-            perf = self.stats.get_performance_trends(count=20)
-            ts = self.memory.get_task_state()
-            comp = self.billing.get_comparison()
+        import traceback as _tb
+        _debug_log = self._config_dir / "snap_debug.log"
 
-            opus_cost = comp["comparisons"].get(
-                "Claude Opus (with re-reads)", {}).get("cost", 0)
+        def _section(name, fn):
+            try:
+                return fn()
+            except Exception:
+                err = _tb.format_exc()
+                try:
+                    with open(_debug_log, "a", encoding="utf-8") as _f:
+                        _f.write(f"[snap:{name}] {err}\n")
+                except Exception:
+                    pass
+                return None
 
-            return {
-                "context": {
-                    "usage_pct": ctx_status["usage_pct"],
-                    "total_tokens": ctx_status["total_tokens"],
-                    "max_tokens": ctx_status["max_tokens"],
-                    "partitions": self.ctx.get_partition_stats(),
-                },
-                "performance": perf,
-                "cache": {"hit_rate": cs.get("hit_rate", 0)},
-                "swaps": ts.context_swaps if ts else 0,
-                "session": {
-                    "turns": self._turn_count,
-                    "duration_m": bs.get("session_duration_m", 0),
-                    "tokens": bs.get("session_tokens", 0),
-                    "cost_saved": opus_cost,
-                },
-                "memory": {
-                    "journal_entries": len(self.memory.get_session_entries()),
-                    "index_chunks": (self.index.stats()["total_chunks"]
-                                     if self.index else 0),
-                    "status": "Active" if self._turn_count > 0 else "Ready",
-                },
-                "model": self.llm.model,
-                "is_active": False,
-                "continuity": {
-                    "score": (self.continuity._current.score
-                              if self.continuity._current else 100),
-                    "grade": (self.continuity._current.grade
-                              if self.continuity._current else "A"),
-                    "swaps": self.continuity._swaps_total,
-                    "enabled": self.continuity.enabled,
-                    "score_history": [
-                        s.score for s in self.continuity._history[-20:]
-                    ],
-                },
-                "reliability": {
-                    "score": self.reliability.get_reliability_score(),
-                    "trend": self.reliability.get_trend(),
-                    "current": self.reliability.get_current_session_health(
-                        forensics=self.forensics,
-                        continuity=self.continuity,
-                        plan_verifier=self.plan_verifier,
-                        billing=self.billing,
-                        session_start=self._session_start,
-                        turn_count=self._turn_count,
-                    ),
-                    "metrics": self.reliability.get_underlying_metrics(),
-                    "score_history": self.reliability.get_score_history(),
-                },
-                "tools": self.tools.get_tool_stats() if hasattr(self.tools, 'get_tool_stats') else {},
-                "router": {
-                    "enabled": self.router.enabled,
-                    "big_model": self.router.big_model,
-                    "small_model": self.router.small_model,
-                    "big_routes": self.router.big_routes,
-                    "small_routes": self.router.small_routes,
-                },
-                "scheduler": self._get_scheduler_info(),
-                "autoforge": self._get_autoforge_snapshot(),
-                "shipwright": self._get_shipwright_snapshot(),
-                "license": self._get_license_snapshot(),
-            }
-        except Exception:
+        ctx_status  = _section("ctx",     lambda: self.ctx.status())
+        bs          = _section("billing",  lambda: self.billing.status())
+        cs          = _section("cache",    lambda: self.cache.stats())
+        perf        = _section("perf",     lambda: self.stats.get_performance_trends(count=20))
+        ts          = _section("memory",   lambda: self.memory.get_task_state())
+        comp        = _section("comp",     lambda: self.billing.get_comparison())
+
+        if not ctx_status:
             return {}
+
+        opus_cost = 0
+        if comp:
+            try:
+                opus_cost = comp["comparisons"].get(
+                    "Claude Opus (with re-reads)", {}).get("cost", 0)
+            except Exception:
+                pass
+
+        result = {
+            "context": {
+                "usage_pct":    ctx_status.get("usage_pct", 0),
+                "total_tokens": ctx_status.get("total_tokens", 0),
+                "max_tokens":   ctx_status.get("max_tokens", 1),
+                "partitions":   _section("partitions", lambda: self.ctx.get_partition_stats()) or {},
+            },
+            "performance": perf or {},
+            "cache":       {"hit_rate": (cs or {}).get("hit_rate", 0)},
+            "swaps":       (ts.context_swaps if ts else 0),
+            "session": {
+                "turns":      self._turn_count,
+                "duration_m": (bs or {}).get("session_duration_m", 0),
+                "tokens":     (bs or {}).get("session_tokens", 0),
+                "cost_saved": opus_cost,
+            },
+            "memory": {
+                "journal_entries": _section("journal", lambda: len(self.memory.get_session_entries())) or 0,
+                "index_chunks":    (self.index.stats()["total_chunks"] if self.index else 0),
+                "status":          "Active" if self._turn_count > 0 else "Ready",
+            },
+            "model":     self.llm.model,
+            "is_active": False,
+            "continuity": _section("continuity", lambda: {
+                "score": (self.continuity._current.score
+                          if self.continuity._current else 100),
+                "grade": (self.continuity._current.grade
+                          if self.continuity._current else "A"),
+                "swaps":   self.continuity._swaps_total,
+                "enabled": self.continuity.enabled,
+                "score_history": [
+                    s.score for s in self.continuity._history[-20:]
+                ],
+            }) or {},
+            "reliability": _section("reliability", lambda: {
+                "score": self.reliability.get_reliability_score(),
+                "trend": self.reliability.get_trend(),
+                "current": self.reliability.get_current_session_health(
+                    forensics=self.forensics,
+                    continuity=self.continuity,
+                    plan_verifier=self.plan_verifier,
+                    billing=self.billing,
+                    session_start=self._session_start,
+                    turn_count=self._turn_count,
+                ),
+                "metrics":      self.reliability.get_underlying_metrics(),
+                "score_history": self.reliability.get_score_history(),
+            }) or {},
+            "tools": _section("tools", lambda: (
+                self.tools.get_tool_stats()
+                if hasattr(self.tools, "get_tool_stats") else {}
+            )) or {},
+            "router": _section("router", lambda: {
+                "enabled":      self.router.enabled,
+                "big_model":    self.router.big_model,
+                "small_model":  self.router.small_model,
+                "big_routes":   self.router.big_routes,
+                "small_routes": self.router.small_routes,
+            }) or {},
+            "scheduler":  _section("scheduler",  lambda: self._get_scheduler_info()) or {},
+            "autoforge":  _section("autoforge",  lambda: self._get_autoforge_snapshot()) or {},
+            "shipwright": _section("shipwright", lambda: self._get_shipwright_snapshot()) or {},
+            "license":    _section("license",    lambda: self._get_license_snapshot()) or {},
+        }
+        return result
 
     def _get_autoforge_snapshot(self) -> dict:
         if not getattr(self, "_autoforge", None):
@@ -3960,17 +4268,26 @@ class ForgeEngine:
             return {}
         sw = self._shipwright
         now = time.time()
-        # Cache shipwright data (git log is slow)
-        if (not hasattr(self, "_sw_cache")
-                or now - getattr(self, "_sw_cache_ts", 0) > 30):
+        # Cache for 5 minutes — git subprocess calls are pipe-hang risks on Windows
+        if (hasattr(self, "_sw_cache")
+                and now - getattr(self, "_sw_cache_ts", 0) < 300):
+            return self._sw_cache
+
+        _res: list = [{"version": sw.get_current_version()
+                        if hasattr(sw, "get_current_version") else "?"}]
+
+        def _worker():
             try:
                 version = sw.get_current_version()
+                sw._git("rev-parse", "--git-dir", check=True)
                 commits = sw.get_unreleased_commits()
-                commits = sw.classify_commits(commits)
+                # Rule-based classification only — never call LLM from snap thread
+                for c in commits:
+                    c.category, c.bump_type = sw._classify_message(c.message)
                 next_ver, bump_type = sw.compute_next_version(commits)
                 last = sw._history[-1] if sw._history else None
                 from datetime import datetime
-                self._sw_cache = {
+                _res[0] = {
                     "version": version,
                     "unreleased_count": len(commits),
                     "suggested_bump": bump_type,
@@ -3980,10 +4297,13 @@ class ForgeEngine:
                             "%Y-%m-%d") if last else "--"),
                 }
             except Exception:
-                self._sw_cache = {
-                    "version": sw.get_current_version()
-                    if hasattr(sw, "get_current_version") else "?"}
-            self._sw_cache_ts = now
+                pass
+
+        _t = threading.Thread(target=_worker, daemon=True)
+        _t.start()
+        _t.join(timeout=5.0)   # hard limit — never blocks snap_worker >5 s
+        self._sw_cache = _res[0]
+        self._sw_cache_ts = now
         return self._sw_cache
 
     def _get_license_snapshot(self) -> dict:
@@ -4006,6 +4326,22 @@ class ForgeEngine:
     def _print_exit_summary(self):
         """Print session summary on exit and record to stats."""
         elapsed = time.time() - self._session_start
+
+        # Notify all event subscribers that the session is ending.
+        # This fires telemetry bridges, cortex idle state, etc.
+        try:
+            self.event_bus.emit("session.end", {
+                "session_id": getattr(
+                    getattr(self, "memory", None), "_session_id", ""),
+                "turns": self._turn_count,
+                "tokens_prompt": getattr(self, "_total_prompt_tokens", 0),
+                "tokens_generated": self._total_generated,
+                "duration_s": round(elapsed, 1),
+                "tool_calls": getattr(self, "_session_tool_count", 0),
+                "files_modified": list(self._session_files),
+            })
+        except Exception:
+            pass
         bs = self.billing.status()
         cs = self.cache.stats()
         comp = self.billing.get_comparison()
@@ -4055,6 +4391,17 @@ class ForgeEngine:
                     log.debug("Genome updated: maturity=%.0f%%", maturity * 100)
         except Exception as e:
             log.debug("Failed to update genome: %s", e)
+
+        # Team genome: push to shared aggregate at session end (Pro/Power)
+        try:
+            if self._bpos and self._bpos.is_feature_allowed("genome_sync"):
+                ok, msg = self._bpos.push_team_genome()
+                if ok:
+                    log.debug("Team genome pushed at session end")
+                else:
+                    log.debug("Team genome push skipped: %s", msg)
+        except Exception as e:
+            log.debug("Team genome push: %s", e)
 
         # Puppet: sync genome to master
         try:

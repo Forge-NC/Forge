@@ -11,7 +11,11 @@ from forge.puppet import PuppetManager, PuppetRole
 
 
 class TestServerRequests:
-    """Test PuppetManager._server_request with mocked urllib."""
+    """Verifies PuppetManager._server_request handles success, timeout, and HTTP errors.
+
+    Mocked urllib: valid JSON response → ok=True, result dict. Exception (timeout) → ok=False.
+    HTTPError 403 → ok=False.
+    """
 
     def test_server_request_success(self, tmp_path):
         pm = PuppetManager(data_dir=tmp_path, machine_id="test1")
@@ -51,7 +55,12 @@ class TestServerRequests:
 
 
 class TestMasterActivationFlow:
-    """End-to-end master activation with mocked server."""
+    """Verifies full master activation flow: validate then activate, with persistence.
+
+    mock_server called with 'validate' then 'activate' (each exactly once) → ok=True,
+    role=MASTER, account_id='fg_flow_123', seats_total=10. Activation persists:
+    reloading PuppetManager from same data_dir restores role, account_id, master_tier, seats_total.
+    """
 
     def test_full_activation_flow(self, tmp_path):
         pm = PuppetManager(
@@ -122,7 +131,13 @@ class TestMasterActivationFlow:
 
 
 class TestPuppetGenerationFlow:
-    """Master generates puppet passports from seat pool."""
+    """Verifies generate_puppet_passport() creates passport files with correct fields and seat tracking.
+
+    Generated passport has role='puppet', puppet_name, master_id, account_id, seat_count=0
+    (puppets cannot sub-distribute). Each generation increments _seats_used. With seats_total=3
+    (1 master + 2 puppet), third generation returns None. Passport includes parent_passport_id,
+    master_id, master_signature for chain-of-trust verification.
+    """
 
     def test_generate_creates_file(self, tmp_path):
         pm = PuppetManager(
@@ -192,7 +207,12 @@ class TestPuppetGenerationFlow:
 
 
 class TestTierFetching:
-    """Test server tier fetching with fallback."""
+    """Verifies tier config fallback when license server is unavailable.
+
+    _FALLBACK_TIERS has community/pro/power with seats 1/3/10. TIERS module variable
+    works for backward compat. get_tiers() returns a dict with >=3 tiers (uses fallback
+    when server is not running).
+    """
 
     def test_fallback_tiers_available(self):
         from forge.passport import _FALLBACK_TIERS
@@ -224,7 +244,11 @@ class TestTierFetching:
 
 
 class TestPassportV2Fields:
-    """Test extended Passport dataclass fields."""
+    """Verifies Passport dataclass v2 fields and backward compatibility defaults.
+
+    v2 Passport with role, passport_id, origin_signature, seat_count → all accessible.
+    Old-style Passport (no v2 fields) → role='', passport_id='', max_activations=1.
+    """
 
     def test_passport_has_v2_fields(self):
         from forge.passport import Passport

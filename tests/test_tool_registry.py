@@ -22,6 +22,13 @@ def registry():
 # ── Basic registration ──
 
 class TestRegistration:
+    """Verifies ToolRegistry correctly lists tools and exposes their metadata.
+
+    list_tools() returns all registered names. get_description() returns the description
+    string or '' for unknowns. get_ollama_tools() returns dicts with type='function' and
+    function.name + function.description fields — one per registered tool.
+    """
+
     def test_list_tools(self, registry):
         names = registry.list_tools()
         assert "greet" in names
@@ -44,6 +51,14 @@ class TestRegistration:
 # ── Tool calling ──
 
 class TestToolCall:
+    """Verifies call() invokes registered tools and returns ToolResult with success/output.
+
+    'greet' with name='World' → success=True, output='Hello, World!'. 'add' with a=3, b=7
+    → output='10' (stringified). Unknown tool → success=False, 'unknown tool' in output.
+    Failing tool (raises ValueError) → success=False, 'boom' in output.
+    ToolResult str() returns the output string directly.
+    """
+
     def test_call_success(self, registry):
         result = registry.call("greet", {"name": "World"})
         assert result.success is True
@@ -72,6 +87,13 @@ class TestToolCall:
 # ── Per-tool analytics ──
 
 class TestToolAnalytics:
+    """Verifies per-tool call statistics track successes, failures, and latency.
+
+    No calls → stats == {}. After 2 greet calls: greet.calls==2, successes==2, failures==0.
+    Two fail calls: fail.failures==2, successes==0. avg_ms is non-negative after any call.
+    Unknown tool calls don't add an entry to stats (only known tools are tracked).
+    """
+
     def test_stats_empty_initially(self, registry):
         stats = registry.get_tool_stats()
         assert stats == {}  # No calls yet
@@ -117,6 +139,12 @@ class TestToolAnalytics:
 # ── Audit dict ──
 
 class TestToolRegistryAudit:
+    """Verifies to_audit_dict() returns complete audit structure with schema version and stats.
+
+    After one greet call: schema_version==1, tool_count==3 (all registered), 'greet' in
+    tool_names and in stats. Empty registry → tool_count==0, stats=={}.
+    """
+
     def test_audit_dict_structure(self, registry):
         registry.call("greet", {"name": "test"})
         audit = registry.to_audit_dict()

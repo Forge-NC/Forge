@@ -580,6 +580,8 @@ def print_help():
         ("Codebase Analysis", [
             ("/scan [path]", "Scan codebase structure (classes, functions, routes, tables)"),
             ("/digest [file]", "Show digest stats, or detail for a specific file"),
+            ("/dedup", "Show response deduplication status"),
+            ("/dedup on|off", "Enable/disable duplicate response detection"),
         ]),
         ("Memory & Search", [
             ("/memory", "Show all memory subsystem status"),
@@ -588,6 +590,12 @@ def print_help():
             ("/search <query>", "Quick semantic search (file list)"),
             ("/index [path]", "Index codebase for semantic search"),
             ("/tasks", "Show task state and progress"),
+        ]),
+        ("Planning", [
+            ("/plan", "Show plan mode status"),
+            ("/plan on|off", "Enable/disable multi-step planning"),
+            ("/plan auto", "Auto-plan complex tasks (threshold-based)"),
+            ("/plan verify", "Show/set plan step verification mode"),
         ]),
         ("Analytics & Dashboard", [
             ("/stats", "Show full analytics: performance, tools, cost"),
@@ -618,6 +626,7 @@ def print_help():
             ("/crucible on|off", "Enable/disable threat scanning"),
             ("/crucible log", "Show threat detection log"),
             ("/crucible canary", "Check honeypot canary integrity"),
+            ("/threats", "Show threat intelligence status and pattern counts"),
         ]),
         ("Forensics & Provenance", [
             ("/forensics", "Show session forensics summary"),
@@ -645,6 +654,18 @@ def print_help():
             ("/ami reset", "Clear learned failure patterns"),
             ("/ami stats", "Detailed retry/recovery analytics"),
         ]),
+        ("Reliability & Assurance", [
+            ("/break", "Run Forge Break Suite (reliability + fingerprint)"),
+            ("/break --autopsy", "Break suite + detailed failure-mode analysis"),
+            ("/break --self-rate", "Model grades its own responses (calibration score)"),
+            ("/break --assure", "Full break + assurance in one pass (combined Matrix score)"),
+            ("/break --share", "Run and upload signed report to the Matrix"),
+            ("/stress", "Run minimal 3-scenario stress suite (CI-compatible)"),
+            ("/assure", "Run AI assurance scenario suite (31 scenarios, 6 categories)"),
+            ("/assure --share", "Run and upload report to assurance server"),
+            ("/assure list", "List saved assurance reports"),
+            ("/assure show <id>", "Show a saved assurance report"),
+        ]),
         ("Audit & Benchmarks", [
             ("/export", "Export audit bundle (zip with manifest + hashes)"),
             ("/export --redact", "Export with sensitive content redacted"),
@@ -653,6 +674,20 @@ def print_help():
             ("/benchmark results", "Show historical benchmark results"),
             ("/benchmark compare", "Compare last two benchmark runs"),
             ("/stats reliability", "Show cross-session reliability score"),
+        ]),
+        ("Release & Licensing", [
+            ("/ship", "Show Shipwright release manager status"),
+            ("/ship dry", "Preview next release (version, changelog)"),
+            ("/ship preflight", "Run preflight checks before release"),
+            ("/ship go", "Execute release (tag, commit, optional push)"),
+            ("/autocommit", "Show AutoForge auto-commit status"),
+            ("/autocommit on|off", "Enable/disable smart auto-commit"),
+            ("/license", "Show current license tier and features"),
+            ("/license tiers", "Compare available license tiers"),
+            ("/license activate <file>", "Activate a license passport"),
+        ]),
+        ("Fleet Management", [
+            ("/puppet", "Show fleet puppet manager status"),
         ]),
         ("Plugins", [
             ("/plugins", "Show loaded plugins and their status"),

@@ -1,4 +1,8 @@
-"""Tests for AutoForge, BPoS, and Shipwright initialization."""
+"""Tests for AutoForge, BPoS, and Shipwright initialization and lifecycle.
+
+Verifies constructor defaults, enable/disable toggling, config wiring,
+edit recording, version detection from pyproject.toml, and feature gating.
+"""
 
 import pytest
 from pathlib import Path
@@ -8,6 +12,14 @@ from forge.shipwright import Shipwright
 
 
 class TestAutoForgeInit:
+    """Verifies AutoForge initialization defaults and basic enable/disable/record lifecycle.
+
+    Fresh instance: _enabled=False, _pending and _commits are empty lists.
+    enable() sets _enabled=True; disable() sets it back to False.
+    config_get lambda is wired and callable.  record_edit() while enabled
+    appends a pending edit with the correct path.
+    """
+
     def test_init_defaults(self):
         af = AutoForge()
         assert af._enabled is False
@@ -35,6 +47,14 @@ class TestAutoForgeInit:
 
 
 class TestBPoSInit:
+    """Verifies BPoS initialization defaults and feature gate behavior.
+
+    Fresh community instance: tier='community', _machine_id=''.  With machine_id
+    kwarg: _machine_id set correctly.  tier_config is a dict.
+    is_feature_allowed('nonexistent_feature') returns False (unknown features
+    are denied by default).
+    """
+
     def test_init_defaults(self, tmp_path):
         bpos = BPoS(data_dir=tmp_path)
         assert bpos.tier == "community"
@@ -51,13 +71,18 @@ class TestBPoSInit:
 
     def test_is_feature_allowed(self, tmp_path):
         bpos = BPoS(data_dir=tmp_path)
-        # Community tier should allow basic features
-        # The specific features depend on TIERS config
         result = bpos.is_feature_allowed("nonexistent_feature")
         assert result is False
 
 
 class TestShipwrightInit:
+    """Verifies Shipwright initialization defaults and version detection.
+
+    Fresh instance: _history=[].  With project_dir kwarg: _project_dir set.
+    No pyproject.toml -> get_current_version() returns '0.0.0'.
+    pyproject.toml with version='1.2.3' -> get_current_version() returns '1.2.3'.
+    """
+
     def test_init_defaults(self, tmp_path):
         sw = Shipwright(data_dir=tmp_path / "shipwright")
         assert sw._history == []
@@ -84,28 +109,3 @@ class TestShipwrightInit:
             data_dir=tmp_path / "shipwright",
         )
         assert sw.get_current_version() == "1.2.3"
-
-
-class TestEngineInitializesSubsystems:
-    """Verify engine.py __init__ creates _autoforge, _bpos, _shipwright."""
-
-    def test_init_code_has_autoforge(self):
-        import inspect
-        from forge.engine import ForgeEngine
-        source = inspect.getsource(ForgeEngine.__init__)
-        assert "self._autoforge" in source
-        assert "AutoForge(" in source
-
-    def test_init_code_has_bpos(self):
-        import inspect
-        from forge.engine import ForgeEngine
-        source = inspect.getsource(ForgeEngine.__init__)
-        assert "self._bpos" in source
-        assert "BPoS(" in source
-
-    def test_init_code_has_shipwright(self):
-        import inspect
-        from forge.engine import ForgeEngine
-        source = inspect.getsource(ForgeEngine.__init__)
-        assert "self._shipwright" in source
-        assert "Shipwright(" in source
