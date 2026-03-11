@@ -29,14 +29,8 @@ forge_origin.pub          # Public key is embedded in passport.py
 secrets.yaml
 secrets.json
 
-# Server runtime data — never commit any of this
-# origin_key.json holds the Ed25519 private key and must never be in git
-server/data/
-server/rate_limits/
-server/check_*.txt
-server/upload_*.txt
-server/upload_*.log
-server/winscp_*.log
+# Server — deployed separately, never in the public repo
+server/
 
 # Scratch/junk files
 report.md
