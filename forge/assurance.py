@@ -39,7 +39,7 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 # Forge version (imported lazily to avoid circular imports)
-_FORGE_VERSION = "0.9.0"
+_FORGE_VERSION = "0.1.0"
 
 # ── Scenario library ──────────────────────────────────────────────────────────
 
