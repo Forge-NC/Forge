@@ -1720,7 +1720,7 @@ class CommandHandler:
                     import requests
                     url = self.engine.config.get("telemetry_url", "")
                     if not url:
-                        url = "https://dirt-star.com/Forge/token_admin.php"
+                        url = "https://forge-nc.dev/token_admin.php"
                     else:
                         url = url.replace("telemetry_receiver.php",
                                           "token_admin.php")
@@ -1797,7 +1797,7 @@ class CommandHandler:
                 import requests
                 url = self.engine.config.get("telemetry_url", "")
                 if not url:
-                    url = "https://dirt-star.com/Forge/token_admin.php"
+                    url = "https://forge-nc.dev/token_admin.php"
                 else:
                     url = url.replace("telemetry_receiver.php",
                                       "token_admin.php")

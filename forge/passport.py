@@ -122,7 +122,7 @@ _FALLBACK_TIERS = {
 # Cache for server-fetched tiers
 _cached_tiers: Optional[dict] = None
 
-PASSPORT_API_URL = "https://dirt-star.com/Forge/passport_api.php"
+PASSPORT_API_URL = "https://forge-nc.dev/passport_api.php"
 
 
 def get_tiers() -> dict:

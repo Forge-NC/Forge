@@ -3,7 +3,7 @@
 
 Pulls from multiple free, open-source threat intelligence sources and merges
 them into a single validated signatures.json for bundling with Forge and
-serving from dirt-star.com/Forge/signatures.json.
+serving from forge-nc.dev/signatures.json.
 
 Sources:
   - gitleaks (222 credential/secret patterns)         MIT License

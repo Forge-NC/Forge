@@ -91,10 +91,10 @@ DEFAULTS = {
     "behavioral_fingerprint": True,       # run 30-probe suite at session start (background)
 
     # Proof of Inference (Phase 3)
-    "challenge_url": "https://dirt-star.com/Forge/challenge_server.php",
+    "challenge_url": "https://forge-nc.dev/challenge_server.php",
 
     # AI Assurance (Phase 4)
-    "assurance_url": "https://dirt-star.com/Forge/assurance_verify.php",
+    "assurance_url": "https://forge-nc.dev/assurance_verify.php",
     "auto_assurance": False,          # run /assure automatically on session.end
     "assurance_self_rate": False,     # ask model to rate own confidence + explain failures
 
@@ -122,7 +122,7 @@ DEFAULTS = {
 
     # Threat Intelligence
     "threat_signatures_enabled": True,    # load external signature database
-    "threat_signatures_url": "https://dirt-star.com/Forge/signatures.json",  # URL for signature updates
+    "threat_signatures_url": "https://forge-nc.dev/signatures.json",  # URL for signature updates
     "threat_auto_update": True,           # auto-check for signature updates on startup
 
     # Adaptive Model Intelligence

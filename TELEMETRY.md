@@ -46,7 +46,7 @@ Telemetry bundles use the same `AuditExporter` as `/export --redact`:
 
 ## Endpoint
 
-Bundles are uploaded to `https://dirt-star.com/Forge/telemetry_receiver.php` via HTTPS POST.
+Bundles are uploaded to `https://forge-nc.dev/telemetry_receiver.php` via HTTPS POST.
 
 ## Authentication
 

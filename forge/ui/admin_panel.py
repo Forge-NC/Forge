@@ -1139,7 +1139,7 @@ class AdminPanelDialog:
         # Register server-side (best-effort, background)
         def _do_register():
             admin_token = self._config.get("telemetry_token", "")
-            url = "https://dirt-star.com/Forge/token_admin.php"
+            url = "https://forge-nc.dev/token_admin.php"
             try:
                 import urllib.request
                 payload = json.dumps({
@@ -1202,7 +1202,7 @@ class AdminPanelDialog:
     def _do_refresh_tokens(self):
         """Fetch token list from server (background thread)."""
         admin_token = self._config.get("telemetry_token", "")
-        url = "https://dirt-star.com/Forge/token_admin.php"
+        url = "https://forge-nc.dev/token_admin.php"
         try:
             import urllib.request
             req = urllib.request.Request(
@@ -1343,7 +1343,7 @@ class AdminPanelDialog:
 
         def _do():
             admin_token = self._config.get("telemetry_token", "")
-            url = "https://dirt-star.com/Forge/token_admin.php"
+            url = "https://forge-nc.dev/token_admin.php"
             try:
                 import urllib.request
                 payload = json.dumps({
@@ -1391,7 +1391,7 @@ class AdminPanelDialog:
 
         def _do():
             admin_token = self._config.get("telemetry_token", "")
-            url = "https://dirt-star.com/Forge/token_admin.php"
+            url = "https://forge-nc.dev/token_admin.php"
             try:
                 import urllib.request
                 payload = json.dumps({

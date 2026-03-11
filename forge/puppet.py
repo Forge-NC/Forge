@@ -39,7 +39,7 @@ log = logging.getLogger(__name__)
 STALE_THRESHOLD_S = 86400
 
 # Server endpoint for passport operations
-DEFAULT_PASSPORT_API = "https://dirt-star.com/Forge/passport_api.php"
+DEFAULT_PASSPORT_API = "https://forge-nc.dev/passport_api.php"
 
 
 class PuppetRole(enum.Enum):

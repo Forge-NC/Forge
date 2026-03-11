@@ -78,7 +78,7 @@ Every Forge install is a measurement node they cannot buy.
 - BPoS: Ed25519 passport signing, machine fingerprints, tier gates — COMPLETE
 - Crucible: runtime output scanning for threats — COMPLETE, direct engine coupling
 - Shipwright + AutoForge: release management + auto-commit — COMPLETE, direct coupling
-- Fleet analytics dashboard: live at dirt-star.com/Forge/analytics.php
+- Fleet analytics dashboard: live at forge-nc.dev/analytics.php
 - Telemetry receiver: signed zip bundles — COMPLETE
 - 1,318 tests, 0 skip/xfail
 - Models: qwen3:14b (primary), qwen3:4b (small), nomic-embed-text (embeddings)
@@ -433,7 +433,7 @@ not just whether they pass. Engineers building on top of models need this inform
 
     forge break --model qwen3:14b --share
 
-Generates a report artifact and uploads to dirt-star.com/Forge/reports/ (reuses existing
+Generates a report artifact and uploads to forge-nc.dev/reports/ (reuses existing
 telemetry infrastructure + BPoS signing). Returns a short URL. Developers can post this link
 directly. Drives organic comparison posts ("I ran Forge against 6 models — results:").
 
@@ -442,7 +442,7 @@ Viewing is public. Submitting requires a valid BPoS passport (prevents spam/spoo
 
 ### Reliability Scoreboard — the viral surface
 
-This is the most important page on dirt-star.com/Forge/:
+This is the most important page on forge-nc.dev/:
 
     Forge Reliability Rankings
     Community-generated · Cryptographically signed · Tamper-evident
