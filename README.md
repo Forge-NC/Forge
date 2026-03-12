@@ -117,7 +117,7 @@ All threats logged with severity and full forensic context. The Crucible™ scan
 ## Quick Start
 
 ```bash
-git clone https://github.com/ForgeNC/Forge.git
+git clone https://github.com/Forge-NC/Forge.git
 cd Forge
 python install.py          # Creates venv, installs deps, creates desktop shortcut
 .venv/Scripts/forge        # Windows
