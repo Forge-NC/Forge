@@ -5,26 +5,32 @@
 <h1 align="center">Forge</h1>
 
 <p align="center">
-  <strong>Local AI coding assistant and AI auditing platform.</strong><br>
-  No cloud. No API keys. No data leaves your machine.
+  <strong>AI you can verify, not just trust.</strong>
 </p>
 
 <p align="center">
   <a href="https://forge-nc.dev">Website</a> &middot;
   <a href="https://forge-nc.dev/docs.php">Documentation</a> &middot;
-  <a href="#quick-start">Quick Start</a> &middot;
-  <a href="#license">License</a>
+  <a href="https://forge-nc.dev/matrix.php">The Matrix</a> &middot;
+  <a href="#quick-start">Quick Start</a>
 </p>
 
 ---
 
-Forge is two things in one:
+AI tools help you write code. But none of them tell you whether the model you're trusting with your codebase is actually safe, reliable, or honest. You're supposed to just... trust it.
 
-1. **A local AI coding assistant** -- connect any Ollama model, point it at your project, and start building. Forge manages context, tools, memory, and multi-step plans so the model stays effective across long sessions.
+Forge is a local AI coding assistant that also audits the AI it runs. Write code with any Ollama model. Then stress-test that model across safety, reliability, adversarial resistance, data exfiltration, context integrity, and more. Get a cryptographically signed report of exactly what happened. Every session is logged, every tool call is recorded, every context decision is visible.
 
-2. **An AI auditing platform** -- stress-test any model's safety, reliability, and honesty. Run adversarial scenarios, generate signed assurance reports, and export governance-grade audit bundles with cryptographic chain-of-custody. Know exactly how your model behaves before you trust it with real work.
+**The [Forge Matrix](https://forge-nc.dev/matrix.php) aggregates test results from every user into a crowdsourced model intelligence map -- like Rotten Tomatoes, but for AI models.** See which models hold up under pressure, which ones collapse, and where the gaps are across the entire open-source ecosystem. Users run the tests. The data speaks for itself.
 
-Both run entirely on your hardware. 79,000+ lines of Python. 1,280 tests. 58 commands. Zero telemetry by default.
+Everything runs on your hardware. Nothing leaves your machine unless you opt in.
+
+```
+git clone https://github.com/Forge-NC/Forge.git
+cd Forge && python install.py
+```
+
+79,000+ lines of Python. 1,280 tests. 58 commands. Zero telemetry by default.
 
 ## The Coding Assistant
 
