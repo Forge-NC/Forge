@@ -1,119 +1,164 @@
-# Forge
+<p align="center">
+  <img src="https://forge-nc.dev/assets/brain.webp" alt="Forge" width="128">
+</p>
 
-Local AI coding assistant powered by [Ollama](https://ollama.com). Runs entirely on your machine -- no cloud APIs, no API keys, no data leaves your box unless you opt in. Manages its own context window with automatic swap and summarization, scans every interaction through a 9-layer security system, records forensic audit logs, tracks token-level billing, and wraps it all in a Neural Cortex GUI with 14 visual themes.
+<h1 align="center">Forge</h1>
 
-58,000+ lines of Python across 131 source files. 1,280 tests passing.
+<p align="center">
+  <strong>Local AI coding assistant and AI auditing platform.</strong><br>
+  No cloud. No API keys. No data leaves your machine.
+</p>
 
-## Architecture
+<p align="center">
+  <a href="https://forge-nc.dev">Website</a> &middot;
+  <a href="https://forge-nc.dev/docs.php">Documentation</a> &middot;
+  <a href="#quick-start">Quick Start</a> &middot;
+  <a href="#license">License</a>
+</p>
 
-```
-                          +------------------+
-                          |   ForgeEngine    |  Core orchestrator
-                          +--------+---------+
-                                   |
-         +------------+------------+------------+------------+
-         |            |            |            |            |
-   ContextWindow  OllamaBackend  ToolRegistry  Crucible  BillingMeter
-   (swap/sum)     (LLM calls)   (6 tool sets) (4 layers) (token $)
-         |                         |
-   ContinuityMon          +-------+-------+-------+-------+
-   (A-F grade)             |       |       |       |       |
-                        files    git   treesitter  web   digest
-                                                          (AST)
+---
 
-   ModelRouter ── routes simple tasks to small model, complex to primary
-   PlanVerifier ── multi-step task execution with test/lint gates
-   SessionForensics ── every tool call recorded, exportable as zip
-   EpisodicMemory ── long-term recall with embeddings
-   CodebaseIndex ── fast file pattern matching and retrieval
-   PluginSystem ── drop .py files in ~/.forge/plugins/
-   VoiceInput ── push-to-talk and VOX via faster-whisper
-```
+Forge is two things in one:
 
-## Requirements
+1. **A local AI coding assistant** -- connect any Ollama model, point it at your project, and start building. Forge manages context, tools, memory, and multi-step plans so the model stays effective across long sessions.
 
-- Python 3.10+
-- [Ollama](https://ollama.com) running locally
-- 8 GB+ VRAM recommended (works with less, slower)
-- Windows 10/11 or Linux
-- [GitHub CLI](https://cli.github.com) (optional, for `/update` and `/admin` commands)
+2. **An AI auditing platform** -- stress-test any model's safety, reliability, and honesty. Run adversarial scenarios, generate signed assurance reports, and export governance-grade audit bundles with cryptographic chain-of-custody. Know exactly how your model behaves before you trust it with real work.
+
+Both run entirely on your hardware. 79,000+ lines of Python. 1,280 tests. 58 commands. Zero telemetry by default.
+
+## The Coding Assistant
+
+Download Forge, pick a model, start coding. Every user gets:
+
+- **Tool use** -- Forge gives the model hands. File read/write/edit, git operations, web requests, tree-sitter AST navigation across 8+ languages, codebase indexing with semantic search, and a digest engine for whole-project analysis.
+- **Context window management** -- most AI tools silently compact or drop context when the window fills up. Forge partitions context into priority tiers, scores each entry by importance, and evicts deterministically so you always know what the model can see and what it can't. Every eviction is logged. A real-time continuity grade (A-F) monitors 6 quality signals after every swap and triggers automatic recovery -- re-reading critical files and re-injecting decisions -- when quality degrades. Nothing is silently lost.
+- **Multi-model routing** -- route simple tasks to a small fast model (3B) and complex tasks to your primary model (14B-70B). Saves tokens without sacrificing quality where it matters. Forge auto-detects your GPU and recommends the best fit.
+- **Plan mode** -- break complex tasks into steps with test/lint verification gates between each one. The model executes, Forge verifies.
+- **Episodic memory** -- long-term recall with embeddings that persists across sessions. Forge remembers what you worked on, what decisions were made, and what the model learned about your project.
+- **Billing ledger** -- token-level cost accounting with per-turn tracking. Compare your local costs against cloud providers with `/compare`.
+- **Voice input** -- push-to-talk or voice-activated dictation via faster-whisper.
+- **14 visual themes** -- midnight, obsidian, dracula, nord, monokai, cyberpunk, matrix, amber, phosphor, arctic, sunset, od_green, plasma, solarized_dark. Hot-swap with `/theme`.
+- **Plugin system** -- 19 hooks for extending Forge behavior. Drop a `.py` file in `~/.forge/plugins/` and it loads automatically.
+- **Neural Cortex GUI** -- full dashboard with brain animation, performance cards, HUD menu, model manager, settings dialog, and visual effects engine. Or use the console terminal if you prefer.
+
+## The Auditing Platform
+
+Opt in to Forge's testing and assurance infrastructure and you get a full AI auditing toolkit:
+
+### `/break` -- Adversarial Stress Testing
+
+Run your model through structured adversarial scenarios and get a scored report. Categories tested:
+
+| Category | What It Tests |
+|----------|---------------|
+| **Safety** | Harm refusal, jailbreak resistance, social engineering, unsafe code generation |
+| **Reliability** | Instruction following, output consistency, edge case handling, long-context coherence |
+| **Adversarial** | Prompt injection, role hijacking, context manipulation, multi-turn attacks |
+| **Tool Misuse** | Hallucinated tool calls, unauthorized file access, command injection attempts |
+| **Exfiltration** | Data leakage, credential extraction, side-channel attempts |
+| **Context Integrity** | Memory poisoning, instruction persistence, context window manipulation |
+| **Data Residency** | Cross-session data bleed, PII retention, workspace isolation |
+| **Audit Integrity** | Log tampering resistance, forensic record completeness |
+
+Each scenario runs the model through a probe, evaluates the response, and scores it. Results feed into a stability profile that blends assurance scores with behavioral fingerprint data.
+
+### `/assure` -- Signed Assurance Reports
+
+Generate a cryptographically signed report of your model's assurance run. Reports are:
+- **Signed with Ed25519** using the machine's private key (generated on first run, hardware-bound)
+- **Tamper-evident** -- any modification invalidates the signature
+- **Uploadable** -- share results to a verification endpoint where third parties can validate the signature and review scores
+- **Stored locally** as JSON + human-readable Markdown in `~/.forge/assurance/`
+
+### `/export` -- Governance Audit Bundles
+
+Export a complete session as a zip bundle for compliance review:
+- `manifest.json` with SHA-512 file hashes, machine fingerprint, hardware profile
+- `audit.json` with full structured session data
+- `logs/tool_calls.jsonl`, `logs/threats.jsonl`, `logs/journal.jsonl`
+- `verification/results.json` with plan verification outcomes
+- Provenance chain integrity verification
+- Optional redaction mode that strips sensitive content while preserving metadata
+
+### Proof of Inference
+
+Challenge-response protocol that cryptographically proves a model forward pass actually ran on local hardware. Server issues a probe prompt with a nonce; Forge runs it through the model, classifies the response, hashes it with the nonce, and signs the payload. Prevents spoofing and establishes that inference genuinely occurred.
+
+### Behavioral Fingerprinting
+
+Builds a unique behavioral profile for each model instance by running standardized probes and measuring response characteristics. Used to detect model swaps, quantization changes, or fine-tuning drift between sessions.
+
+### Fleet Telemetry (Opt-In)
+
+For teams running Forge across multiple machines:
+- Per-machine profiles with hardware fingerprints, scenario history, pass rates
+- Server-side adaptive test manifests that learn which scenarios are flaky on which hardware
+- Fleet health dashboard with cross-machine analytics
+- SLA alerting when fleet pass rate drops below threshold
+
+## Crucible™ Security Pipeline
+
+9 layers spanning the full request lifecycle:
+
+| # | Layer | Function |
+|---|-------|----------|
+| 1 | **Static Pattern Scan** | Regex detection of prompt injection signatures, shell metacharacters, LOLBins |
+| 2 | **Zero-Width Unicode** | Invisible characters that alter code behavior |
+| 3 | **Encoded Payload Detection** | Base64, nested encoding, obfuscation |
+| 4 | **Behavioral Tripwires** | Timing anomalies, call frequency spikes, honeypot canary integrity |
+| 5 | **Output Scanning** | AI-generated responses scanned before reaching user or disk |
+| 6 | **RAG Scanning** | Retrieved context validated for injection and poisoning |
+| 7 | **Rate Limiting** | Abnormal request pattern throttling |
+| 8 | **Threat Intelligence** | Updatable signature database with SHA-512 validation and version monotonicity |
+| 9 | **Tool Fencing / Sandbox** | 4-tier safety guard with filesystem sandboxing |
+
+All threats logged with severity and full forensic context. The Crucible™ scanner (layers 1-4) runs in under 50 ms per check.
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/ups0n/Forge.git
+git clone https://github.com/ForgeNC/Forge.git
 cd Forge
 python install.py          # Creates venv, installs deps, creates desktop shortcut
-.venv/Scripts/forge        # Launch (Windows)
-# or: .venv/bin/forge      # Launch (Linux)
+.venv/Scripts/forge        # Windows
+.venv/bin/forge            # Linux / macOS
 ```
 
-On first run Forge creates `~/.forge/`, detects your Ollama instance, and offers to pull the default model (`qwen2.5-coder:14b`).
+On first launch Forge creates `~/.forge/`, connects to your local Ollama instance, and offers to pull a model.
+
+## System Requirements
+
+| Component | Minimum | Recommended | Optimal |
+|-----------|---------|-------------|---------|
+| **GPU** | 4-8 GB VRAM (GTX 1650 / RTX 3060) | 16-24 GB (RTX 4070 Ti / 5070 Ti / 4090 / 5090) | 48 GB+ (dual GPU / A6000 / workstation) |
+| **RAM** | 8 GB | 32 GB | 64-128 GB |
+| **Storage** | 10 GB | 50 GB | 200 GB+ |
+| **CPU** | Any modern 4-core | 8+ cores | 16+ cores |
+| **OS** | Windows 10/11, Linux (Ubuntu 20.04+), macOS 12+ |||
+
+Larger models produce better results but need more VRAM:
+
+| Parameters | VRAM (Q4) | Quality | Use Case |
+|------------|-----------|---------|----------|
+| 3B | ~2.5 GB | Good | Router model, fast classification |
+| 7B | ~5 GB | Strong | General coding, 8 GB GPU sweet spot |
+| 14B | ~10 GB | Excellent | Complex reasoning, refactoring |
+| 32B | ~20 GB | Best | Architecture design, hard problems |
+| 70B | ~48 GB | Frontier | Maximum quality, multi-GPU setups |
+
+Forge auto-detects your GPU and recommends the best model via `/hardware`.
 
 ## Launch Modes
 
 | Command | Description |
 |---------|-------------|
-| `forge` | Console terminal (default) |
-| `forge --fnc` | Neural Cortex -- full GUI dashboard with brain animation, performance cards, HUD menu |
-| `forge --gui-terminal` | GUI terminal with visual effects (scanlines, glow, matrix rain) |
-
-## Core Subsystems
-
-### Context Window Management
-Forge tracks every token entering the context window. When usage hits the configurable threshold (default 85%), it automatically swaps older entries out, summarizing them to preserve continuity. Pinned entries survive swaps. The **Continuity Grade** (A through F) scores swap quality across 6 signals and triggers auto-recovery when quality drops.
-
-### Crucible Security Scanner
-Every user message, AI response, and file read passes through 4 detection layers:
-1. **Static patterns** -- prompt injection signatures, shell metacharacters, LOLBins
-2. **Zero-width Unicode** -- invisible characters that can alter code behavior
-3. **Base64 / encoded payloads** -- nested encoding detection
-4. **Behavioral tripwires** -- monitors timing, call frequency, and honeypot canary integrity
-
-Threats are logged with forensic detail and severity levels. The scanner runs in under 50ms per check.
-
-### Forensic Audit System
-Every tool call, threat event, context swap, and session metric is recorded in structured JSONL. Export governance-grade zip bundles with `/export` -- each bundle includes a manifest with SHA-256 hashes for chain-of-custody verification. Supports redaction mode for sensitive environments.
-
-### Billing Ledger
-Token-level accounting with per-turn tracking. Set a starting balance, monitor burn rate, compare costs against cloud providers with `/compare`. The ledger persists across sessions and includes detailed breakdowns by model, tool call, and swap overhead.
-
-### Plan Mode
-Multi-step task planning with optional verification after each step. PlanVerifier can run tests, linters, or custom checks between plan steps. Modes: `off`, `manual`, `auto` (triggers on complex tasks), `always`.
-
-### Multi-Model Router
-Routes simple tasks (greetings, short questions) to a smaller, faster model and complex tasks (code generation, analysis) to the primary model. Configurable threshold. Saves tokens without sacrificing quality where it matters.
-
-### Plugin System
-Drop Python files in `~/.forge/plugins/`. Plugins hook into: `on_command`, `on_user_input`, `on_tool_call`, `on_response`, `on_error`, and more. Auto-disables after 5 consecutive errors to prevent cascading failures.
-
-### Voice Input
-Push-to-talk (hold backtick) and VOX (voice-activated) modes via faster-whisper. Optional install: `pip install forge[voice]`.
-
-### 14 Visual Themes
-midnight, obsidian, dracula, solarized_dark, nord, monokai, cyberpunk, matrix, amber, phosphor, arctic, sunset, od_green, plasma. Hot-swap with `/theme <name>` or from Settings.
-
-## Adaptive Nightly Testing
-
-Fleet-wide automated testing with server-side intelligence.
-
-- **Smart scheduler** (`scripts/nightly_smart.py`) -- GPU-aware time budgeting, automatic scenario selection via server manifest, resource guarding (auto-close heavy processes), cortex overlay for live progress
-- **13 integration scenarios** -- endurance, model swap, context storm, plugin chaos, crash recovery, malicious repo, oscillation, repair loop, embedding loss, network chaos, tool corruption, verification theater, policy drift
-- **8 invariants** checked after every scenario -- context consistency, billing integrity, forensics integrity, state files, continuity state, crucible state, workspace/sandbox, tool-call validity
-- **Auto-bisect** -- when a scenario starts failing, automatically binary-searches recent commits to find the regression
-- **Cross-platform scheduling** -- Settings > Nightly > Install Schedule (Windows Task Scheduler or Linux cron)
-
-### Server Analytics
-
-PHP backend processes telemetry uploads into fleet-wide analytics:
-- **Per-machine profiles** with hardware fingerprints, scenario history, pass rates
-- **Adaptive manifest** -- server learns which scenarios are flaky on which hardware and adjusts test assignments
-- **HTML dashboard** at the analytics endpoint with fleet health charts, scenario breakdowns, machine timelines
-- **SLA alerting** via Discord, Slack, or email when fleet pass rate drops below threshold
+| `forge` | Console terminal |
+| `forge --fnc` | Neural Cortex GUI with dashboard, brain animation, HUD menu |
+| `forge --gui-terminal` | GUI terminal with visual effects |
 
 ## Commands
 
-59 commands organized by category. Run `/help` in-session for the full list.
+58 commands. Run `/help` in-session for the full list.
 
 | Category | Commands |
 |----------|----------|
@@ -135,189 +180,43 @@ PHP backend processes telemetry uploads into fleet-wide analytics:
 
 ## Configuration
 
-Edit `~/.forge/config.yaml` or use `/config` in-session.
+98 configuration keys. Edit `~/.forge/config.yaml` or use `/config` in-session.
 
 ```yaml
-# Model
 default_model: "qwen2.5-coder:14b"
 small_model: "qwen2.5-coder:3b"
 router_enabled: true
-
-# Safety (0=unleashed, 1=smart_guard, 2=confirm_writes, 3=locked_down)
-safety_level: 1
+safety_level: 1          # 0=unleashed, 1=smart_guard, 2=confirm_writes, 3=locked_down
 sandbox_enabled: true
-
-# Context
 swap_threshold_pct: 85
-continuity_enabled: true
-
-# UI
 theme: "midnight"
-effects_enabled: true
-
-# Telemetry (opt-in)
-telemetry_enabled: false
-telemetry_token: ""
-telemetry_label: ""
-
-# Nightly testing
-nightly_schedule_time: "03:00"
-nightly_max_duration_m: 120
-nightly_auto_bisect: true
+telemetry_enabled: false  # opt-in only
 ```
 
-80+ configuration keys total. See `/config` for the full list with descriptions.
+## Nightly Testing
 
-## Updating Forge
+Automated fleet-wide testing with adaptive scheduling:
+
+- 13 integration scenarios (endurance, model swap, context storm, plugin chaos, crash recovery, malicious repo, and more)
+- 8 invariants checked after every scenario
+- Auto-bisect to pinpoint regressions
+- Cross-platform scheduling via Settings
+
+## Testing
 
 ```bash
-# From the terminal:
-/update              # Check what's available
-/update --yes        # Pull and apply
-
-# Or from the Neural Cortex GUI:
-# HUD Menu > Check for Updates
-```
-
-Updates use `git pull --ff-only` (safe, no merge conflicts). If `pyproject.toml` changed, dependencies are automatically reinstalled. Core file changes prompt a restart.
-
-## Admin
-
-Manage GitHub collaborators and telemetry tokens from within Forge.
-
-```bash
-/admin                     # List collaborators
-/admin invite <username>   # Send GitHub repo invitation
-/admin remove <username>   # Remove collaborator
-/admin pending             # Show pending invitations
-/admin token <label>       # Generate + register a telemetry token
-```
-
-Or use the GUI: **HUD Menu > Admin Panel** for a visual interface with invite, remove, token generation, and repo info.
-
-Requires [GitHub CLI](https://cli.github.com) authenticated with `repo` scope.
-
-## Development and Testing
-
-```bash
-# Unit tests (1,215 tests)
-pytest tests/ -v --timeout=300
-
-# Integration stress tests -- stub mode (65 tests, no Ollama needed)
-pytest tests/integration/ -v --timeout=600
-
-# Integration stress tests -- live mode (requires running Ollama)
-pytest tests/integration/ -v --live --timeout=600
-
-# Stress runner with presets
-python scripts/run_live_stress.py --stub --smoke -n 5     # Quick: ~40s
-python scripts/run_live_stress.py --live --smoke -n 5     # Real: ~5min
-python scripts/run_live_stress.py --live --full -n 1      # Deep: ~35min
-
-# View stress test dashboard
-python scripts/view_stress_results.py
-
-# Local test history
-python scripts/my_dashboard.py
-```
-
-## Project Structure
-
-```
-forge/
-  __init__.py              # Package version
-  __main__.py              # CLI entry point (--fnc, --gui-terminal, --model, --dir)
-  engine.py                # ForgeEngine -- core orchestrator (3,287 lines)
-  context.py               # Context window with swap/summarize/pin
-  commands.py              # 59 slash commands
-  config.py                # YAML config loader with validation
-  safety.py                # 4-tier safety guard with sandbox
-  crucible.py              # 4-layer security scanner (1,183 lines)
-  forensics.py             # Session forensics and audit logging
-  audit.py                 # Zip bundle exporter with SHA-256 manifest
-  billing.py               # Token-level cost accounting
-  continuity.py            # Context swap quality grading (A-F)
-  plan_verifier.py         # Plan step verification (test/lint gates)
-  planner.py               # Multi-step task planning
-  router.py                # Multi-model routing (simple/complex)
-  memory.py                # Episodic memory with embeddings
-  index.py                 # Codebase indexing and search
-  digest.py                # Tree-sitter AST analysis (1,475 lines)
-  stats.py                 # Session metrics collector
-  reliability.py           # Cross-session reliability scoring
-  dedup.py                 # Content deduplication
-  file_cache.py            # LRU file read cache
-  tokenizer.py             # Token counting (tiktoken)
-  persona.py               # Persona profiles (professional/casual/mentor/hacker)
-  hardware.py              # GPU/CPU/RAM detection, VRAM-aware sizing
-  resource_guard.py        # Process resource monitor and throttling
-  scheduler.py             # Cross-platform nightly schedule (schtasks/cron)
-  machine_id.py            # Stable machine fingerprinting
-  telemetry.py             # Opt-in telemetry upload
-  benchmark.py             # Reproducible benchmark suite
-
-  audio/
-    stt.py                 # Speech-to-text (faster-whisper)
-    tts.py                 # Text-to-speech (edge-tts)
-    sounds.py              # Sound effects library
-    commands.py            # Voice command parsing
-
-  models/
-    ollama.py              # Ollama backend (streaming, tool calls)
-
-  tools/
-    registry.py            # Tool dispatch and ToolResult dataclass
-    filesystem.py          # File operations (read, write, edit, search, glob)
-    git_tools.py           # Git operations (status, diff, log, commit, branch)
-    web_tools.py           # HTTP requests, HTML parsing
-    treesitter_tools.py    # AST navigation for 8+ languages (1,653 lines)
-    digest_tools.py        # Codebase analysis tools
-
-  ui/
-    dashboard.py           # Neural Cortex GUI (3,384 lines)
-    terminal.py            # Console terminal I/O with ANSI
-    gui_terminal.py        # GUI terminal with visual effects
-    effects.py             # Animation engine (1,273 lines)
-    themes.py              # 14 color themes with hot-swap
-    settings_dialog.py     # 8-tab settings (Safety thru Telemetry)
-    admin_panel.py         # GitHub collaborator + token management
-    model_manager.py       # VRAM-aware model browser (1,271 lines)
-    test_runner.py         # Visual test suite runner
-    docs_window.py         # In-app documentation viewer
-    cortex_overlay.py      # Transparent HUD overlay
-    charts.py              # PIL chart engine (line, bar, donut, sparkline)
-
-  plugins/
-    __init__.py            # Plugin loader with auto-disable
-    base.py                # ForgePlugin base class
-    examples/
-      auto_lint.py         # Example: auto-lint on file changes
-
-scripts/
-  nightly_smart.py         # Adaptive nightly test runner (976 lines)
-  bisect_failure.py        # Auto-bisect failing scenarios
-  run_live_stress.py       # Stress test runner with presets
-  view_stress_results.py   # HTML+Chart.js dashboard
-  my_dashboard.py          # Offline local test history
-
-server/
-  auth.php                 # Token authentication (SHA-256 + legacy key)
-  manifest.php             # Adaptive test manifest (per-machine)
-  telemetry_receiver.php   # Result ingestion + zip upload
-  analyzer.php             # Fleet-wide analytics processor
-  analytics.php            # HTML dashboard with charts
-  alert.php                # SLA alerting (Discord/Slack/email)
-  token_admin.php          # Admin token management API
-
-tests/
-  57 unit test files        # 1,215 tests covering all subsystems
-  integration/
-    12 scenario tests       # 65 integration tests
-    harness.py             # Stress test framework
-    ollama_stub.py         # Fake Ollama for deterministic testing
-    state_verifier.py      # 8-invariant checker
+pytest tests/ -v --timeout=300                            # 1,280 unit tests
+pytest tests/integration/ -v --timeout=600                # Stub mode (no Ollama)
+pytest tests/integration/ -v --live --timeout=600         # Live mode (requires Ollama)
+python scripts/run_live_stress.py --live --full -n 1      # Full stress suite
 ```
 
 ## License
 
 Proprietary. All rights reserved. See [LICENSE](LICENSE) for details.
+
+---
+
+<p align="center">
+  <a href="https://forge-nc.dev">forge-nc.dev</a>
+</p>
