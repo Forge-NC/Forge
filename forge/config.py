@@ -160,6 +160,9 @@ DEFAULTS = {
     # License / BPoS (Behavioral Proof of Stake)
     "license_tier": "community",                # community, pro, power
 
+    # XP / Gamification
+    "xp_enabled": False,                   # opt-in XP, levels, achievements
+
     # Plugins
     "disabled_plugins": [],                     # list of plugin class names to skip on load
 
@@ -608,6 +611,7 @@ _VALIDATORS = {
     "auto_commit": lambda v: isinstance(v, bool),
     "push_on_commit": lambda v: isinstance(v, bool),
     "license_tier": lambda v: isinstance(v, str) and v in ("community", "pro", "power", "origin"),
+    "xp_enabled": lambda v: isinstance(v, bool),
     "backend_provider": lambda v: isinstance(v, str) and v in ("ollama", "openai", "anthropic"),
     "openai_api_key": lambda v: isinstance(v, str),
     "anthropic_api_key": lambda v: isinstance(v, str),

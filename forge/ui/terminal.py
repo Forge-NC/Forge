@@ -703,8 +703,8 @@ def print_help():
             ("/admin invite <user>", "Invite a collaborator (push access)"),
             ("/admin remove <user>", "Remove a collaborator"),
             ("/admin pending", "Show pending invitations"),
-            ("/admin token <label>", "Generate a telemetry token for a tester"),
-            ("/admin role <label> <role>", "Change token role (owner/admin/tester)"),
+            ("/admin token <label>", "Generate a telemetry token for a master"),
+            ("/admin role <label> <role>", "Change token role (origin/admin/master/puppet)"),
         ]),
         ("System", [
             ("/hardware", "Show GPU/CPU/RAM and model recommendation"),

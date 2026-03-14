@@ -191,6 +191,8 @@ class GenomeSnapshot:
     tool_success_rate: float = 0.0                          # Successful tool calls fraction
     benchmark_pass_rate: float = 0.0                        # Cross-session benchmark performance
     models_tested: list = field(default_factory=list)       # All model names ever tested
+    xp_total: int = 0                                       # Current XP total from gamification
+    xp_level: int = 1                                       # Current level
 
 
 @dataclass

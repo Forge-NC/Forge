@@ -123,6 +123,7 @@ class BreakRunner:
         adaptive_pressure: Any = None,
         self_rate: bool = False,
         tier: str = "community",
+        progress_callback: Any = None,
     ) -> BreakResult:
         """Execute a break/stress run and return a BreakResult.
 
@@ -174,6 +175,7 @@ class BreakRunner:
             fingerprint_scores=fp_scores,
             self_rate=self_rate,
             tier=tier,
+            progress_callback=progress_callback,
         )
         report = generate_report(assurance_run, config_dir=self._config_dir)
 

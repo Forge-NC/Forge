@@ -184,15 +184,12 @@ def get_hardware_summary() -> dict:
         "ram_gb": round(ram_mb / 1024, 1) if ram_mb else 0,
     }
 
-    # Generate recommendation
+    # Generate recommendation — always use total VRAM since Ollama unloads
+    # the current model before loading a new one
     if gpu:
-        vram_free = summary["vram_free_gb"]
         vram_total = summary["vram_gb"]
-        # Use free VRAM for recommendation (other apps may be using some)
-        # But if free is >80% of total, use total (system overhead is normal)
-        usable = vram_total if vram_free > (vram_total * 0.8) else vram_free
-        summary["usable_vram_gb"] = round(usable, 1)
-        summary["recommendation"] = recommend_model(usable)
+        summary["usable_vram_gb"] = vram_total
+        summary["recommendation"] = recommend_model(vram_total)
     else:
         summary["usable_vram_gb"] = 0
         summary["recommendation"] = {

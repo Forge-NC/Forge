@@ -58,7 +58,7 @@ def _get_forge_root() -> str:
 
 
 def _get_repo_nwo() -> Optional[str]:
-    """Get owner/repo from git remote (e.g., 'ups0n/Forge').
+    """Get owner/repo from git remote (e.g., 'Forge-NC/Forge').
 
     Parses both HTTPS and SSH remote URL formats.
     Returns None if the remote cannot be determined.
@@ -557,11 +557,11 @@ class AdminPanelDialog:
         )
         self._collab_entry.pack(side="left", padx=(0, 4))
 
-        self._role_var = ctk.StringVar(value="push")
+        self._role_var = ctk.StringVar(value="pull")
         self._role_menu = ctk.CTkOptionMenu(
             invite_row,
             variable=self._role_var,
-            values=["push", "pull", "admin"],
+            values=["pull", "push"],
             fg_color=COLORS["bg_card"],
             button_color=COLORS["cyan_dim"],
             button_hover_color=COLORS["cyan"],
@@ -1272,13 +1272,14 @@ class AdminPanelDialog:
         row.pack(fill="x", padx=8, pady=2)
 
         label = tok.get("label", "unknown")
-        role = tok.get("role", "tester")
+        role = tok.get("role", "master")
 
         # Role badge color
         role_colors = {
-            "owner": COLORS["cyan"],
+            "origin": COLORS["cyan"],
             "admin": COLORS["yellow"],
-            "tester": COLORS["gray"],
+            "master": COLORS["gray"],
+            "puppet": COLORS["gray"],
         }
         badge_color = role_colors.get(role, COLORS["gray"])
 
@@ -1310,7 +1311,7 @@ class AdminPanelDialog:
         role_menu = ctk.CTkOptionMenu(
             row,
             variable=role_var,
-            values=["tester", "admin", "owner"],
+            values=["master", "admin", "origin", "puppet"],
             fg_color=COLORS["bg_card"],
             button_color=COLORS["cyan_dim"],
             button_hover_color=COLORS["cyan"],
