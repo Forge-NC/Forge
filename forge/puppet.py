@@ -41,7 +41,9 @@ DEFAULT_PASSPORT_API = "https://forge-nc.dev/passport_api.php"
 
 
 class PuppetRole(enum.Enum):
-    MASTER = "master"          # Paying customer (also Origin backward compat)
+    ORIGIN = "origin"          # Creator — god view, can see all Masters
+    ADMIN = "admin"            # Admin — can manage tokens, view fleet
+    MASTER = "master"          # Paying customer, manages own Puppets
     PUPPET = "puppet"          # Terminal user under a Master
     STANDALONE = "standalone"  # Default, no fleet
 

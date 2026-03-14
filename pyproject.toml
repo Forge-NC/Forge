@@ -11,8 +11,6 @@ dependencies = [
     "Pillow>=9.0",
     "customtkinter>=5.2",
     "tiktoken>=0.7",
-    "pyyaml>=6.0",
-    "sounddevice>=0.4",
     "pyreadline3>=3.4; sys_platform == 'win32'",
     "cryptography>=41.0",
 ]
@@ -26,6 +24,7 @@ voice = [
     "soundfile>=0.12",
     "pyttsx3>=2.90",
 ]
+yaml = ["pyyaml>=6.0"]
 
 [project.scripts]
 forge = "forge.__main__:main"
