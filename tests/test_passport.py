@@ -12,7 +12,11 @@ from forge.passport import BPoS, Passport, GenomeSnapshot, BehavioralFingerprint
 
 @pytest.fixture
 def bpos(tmp_path):
-    return BPoS(data_dir=tmp_path, machine_id="test123456ab")
+    # Clear cached tiers so get_tiers() re-fetches (or falls back)
+    import forge.passport as _pp
+    _pp._cached_tiers = None
+    b = BPoS(data_dir=tmp_path, machine_id="test123456ab")
+    return b
 
 
 # ── Tier system ──

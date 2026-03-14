@@ -126,7 +126,11 @@ PASSPORT_API_URL = "https://forge-nc.dev/passport_api.php"
 
 
 def get_tiers() -> dict:
-    """Get tier definitions. Tries server first, falls back to defaults."""
+    """Get tier definitions. Tries server first, falls back to defaults.
+
+    Server-returned tiers are merged onto _FALLBACK_TIERS so any keys
+    the server doesn't define still have sane defaults.
+    """
     global _cached_tiers
     if _cached_tiers is not None:
         return _cached_tiers
@@ -137,7 +141,16 @@ def get_tiers() -> dict:
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             if isinstance(data, dict) and len(data) > 0:
-                _cached_tiers = data
+                # Merge: fallback defaults first, server overrides on top
+                merged = {}
+                for tier_name, fallback_cfg in _FALLBACK_TIERS.items():
+                    server_cfg = data.get(tier_name, {})
+                    merged[tier_name] = {**fallback_cfg, **server_cfg}
+                # Include any server-only tiers (e.g. "origin")
+                for tier_name, server_cfg in data.items():
+                    if tier_name not in merged:
+                        merged[tier_name] = server_cfg
+                _cached_tiers = merged
                 return _cached_tiers
     except Exception:
         pass

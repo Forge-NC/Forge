@@ -498,7 +498,7 @@ class TestRoleEnum:
 
     def test_all_roles(self):
         roles = {r.value for r in PuppetRole}
-        assert roles == {"master", "puppet", "standalone"}
+        assert roles == {"origin", "admin", "master", "puppet", "standalone"}
 
     def test_puppet_info_has_seat_fields(self):
         p = PuppetInfo(machine_id="m1", name="test",
