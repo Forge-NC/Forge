@@ -31,7 +31,7 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
-FORGE_VERSION = "0.1.0"
+from forge import __version__ as FORGE_VERSION
 
 
 class AuditExporter:

@@ -87,6 +87,23 @@ def register_cortex_handlers(
     def on_session_end(event: "ForgeEvent") -> None:
         write_state_fn("idle", None)
 
+    def on_break_progress(event: "ForgeEvent") -> None:
+        """Keep brain in 'thinking' state during /break scenario runs."""
+        passed = event.data.get("passed", True)
+        pct = event.data.get("pct", 0)
+        scenario = event.data.get("scenario_id", "")
+        if not passed:
+            # Flash threat state briefly on failures
+            write_state_fn("threat", {
+                "rule": f"break: {scenario}",
+                "level": "WARNING",
+            })
+        else:
+            write_state_fn("thinking", {
+                "break_pct": pct,
+                "scenario": scenario,
+            })
+
     bus.subscribe("session.start",    on_session_start,    priority=80)
     bus.subscribe("turn.start",       on_turn_start,       priority=80)
     bus.subscribe("turn.end",         on_turn_end,         priority=80)
@@ -96,6 +113,7 @@ def register_cortex_handlers(
     bus.subscribe("context.swap",     on_context_swap,     priority=80)
     bus.subscribe("threat.detected",  on_threat_detected,  priority=80)
     bus.subscribe("assurance.pass",   on_assurance_pass,   priority=80)
+    bus.subscribe("break.progress",   on_break_progress,   priority=80)
     bus.subscribe("session.end",      on_session_end,      priority=80)
 
     log.debug("NeuralCortex event bridge registered.")

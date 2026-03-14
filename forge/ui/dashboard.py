@@ -1614,6 +1614,7 @@ class ForgeLauncher:
             ("duration", "Duration", "0m"),
             ("tokens", "Tokens", "0"),
             ("cost_saved", "Saved vs Opus", "$0.00"),
+            ("cost_saved_lt", "Lifetime Saved", "$0.00"),
         ]:
             self._add_stat_row(body, key, label, default)
 
@@ -3249,6 +3250,16 @@ class ForgeLauncher:
                 cost_str = "$0.00"
             self._stat_labels["cost_saved"].configure(
                 text=cost_str, text_color=COLORS["green"])
+        if "cost_saved_lt" in self._stat_labels:
+            lt_saved = session.get('cost_saved_lifetime', 0)
+            if lt_saved >= 0.01:
+                lt_str = f"${lt_saved:.2f}"
+            elif lt_saved > 0:
+                lt_str = f"${lt_saved:.4f}"
+            else:
+                lt_str = "$0.00"
+            self._stat_labels["cost_saved_lt"].configure(
+                text=lt_str, text_color=COLORS["green"])
 
         memory = data.get("memory", {})
         if "journal" in self._stat_labels:
@@ -3632,7 +3643,15 @@ class ForgeLauncher:
             ("Run All Tests", None, self._run_all_tests),
             ("Nightly Tests", None, self._open_nightly_settings),
             ("Check for Updates", None, self._check_for_updates),
-            ("Admin Panel", None, self._open_admin_panel),
+        ]
+        # Admin Panel only visible to Origin
+        try:
+            from forge.config import ForgeConfig
+            if ForgeConfig().get("license_tier", "community") == "origin":
+                items.append(("Admin Panel", None, self._open_admin_panel))
+        except Exception:
+            pass
+        items += [
             None,
             ("About", None, self._show_about),
             ("Quit", None, self._on_close),
@@ -3802,10 +3821,13 @@ class ForgeLauncher:
         UpdateCheckDialog(self._root)
 
     def _open_admin_panel(self):
-        """Open the admin panel for collaborator and token management."""
-        from forge.ui.admin_panel import AdminPanelDialog
+        """Open the admin panel. Origin-only."""
         from forge.config import ForgeConfig
-        AdminPanelDialog(self._root, ForgeConfig())
+        cfg = ForgeConfig()
+        if cfg.get("license_tier", "community") != "origin":
+            return
+        from forge.ui.admin_panel import AdminPanelDialog
+        AdminPanelDialog(self._root, cfg)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -4023,7 +4045,8 @@ class ForgeDashboard:
         for k, l, d in [("turns", "Turns", "0"),
                          ("duration", "Duration", "0m"),
                          ("tokens", "Tokens", "0"),
-                         ("cost_saved", "Saved vs Opus", "$0.00")]:
+                         ("cost_saved", "Saved vs Opus", "$0.00"),
+                         ("cost_saved_lt", "Lifetime Saved", "$0.00")]:
             _add_row(card, k, l, d, self._stat_labels)
 
         # Memory
@@ -4168,6 +4191,10 @@ class ForgeDashboard:
         _set(self._stat_labels, "tokens", f"{s.get('tokens', 0):,}")
         _set(self._stat_labels, "cost_saved",
              f"${s.get('cost_saved', 0):.4f}", COLORS["green"])
+        lt_saved = s.get('cost_saved_lifetime', 0)
+        _set(self._stat_labels, "cost_saved_lt",
+             f"${lt_saved:.2f}" if lt_saved >= 0.01 else f"${lt_saved:.4f}",
+             COLORS["green"])
 
         m = data.get("memory", {})
         _set(self._stat_labels, "journal",

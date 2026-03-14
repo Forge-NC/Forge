@@ -322,6 +322,56 @@ _REGISTRY: dict[str, dict] = {
     },
 
     # ── CommonSenseGuard events ──────────────────────────────────────────
+    # ── Break/Assurance progress ─────────────────────────────────────────
+    "break.progress": {
+        "version": 1,
+        "schema":  "forge.break.progress.v1",
+        "fields": {
+            "current":     {"type": "int",  "required": True,  "desc": "Completed scenario count"},
+            "total":       {"type": "int",  "required": True,  "desc": "Total scenarios in run"},
+            "scenario_id": {"type": "str",  "required": True,  "desc": "Scenario that just completed"},
+            "passed":      {"type": "bool", "required": True,  "desc": "Did the scenario pass"},
+            "pct":         {"type": "int",  "required": False, "desc": "Completion percentage 0-100"},
+        },
+        "changelog": [(1, "2026-03-12", "Initial definition — break progress tracking")],
+    },
+
+    # ── XP events ─────────────────────────────────────────────────────
+    "xp.awarded": {
+        "version": 1,
+        "schema":  "forge.xp.awarded.v1",
+        "fields": {
+            "action":    {"type": "str", "required": True,  "desc": "XP action key (break_complete, etc.)"},
+            "xp":        {"type": "int", "required": True,  "desc": "XP amount awarded"},
+            "total_xp":  {"type": "int", "required": False, "desc": "New total XP"},
+            "level":     {"type": "int", "required": False, "desc": "Current level after award"},
+        },
+        "changelog": [(1, "2026-03-11", "Initial definition — XP gamification")],
+    },
+
+    "xp.level_up": {
+        "version": 1,
+        "schema":  "forge.xp.level_up.v1",
+        "fields": {
+            "old_level": {"type": "int", "required": True,  "desc": "Previous level"},
+            "new_level": {"type": "int", "required": True,  "desc": "New level"},
+            "title":     {"type": "str", "required": False, "desc": "Title unlocked (if any)"},
+        },
+        "changelog": [(1, "2026-03-11", "Initial definition — XP gamification")],
+    },
+
+    "xp.achievement": {
+        "version": 1,
+        "schema":  "forge.xp.achievement.v1",
+        "fields": {
+            "achievement_id": {"type": "str", "required": True,  "desc": "Achievement ID"},
+            "name":           {"type": "str", "required": True,  "desc": "Achievement display name"},
+            "bonus_xp":       {"type": "int", "required": True,  "desc": "Bonus XP awarded"},
+        },
+        "changelog": [(1, "2026-03-11", "Initial definition — XP gamification")],
+    },
+
+    # ── CommonSenseGuard events ──────────────────────────────────────
     "common_sense.warning": {
         "version": 1,
         "schema":  "forge.common_sense.warning.v1",

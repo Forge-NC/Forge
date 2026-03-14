@@ -22,14 +22,12 @@ Sync protocol (v2): file-based via a local shared directory (optional).
 """
 
 import enum
-import hashlib
-import hmac
 import json
 import logging
 import os
 import tempfile
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -301,8 +299,7 @@ class PuppetManager:
 
         self._role = PuppetRole.PUPPET
         self._parent_account_id = passport_data.get("account_id", "")
-        self._master_id = passport_data.get("master_id",
-                                           passport_data.get("captain_id", ""))
+        self._master_id = passport_data.get("master_id", "")
         self._seat_id = passport_data.get("seat_id", "")
         self._master_tier = passport_data.get("tier", "community")
         self._passport_id = passport_data.get("passport_id", "")
@@ -638,9 +635,6 @@ class PuppetManager:
         try:
             data = json.loads(self._registry_path.read_text())
             role_str = data.get("role", "standalone")
-            # Backward compat: old "captain" role maps to MASTER
-            if role_str == "captain":
-                role_str = "master"
             try:
                 self._role = PuppetRole(role_str)
             except ValueError:
@@ -650,9 +644,7 @@ class PuppetManager:
             self._master_id = data.get("master_id", "")
             self._account_id = data.get("account_id", "")
             self._passport_id = data.get("passport_id", "")
-            # Backward compat: read old "captain_tier" key too
-            self._master_tier = data.get("master_tier",
-                                         data.get("captain_tier", "community"))
+            self._master_tier = data.get("master_tier", "community")
             self._seats_total = data.get("seats_total", 1)
             self._seats_used = data.get("seats_used", 0)
             self._telemetry_token = data.get("telemetry_token", "")

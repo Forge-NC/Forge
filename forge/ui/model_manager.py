@@ -641,23 +641,28 @@ class ModelManagerDialog:
             if gpu:
                 total = round(gpu["vram_total_mb"] / 1024, 1)
                 free = round(gpu["vram_free_mb"] / 1024, 1)
-                # Use total if >80% free (normal OS overhead), else free
-                usable = total if free > (total * 0.8) else free
                 self._win.after(0, lambda: self._apply_vram(
-                    usable, total, gpu.get("name", "")))
+                    total, free, gpu.get("name", "")))
             else:
                 self._win.after(0, lambda: self._apply_vram(0, 0, ""))
 
         threading.Thread(target=_bg, daemon=True,
                          name="ModelMgrVRAM").start()
 
-    def _apply_vram(self, usable: float, total: float, gpu_name: str):
-        """Apply detected VRAM to state and UI."""
-        self._vram_gb = usable
+    def _apply_vram(self, total: float, free: float, gpu_name: str):
+        """Apply detected VRAM to state and UI.
+
+        Always use total VRAM for fit calculations — Ollama unloads the
+        current model before loading a new one, so the full capacity is
+        available for any model the user picks.
+        """
+        self._vram_gb = total
         if total > 0:
             short_name = gpu_name.replace("NVIDIA GeForce ", "")
+            in_use = round(total - free, 1)
+            suffix = f"  ({in_use:.0f}GB in use)" if in_use >= 1.0 else ""
             self._lbl_vram.configure(
-                text=f"{short_name}  {total:.0f}GB",
+                text=f"{short_name}  {total:.0f}GB{suffix}",
                 text_color=COLORS["cyan"])
         else:
             self._lbl_vram.configure(

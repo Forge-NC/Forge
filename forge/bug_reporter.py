@@ -26,7 +26,7 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-FORGE_VERSION = "0.1.0"
+from forge import __version__ as FORGE_VERSION
 
 # Exceptions that are transient / infrastructure — not worth filing
 _TRANSIENT_EXCEPTIONS = frozenset({

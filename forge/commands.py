@@ -5,17 +5,18 @@ engine reference. The engine calls handle_command() which dispatches
 to the right handler.
 """
 
+import logging
 import os
 import time
 from pathlib import Path
 from typing import Optional
 
-from forge.context import ContextFullError
-from forge.safety import LEVEL_NAMES, NAME_TO_LEVEL
 from forge.crucible import ThreatLevel
 from forge.ui.terminal import (
     RESET, DIM, BOLD, YELLOW, RED, CYAN, GREEN, MAGENTA, WHITE, GRAY,
 )
+
+log = logging.getLogger(__name__)
 
 
 class CommandHandler:
@@ -1629,6 +1630,11 @@ class CommandHandler:
 
         nwo = _get_nwo()
 
+        e = self.engine
+        if e.config.get("license_tier", "community") != "origin":
+            self.io.print_error("/admin is Origin-only.")
+            return True
+
         parts = arg.strip().split(None, 1)
         sub = parts[0].lower() if parts else "list"
         subarg = parts[1].strip() if len(parts) > 1 else ""
@@ -1663,9 +1669,9 @@ class CommandHandler:
                 return True
             ok, out = _gh(["api", "-X", "PUT",
                           f"repos/{nwo}/collaborators/{subarg}",
-                          "-f", "permission=push"])
+                          "-f", "permission=pull"])
             if ok:
-                print(f"  {GREEN}Invitation sent to {subarg} (push access).{RESET}")
+                print(f"  {GREEN}Invitation sent to {subarg} (read-only access).{RESET}")
             else:
                 self.io.print_error(f"Failed: {out}")
 
@@ -1775,22 +1781,22 @@ class CommandHandler:
         elif sub == "role":
             if not subarg or len(subarg.split()) < 2:
                 self.io.print_error(
-                    "Usage: /admin role <label> <owner|admin|tester>")
+                    "Usage: /admin role <label> <origin|admin|master|puppet>")
                 return True
             parts_r = subarg.split(None, 1)
             role_label = parts_r[0]
             role_value = parts_r[1].lower().strip()
-            if role_value not in ("owner", "admin", "tester"):
+            if role_value not in ("origin", "admin", "master", "puppet"):
                 self.io.print_error(
                     f"Invalid role '{role_value}'. "
-                    f"Must be: owner, admin, or tester")
+                    f"Must be: origin, admin, master, or puppet")
                 return True
 
             admin_token = self.engine.config.get("telemetry_token", "")
             if not admin_token:
                 self.io.print_error(
                     "No telemetry_token in config. "
-                    "Only the server owner can change roles.")
+                    "Only Origin can change roles.")
                 return True
 
             try:
@@ -2337,12 +2343,31 @@ class CommandHandler:
             if hasattr(e, '_latest_fingerprint'):
                 fp_scores = e._latest_fingerprint
 
+            import time as _time
+            _assure_t0 = _time.time()
+
+            def _assure_prog(current, total, scenario_id, passed, latency_ms):
+                elapsed = _time.time() - _assure_t0
+                mark = "+" if passed else "x"
+                pct = int(current / max(total, 1) * 100)
+                avg_per = elapsed / max(current, 1)
+                remain = avg_per * (total - current) / 60
+                filled = int(pct / 100 * 20)
+                bar = "\u2588" * filled + "\u2591" * (20 - filled)
+                print(
+                    f"  [{bar}] {pct:>3}%  {current}/{total}  "
+                    f"[{mark}] {scenario_id:<35}  "
+                    f"{latency_ms/1000:.1f}s  "
+                    f"({elapsed/60:.1f}m elapsed, ~{remain:.1f}m left)",
+                    flush=True)
+
             tier = bpos.tier if bpos else "community"
             run = runner.run(e.llm, e.llm.model,
                              categories=categories,
                              fingerprint_scores=fp_scores,
                              self_rate=e.config.get("assurance_self_rate", False),
-                             tier=tier)
+                             tier=tier,
+                             progress_callback=_assure_prog)
             report = generate_report(run, config_dir=Path(e._config_dir))
 
             pct = round(report['pass_rate'] * 100, 1)
@@ -2381,6 +2406,25 @@ class CommandHandler:
                 mark = "✓" if rate >= 1.0 else ("~" if rate > 0 else "✗")
                 self.io.print_info(f"  {mark} {cat}: {round(rate*100,1)}%")
 
+            # ── XP awards ─────────────────────────────────────────────
+            xp = getattr(e, 'xp_engine', None)
+            if xp and e.config.get("xp_enabled", True):
+                try:
+                    xp.record_assure(
+                        model=e.llm.model,
+                        pass_rate=report['pass_rate'],
+                        category_pass_rates=report.get('category_pass_rates'),
+                        calibration=cal if cal >= 0 else -1.0,
+                    )
+                    # Clean sweep achievement
+                    if report.get('category_pass_rates'):
+                        if all(v >= 1.0 for v in report['category_pass_rates'].values()):
+                            xp.unlock_achievement("clean_sweep")
+                    for note in xp.drain_notifications():
+                        self.io.print_info(note)
+                except Exception:
+                    log.debug("XP assure award failed", exc_info=True)
+
             # Upload only if user opted in via telemetry or --share flag
             share = "--share" in arg
             auto_share = e.config.get("telemetry_enabled", False)
@@ -2394,7 +2438,7 @@ class CommandHandler:
                     try:
                         import requests
                         resp = requests.post(
-                            assurance_url + "/submit",
+                            assurance_url,
                             json=report,
                             timeout=20,
                         )
@@ -2424,6 +2468,7 @@ class CommandHandler:
           /break --assure     — full break + full assurance in one pass
           /break --share      — run and upload signed report(s) to the Matrix
           /break --json       — output JSON instead of formatted text
+          /break --full       — alias for --autopsy --self-rate --assure --share --json
 
         Flags are combinable: /break --autopsy --assure --self-rate --share
 
@@ -2431,6 +2476,9 @@ class CommandHandler:
         contributed to the Forge Matrix (decentralized model leaderboard).
         """
         e = self.engine
+        # --full expands to all flags
+        if "--full" in arg:
+            arg += " --autopsy --self-rate --assure --share --json"
         share = "--share" in arg
         as_json = "--json" in arg
         autopsy = "--autopsy" in arg
@@ -2438,12 +2486,67 @@ class CommandHandler:
         run_assure = "--assure" in arg
         mode = "full"
 
+        # Show active flags
+        flags = []
+        if autopsy:    flags.append("autopsy")
+        if self_rate:  flags.append("self-rate")
+        if run_assure: flags.append("assure")
+        if share:      flags.append("share")
+        if as_json:    flags.append("json")
+        flag_str = f"  Flags: {', '.join(flags)}" if flags else ""
+
+        # Estimate: ~20s per scenario on typical GPU, ~40s with self-rate
+        est_per_scenario = 40 if self_rate else 20
+        est_scenarios = 38  # full suite default
+        est_total = est_scenarios * est_per_scenario
+        if run_assure:
+            est_total *= 2  # double for assure pass
+        est_min = est_total / 60
+
         self.io.print_info(
             f"Running Forge Break Suite against '{e.llm.model}'...")
+        if flag_str:
+            self.io.print_info(flag_str)
+        self.io.print_info(
+            f"  Estimated: ~{est_scenarios} scenarios, ~{est_min:.0f} min"
+            f" (varies by model/GPU)")
 
         try:
+            import time as _time
             from forge.break_runner import BreakRunner, format_break_output, format_autopsy_output
             from pathlib import Path
+
+            _break_start = _time.time()
+
+            def _break_progress(current, total, scenario_id, passed, latency_ms):
+                elapsed = _time.time() - _break_start
+                elapsed_m = elapsed / 60
+                mark = "+" if passed else "x"
+                pct = int(current / max(total, 1) * 100)
+                # Estimate remaining from average latency so far
+                avg_per = elapsed / max(current, 1)
+                remaining = avg_per * (total - current)
+                remain_m = remaining / 60
+                bar_len = 20
+                filled = int(pct / 100 * bar_len)
+                bar = "\u2588" * filled + "\u2591" * (bar_len - filled)
+                print(
+                    f"  [{bar}] {pct:>3}%  {current}/{total}  "
+                    f"[{mark}] {scenario_id:<35}  "
+                    f"{latency_ms/1000:.1f}s  "
+                    f"({elapsed_m:.1f}m elapsed, ~{remain_m:.1f}m left)",
+                    flush=True)
+                # Emit event so Neural Cortex animates
+                try:
+                    e.event_bus.emit("break.progress", {
+                        "current": current,
+                        "total": total,
+                        "scenario_id": scenario_id,
+                        "passed": passed,
+                        "pct": pct,
+                    })
+                except Exception:
+                    pass
 
             bpos = getattr(e, '_bpos', None)
             machine_id  = getattr(e, '_machine_id', "") or ""
@@ -2458,7 +2561,8 @@ class CommandHandler:
             )
             tier = bpos.tier if bpos else "community"
             result = runner.run(e.llm, e.llm.model, mode=mode,
-                                self_rate=self_rate, tier=tier)
+                                self_rate=self_rate, tier=tier,
+                                progress_callback=_break_progress)
 
             if as_json:
                 import json
@@ -2475,6 +2579,41 @@ class CommandHandler:
                     "model": result.model,
                 })
 
+            # ── XP awards ─────────────────────────────────────────────
+            xp = getattr(e, 'xp_engine', None)
+            if xp and e.config.get("xp_enabled", True):
+                try:
+                    xp.record_break(
+                        model=e.llm.model,
+                        pass_rate=result.pass_rate,
+                        run_id=getattr(result, 'run_id', ''),
+                        shared=share or e.config.get("telemetry_enabled", False),
+                        autopsy=autopsy,
+                        calibration=getattr(result, 'calibration_score', -1.0),
+                    )
+                    # New combo detection
+                    bpos = getattr(e, '_bpos', None)
+                    if bpos:
+                        from forge.machine_id import get_machine_id
+                        mid = get_machine_id()
+                        gpu = ""
+                        try:
+                            from forge.hardware import detect_gpu
+                            gpu = detect_gpu().get("name", "")
+                        except Exception:
+                            pass
+                        xp.record_new_combo(
+                            model=e.llm.model,
+                            machine_id=mid,
+                            gpu_name=gpu,
+                            run_id=getattr(result, 'run_id', ''),
+                        )
+                    # Print any XP notifications
+                    for note in xp.drain_notifications():
+                        self.io.print_info(note)
+                except Exception:
+                    log.debug("XP break award failed", exc_info=True)
+
             # ── Assurance combo ────────────────────────────────────────
             assure_report = None
             if run_assure:
@@ -2482,6 +2621,34 @@ class CommandHandler:
                     f"\nRunning AI Assurance Suite against '{e.llm.model}'...")
                 from forge.assurance import AssuranceRunner
                 from forge.assurance_report import generate_report
+
+                _assure_start = _time.time()
+
+                def _assure_progress(current, total, scenario_id, passed, latency_ms):
+                    elapsed = _time.time() - _assure_start
+                    elapsed_m = elapsed / 60
+                    mark = "+" if passed else "x"
+                    pct = int(current / max(total, 1) * 100)
+                    avg_per = elapsed / max(current, 1)
+                    remaining = avg_per * (total - current)
+                    remain_m = remaining / 60
+                    bar_len = 20
+                    filled = int(pct / 100 * bar_len)
+                    bar = "\u2588" * filled + "\u2591" * (bar_len - filled)
+                    print(
+                        f"  [{bar}] {pct:>3}%  {current}/{total}  "
+                        f"[{mark}] {scenario_id:<35}  "
+                        f"{latency_ms/1000:.1f}s  "
+                        f"({elapsed_m:.1f}m elapsed, ~{remain_m:.1f}m left)",
+                        flush=True)
+                    try:
+                        e.event_bus.emit("break.progress", {
+                            "current": current, "total": total,
+                            "scenario_id": scenario_id, "passed": passed,
+                            "pct": pct,
+                        })
+                    except Exception:
+                        pass
 
                 fp_scores = {}
                 if hasattr(e, '_latest_fingerprint'):
@@ -2498,6 +2665,7 @@ class CommandHandler:
                     fingerprint_scores=fp_scores,
                     self_rate=self_rate,
                     tier=tier,
+                    progress_callback=_assure_progress,
                 )
                 assure_report = generate_report(
                     assure_run, config_dir=Path(e._config_dir))
@@ -2536,6 +2704,23 @@ class CommandHandler:
                     print(f"    Assurance: {pct}%")
                     print(f"  {'='*50}")
 
+                # XP: assure portion of the combo
+                xp = getattr(e, 'xp_engine', None)
+                if xp and e.config.get("xp_enabled", True):
+                    try:
+                        xp.record_assure(
+                            model=e.llm.model,
+                            pass_rate=assure_report['pass_rate'],
+                            category_pass_rates=assure_report.get('category_pass_rates'),
+                        )
+                        # Full Audit: only if ALL 5 flags were used
+                        if all([autopsy, self_rate, run_assure, share, as_json]):
+                            xp.unlock_achievement("full_audit")
+                        for note in xp.drain_notifications():
+                            self.io.print_info(note)
+                    except Exception:
+                        log.debug("XP assure combo award failed", exc_info=True)
+
             if as_json:
                 import json
                 print(json.dumps(combined, indent=2))
@@ -2562,7 +2747,7 @@ class CommandHandler:
                         try:
                             import requests
                             resp = requests.post(
-                                share_url + "/submit",
+                                share_url,
                                 json=assure_report,
                                 timeout=20,
                             )
@@ -2629,6 +2814,16 @@ class CommandHandler:
             else:
                 print(format_break_output(result))
 
+            # ── XP awards ─────────────────────────────────────────────
+            xp = getattr(e, 'xp_engine', None)
+            if xp and e.config.get("xp_enabled", True):
+                try:
+                    xp.record_stress(model=e.llm.model)
+                    for note in xp.drain_notifications():
+                        self.io.print_info(note)
+                except Exception:
+                    log.debug("XP stress award failed", exc_info=True)
+
             if ci_mode and result.pass_rate < 1.0:
                 import sys
                 sys.exit(1)
@@ -2636,6 +2831,23 @@ class CommandHandler:
         except Exception as exc:
             self.io.print_error(f"Stress suite failed: {exc}")
             log.debug("forge stress error", exc_info=True)
+        return True
+
+    def _cmd_profile(self, arg: str) -> bool:
+        """Show your Forge XP profile, level, title, and achievements.
+
+        Usage:
+          /profile           — summary view
+          /profile --all     — full view with all achievements and title progression
+        """
+        e = self.engine
+        xp = getattr(e, 'xp_engine', None)
+        if not xp:
+            self.io.print_warning("XP system is not enabled.")
+            return True
+
+        verbose = "--all" in arg or "-v" in arg
+        print(xp.format_profile(verbose=verbose))
         return True
 
     # Register commands defined after the _COMMANDS dict
@@ -2647,3 +2859,4 @@ class CommandHandler:
     _COMMANDS["/break"] = _cmd_break
     _COMMANDS["/autopsy"] = _cmd_autopsy
     _COMMANDS["/stress"] = _cmd_stress
+    _COMMANDS["/profile"] = _cmd_profile

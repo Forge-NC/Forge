@@ -6,7 +6,29 @@ import os
 import logging
 
 
+def _setup_crash_handler():
+    """Enable faulthandler so native crashes (segfaults, illegal instructions)
+    dump a traceback to ~/.forge/crash.log instead of dying silently."""
+    import faulthandler
+    try:
+        crash_dir = os.path.join(os.path.expanduser("~"), ".forge")
+        os.makedirs(crash_dir, exist_ok=True)
+        crash_path = os.path.join(crash_dir, "crash.log")
+        # Open in append mode so we keep history
+        crash_file = open(crash_path, "a", encoding="utf-8")
+        # Write timestamp header
+        from datetime import datetime
+        crash_file.write(f"\n=== faulthandler armed {datetime.now().isoformat()} ===\n")
+        crash_file.flush()
+        faulthandler.enable(file=crash_file, all_threads=True)
+    except Exception:
+        # Fallback: enable to stderr
+        faulthandler.enable()
+
+
 def main():
+    _setup_crash_handler()
+
     parser = argparse.ArgumentParser(
         description="Forge — Local AI coding assistant",
     )
@@ -39,12 +61,29 @@ def main():
     )
     args = parser.parse_args()
 
-    # Setup logging
+    # Setup logging — file + console so crashes leave a trail
     level = logging.DEBUG if args.verbose else logging.WARNING
+    log_dir = os.path.join(os.path.expanduser("~"), ".forge")
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, "forge.log")
+    handlers = [logging.StreamHandler()]
+    try:
+        # Rotate: keep last 2MB, then truncate
+        file_h = logging.FileHandler(log_path, encoding="utf-8")
+        # Cap file at 2MB — truncate on startup if too large
+        try:
+            if os.path.getsize(log_path) > 2 * 1024 * 1024:
+                open(log_path, "w").close()
+        except OSError:
+            pass
+        handlers.append(file_h)
+    except Exception:
+        pass
     logging.basicConfig(
         level=level,
         format="%(asctime)s %(name)s %(levelname)s: %(message)s",
         datefmt="%H:%M:%S",
+        handlers=handlers,
     )
 
     # FNC mode: launch the GUI launcher instead of terminal

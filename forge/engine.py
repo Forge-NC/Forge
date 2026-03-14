@@ -442,6 +442,12 @@ class ForgeEngine:
         except Exception as e:
             log.debug("Assurance event bridge: %s", e)
 
+        try:
+            from forge.plugins.bundled.xp_plugin import register_xp_handlers
+            register_xp_handlers(self.event_bus, self)
+        except Exception as e:
+            log.debug("XP event bridge: %s", e)
+
         # Episodic memory — persistent journal across sessions
         self.memory = EpisodicMemory(
             persist_dir=self._config_dir / "journal")
@@ -469,12 +475,14 @@ class ForgeEngine:
 
         # BPoS — Behavioral Proof of Stake license management (init FIRST, others depend on it)
         self._bpos = None
+        self._machine_id = ""
         try:
             from forge.passport import BPoS
             from forge.machine_id import get_machine_id
+            self._machine_id = get_machine_id()
             self._bpos = BPoS(
                 data_dir=self._config_dir,
-                machine_id=get_machine_id(),
+                machine_id=self._machine_id,
             )
         except Exception as e:
             log.debug("BPoS init: %s", e)
@@ -486,6 +494,15 @@ class ForgeEngine:
                 log.debug("Team genome pulled at session start")
         except Exception as e:
             log.debug("Team genome pull: %s", e)
+
+        # XP Engine — gamification (levels, titles, achievements)
+        self.xp_engine = None
+        if self.config.get("xp_enabled", False):
+            try:
+                from forge.xp import XPEngine
+                self.xp_engine = XPEngine(persist_dir=self._config_dir)
+            except Exception as e:
+                log.debug("XP engine init: %s", e)
 
         # AutoForge — smart auto-commit for file edits (Pro/Power only)
         self._autoforge = None
@@ -1136,8 +1153,9 @@ class ForgeEngine:
                 "ami_auto_probe", True):
             caps = self.ami.probe_model_capabilities(self.llm.model)
             if caps and not caps.supports_native_tools:
-                log.warning("Model %s does not support native tool calling — "
-                            "AMI constrained mode active", self.llm.model)
+                fmt = caps.preferred_tool_format or "text_json"
+                log.info("Model %s uses %s tool format (AMI auto-detected)",
+                         self.llm.model, fmt)
 
         # Show hardware profile
         if not hasattr(self, '_hw_summary'):
@@ -4199,6 +4217,8 @@ class ForgeEngine:
                 "duration_m": (bs or {}).get("session_duration_m", 0),
                 "tokens":     (bs or {}).get("session_tokens", 0),
                 "cost_saved": opus_cost,
+                "cost_saved_lifetime": _section("cost_lifetime",
+                    lambda: self.stats.get_cost_analysis().get("total_saved_vs_opus", 0)) or 0,
             },
             "memory": {
                 "journal_entries": _section("journal", lambda: len(self.memory.get_session_entries())) or 0,
@@ -4492,5 +4512,22 @@ class ForgeEngine:
                         print(f"    {DIM}{url}{RESET}")
         except Exception as e:
             log.debug("Bug reporter flush failed: %s", e)
+
+        # XP summary line
+        try:
+            if self.xp_engine and self.config.get("xp_enabled", False):
+                # Update genome with XP snapshot
+                if hasattr(self, '_bpos') and self._bpos:
+                    try:
+                        self._bpos._genome.xp_total = self.xp_engine.total_xp
+                        self._bpos._genome.xp_level = self.xp_engine.level
+                    except Exception:
+                        pass
+                # Print any pending notifications (level ups, achievements)
+                for note in self.xp_engine.drain_notifications():
+                    print(f"{BOLD}{CYAN}{note}{RESET}")
+                print(self.xp_engine.format_exit_summary())
+        except Exception as e:
+            log.debug("XP exit summary failed: %s", e)
 
         print(f"{BOLD}{'=' * 60}{RESET}\n")

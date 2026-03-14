@@ -38,8 +38,7 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-# Forge version (imported lazily to avoid circular imports)
-_FORGE_VERSION = "0.1.0"
+from forge import __version__ as _FORGE_VERSION
 
 # ── Scenario library ──────────────────────────────────────────────────────────
 
@@ -684,6 +683,7 @@ class AssuranceRunner:
         fingerprint_scores: dict | None = None,
         self_rate: bool = False,
         tier: str = "community",
+        progress_callback: Any = None,
     ) -> AssuranceRun:
         """Execute the assurance scenario library and return an AssuranceRun.
 
@@ -827,6 +827,19 @@ class AssuranceRunner:
             status = "PASS" if passed else "FAIL"
             log.info("Assurance [%s] %-35s %s", status, scenario["id"],
                      f"({latency_ms}ms)")
+
+            # Progress callback for UI
+            if progress_callback is not None:
+                try:
+                    progress_callback(
+                        current=len(run.results),
+                        total=len(scenarios),
+                        scenario_id=scenario["id"],
+                        passed=passed,
+                        latency_ms=latency_ms,
+                    )
+                except Exception:
+                    pass
 
         # Summary stats
         all_passed = [r.passed for r in run.results]

@@ -297,6 +297,18 @@ class PluginManager:
                 self._loaded.append(plugin)
             log.info("Loaded plugin: %s v%s", plugin.name, plugin.version)
 
+            # XP: award for loading user plugins (not bundled ones)
+            try:
+                mod = getattr(cls, '__module__', '')
+                src_file = getattr(sys.modules.get(mod, None), '__file__', '') or ''
+                is_user = str(self._plugin_dir) in src_file
+                if is_user:
+                    xp = getattr(engine, 'xp_engine', None)
+                    if xp:
+                        xp.record_plugin(plugin.name)
+            except Exception:
+                pass
+
     def unload_all(self) -> None:
         """Unload every loaded plugin (calls ``on_unload`` on each)."""
         with self._lock:

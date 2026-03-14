@@ -17,9 +17,6 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-# Legacy shared API key — used when no per-user token is configured.
-_API_KEY = "fg_tel_2026_e7eb55900b70bd84eaeb62f7cd0153e7"
-
 # Default endpoint
 _DEFAULT_URL = "https://forge-nc.dev/telemetry_receiver.php"
 
@@ -106,7 +103,8 @@ def upload_telemetry(
                 if token:
                     headers["X-Forge-Token"] = token
                 else:
-                    headers["X-Forge-Key"] = _API_KEY
+                    log.debug("No telemetry_token configured — skipping upload")
+                    return
 
                 # Include fleet metadata if available
                 post_data = {"machine_id": machine_id}
@@ -114,8 +112,7 @@ def upload_telemetry(
                     from forge.config import load_config
                     cfg = load_config()
                     fleet_role = cfg.get("fleet_role", "standalone")
-                    master_id = cfg.get("master_id",
-                                        cfg.get("captain_id", ""))
+                    master_id = cfg.get("master_id", "")
                     account_id = cfg.get("account_id", "")
                     seat_id = cfg.get("seat_id", "")
                     if fleet_role != "standalone":
