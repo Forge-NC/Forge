@@ -89,21 +89,21 @@ class AuditExporter:
             try:
                 package["bug_reporter"] = bug_reporter.to_audit_dict()
             except Exception:
-                pass
+                log.debug("Bug reporter audit data collection failed", exc_info=True)
 
         # AMI data (optional)
         if ami is not None:
             try:
                 package["ami"] = ami.to_audit_dict()
             except Exception:
-                pass
+                log.debug("AMI audit data collection failed", exc_info=True)
 
         # Reliability data (optional — graceful if tracker not provided)
         if reliability is not None:
             try:
                 package["reliability"] = reliability.to_audit_dict()
             except Exception:
-                pass
+                log.debug("Reliability audit data collection failed", exc_info=True)
 
         # Provenance chain integrity verification
         try:
@@ -115,28 +115,28 @@ class AuditExporter:
                 "break_index": break_idx,
             }
         except Exception:
-            pass
+            log.debug("Provenance chain verification failed", exc_info=True)
 
         # Threat intelligence status (if available via Crucible)
         if hasattr(crucible, '_threat_intel') and crucible._threat_intel:
             try:
                 package["threat_intel"] = crucible._threat_intel.to_audit_dict()
             except Exception:
-                pass
+                log.debug("Threat intel audit data collection failed", exc_info=True)
 
         # Shipwright release history (optional)
         if shipwright is not None:
             try:
                 package["shipwright"] = shipwright.to_audit_dict()
             except Exception:
-                pass
+                log.debug("Shipwright audit data collection failed", exc_info=True)
 
         # AutoForge commit log (optional)
         if autoforge is not None:
             try:
                 package["autoforge"] = autoforge.to_audit_dict()
             except Exception:
-                pass
+                log.debug("AutoForge audit data collection failed", exc_info=True)
 
         # BPoS genome and license status (optional)
         if bpos is not None:
@@ -147,14 +147,14 @@ class AuditExporter:
                     "session_count": bpos._genome.session_count,
                 }
             except Exception:
-                pass
+                log.debug("BPoS audit data collection failed", exc_info=True)
 
         # Tool registry analytics (optional)
         if tools is not None:
             try:
                 package["tools"] = tools.to_audit_dict()
             except Exception:
-                pass
+                log.debug("Tool registry audit data collection failed", exc_info=True)
 
         return package
 
@@ -264,7 +264,7 @@ class AuditExporter:
                             break
                 manifest["stress_test_results"] = True
             except Exception:
-                pass
+                log.debug("Stress test trendline inclusion failed", exc_info=True)
 
         # Write zip
         buf = io.BytesIO()

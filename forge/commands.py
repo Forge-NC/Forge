@@ -48,7 +48,7 @@ class CommandHandler:
             e.ctx.save_session(e._session_file)
             self.io.print_info(f"Session auto-saved to {e._session_file}")
         except Exception:
-            pass
+            log.debug("Session auto-save on exit failed", exc_info=True)
         e._print_exit_summary()
         raise SystemExit(0)
 
@@ -794,6 +794,8 @@ class CommandHandler:
             if chunks > 0:
                 short = Path(fpath).name
                 print(f"  {DIM}+{chunks} chunks: {short}{RESET}")
+            elif fpath.startswith("[embedding"):
+                print(f"  {DIM}{fpath}{RESET}", flush=True)
 
         stats = e.index.index_directory(target_dir, callback=progress)
         print(f"\n{BOLD}Indexing complete:{RESET}")
@@ -955,7 +957,7 @@ class CommandHandler:
                         e.config.set("tts_engine", engine_choice)
                         e.config.save()
                     except Exception:
-                        pass
+                        log.debug("TTS engine config save failed", exc_info=True)
                 else:
                     self.io.print_error("TTS not initialized.")
             else:
@@ -1485,7 +1487,7 @@ class CommandHandler:
                 import webbrowser
                 webbrowser.open(str(report_path))
             except Exception:
-                pass
+                log.debug("Failed to open benchmark report in browser", exc_info=True)
             return True
 
         self.io.print_error(
@@ -1738,7 +1740,7 @@ class CommandHandler:
                     if resp.status_code == 200:
                         server_ok = True
                 except Exception:
-                    pass
+                    log.debug("Team token server registration failed", exc_info=True)
 
             # Detect repo URL for onboarding instructions
             repo_url = ""
@@ -2546,7 +2548,7 @@ class CommandHandler:
                         "pct": pct,
                     })
                 except Exception:
-                    pass
+                    log.debug("Event bus break.progress emit failed", exc_info=True)
 
             bpos = getattr(e, '_bpos', None)
             machine_id  = getattr(e, '_machine_id', "") or ""
@@ -2601,7 +2603,7 @@ class CommandHandler:
                             from forge.hardware import detect_gpu
                             gpu = detect_gpu().get("name", "")
                         except Exception:
-                            pass
+                            log.debug("GPU detection failed for XP combo", exc_info=True)
                         xp.record_new_combo(
                             model=e.llm.model,
                             machine_id=mid,
@@ -2648,7 +2650,7 @@ class CommandHandler:
                             "pct": pct,
                         })
                     except Exception:
-                        pass
+                        log.debug("Event bus break.progress emit failed (break suite)", exc_info=True)
 
                 fp_scores = {}
                 if hasattr(e, '_latest_fingerprint'):
@@ -2774,7 +2776,7 @@ class CommandHandler:
         return self._cmd_break(new_arg)
 
     def _cmd_stress(self, arg: str) -> bool:
-        """Run the minimal 3-scenario Forge Stress Suite (CI-compatible, < 30s).
+        """Run the minimal 3-category Forge Stress Suite (CI-compatible, < 30s).
 
         Exits the process with code 1 if any scenario fails (for CI pipelines).
 

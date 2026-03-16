@@ -1,0 +1,155 @@
+{
+  "name": "forge-nc",
+  "displayName": "Forge — Local AI Coding Assistant",
+  "description": "AI coding assistant powered by local models. Inline completions, chat panel, and Crucible threat alerts — all running on your GPU.",
+  "version": "0.9.0",
+  "publisher": "forge-nc",
+  "license": "Proprietary",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Forge-NC/Forge"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "coding-assistant",
+    "ollama",
+    "local-llm",
+    "copilot",
+    "autocomplete",
+    "security"
+  ],
+  "icon": "icon.png",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "forge.chat",
+        "title": "Forge: Open Chat Panel"
+      },
+      {
+        "command": "forge.explain",
+        "title": "Forge: Explain Selection"
+      },
+      {
+        "command": "forge.fix",
+        "title": "Forge: Fix Selection"
+      },
+      {
+        "command": "forge.refactor",
+        "title": "Forge: Refactor Selection"
+      },
+      {
+        "command": "forge.test",
+        "title": "Forge: Generate Tests for Selection"
+      },
+      {
+        "command": "forge.toggleCompletion",
+        "title": "Forge: Toggle Inline Completions"
+      }
+    ],
+    "configuration": {
+      "title": "Forge",
+      "properties": {
+        "forge.ollamaUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Ollama API URL"
+        },
+        "forge.model": {
+          "type": "string",
+          "default": "qwen2.5-coder:14b",
+          "description": "Default model for completions and chat"
+        },
+        "forge.completionModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model for inline completions (blank = use main model)"
+        },
+        "forge.completionEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable inline code completions"
+        },
+        "forge.completionDelay": {
+          "type": "number",
+          "default": 500,
+          "description": "Delay in ms before triggering completion (lower = faster, more GPU usage)"
+        },
+        "forge.maxCompletionTokens": {
+          "type": "number",
+          "default": 128,
+          "description": "Max tokens for inline completions"
+        },
+        "forge.contextLines": {
+          "type": "number",
+          "default": 50,
+          "description": "Lines of context above/below cursor sent to model"
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "forge.explain",
+          "when": "editorHasSelection",
+          "group": "forge@1"
+        },
+        {
+          "command": "forge.fix",
+          "when": "editorHasSelection",
+          "group": "forge@2"
+        },
+        {
+          "command": "forge.refactor",
+          "when": "editorHasSelection",
+          "group": "forge@3"
+        },
+        {
+          "command": "forge.test",
+          "when": "editorHasSelection",
+          "group": "forge@4"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "forge-sidebar",
+          "title": "Forge",
+          "icon": "$(hubot)"
+        }
+      ]
+    },
+    "views": {
+      "forge-sidebar": [
+        {
+          "type": "webview",
+          "id": "forge.chatView",
+          "name": "Forge Chat"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npx @vscode/vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  }
+}

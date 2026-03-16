@@ -1116,7 +1116,7 @@ class ForgeEngine:
                 print()  # clean newline after prompt
 
         except Exception:
-            pass  # Silent — no git, no network, etc.
+            log.debug("Self-update check failed", exc_info=True)
 
     def run(self):
         """Main interactive loop."""
@@ -1128,6 +1128,14 @@ class ForgeEngine:
 
         # Data retention housekeeping (safety-level gated)
         self._run_housekeeping()
+
+        # Upload any pending telemetry from previous crashed sessions
+        if self.config.get("telemetry_enabled", False):
+            try:
+                from forge.telemetry import upload_pending
+                upload_pending()
+            except Exception:
+                log.debug("Pending telemetry upload check failed", exc_info=True)
 
         # Threat signature auto-update (daemon thread, non-blocking)
         if self.config.get("threat_auto_update", True) and self.safety.level > 0:
@@ -1238,6 +1246,19 @@ class ForgeEngine:
                        f"{cs['tokens_saved']:,} tokens saved lifetime "
                        f"({cs['hit_rate']:.0f}% hit rate)")
 
+        # Show telemetry destination (full transparency)
+        if self.config.get("telemetry_enabled", False):
+            from forge.telemetry import _DEFAULT_URL
+            custom_url = self.config.get("telemetry_url", "")
+            if custom_url and custom_url != _DEFAULT_URL:
+                self.io.print_info(
+                    f"Telemetry: ON — uploading to Forge Matrix + {custom_url}")
+            else:
+                self.io.print_info(
+                    "Telemetry: ON — uploading to Forge Matrix (forge-nc.dev)")
+        else:
+            self.io.print_info("Telemetry: OFF")
+
         # Initialize voice input (optional — silent if deps missing)
         self._init_voice()
 
@@ -1267,6 +1288,10 @@ class ForgeEngine:
             "/dashboard", "/hardware", "/voice", "/safety", "/config",
             "/crucible", "/forensics", "/router", "/provenance",
             "/docs", "/plugins", "/plan", "/dedup", "/synapse", "/ami",
+            "/theme", "/report", "/export", "/benchmark", "/update",
+            "/admin", "/threats", "/continuity", "/ship", "/autocommit",
+            "/license", "/puppet", "/assure", "/break", "/autopsy",
+            "/stress", "/profile",
         ])
 
         # Initialize semantic index (non-blocking)
@@ -1326,7 +1351,7 @@ class ForgeEngine:
                     try:
                         self._write_dashboard_state("idle")
                     except Exception:
-                        pass
+                        log.debug("Dashboard heartbeat write failed", exc_info=True)
 
         threading.Thread(target=_heartbeat, daemon=True,
                          name="dash-heartbeat").start()
@@ -1444,8 +1469,7 @@ class ForgeEngine:
             self.event_bus.emit("turn.start", {
                 "turn_id": self._turn_count,
                 "user_input_preview": user_input[:100],
-                "context_pct": round(self.ctx.usage_fraction * 100, 1)
-                               if hasattr(self.ctx, "usage_fraction") else 0,
+                "context_pct": round(self.ctx.usage_pct, 1),
             })
 
             self._engine_busy = True
@@ -1756,6 +1780,11 @@ class ForgeEngine:
             self._turn_count += 1
             self._turn_prompt_tokens = total_prompt_tokens
             self._turn_eval_count = total_eval_count
+
+            # Periodic telemetry checkpoint (every 25 turns)
+            if (self._turn_count % 25 == 0
+                    and self.config.get("telemetry_enabled", False)):
+                self._upload_telemetry_checkpoint()
             if total_prompt_tokens or total_eval_count:
                 self.billing.record_turn(
                     input_tokens=total_prompt_tokens,
@@ -1793,7 +1822,7 @@ class ForgeEngine:
                 "model": self.llm.model,
                 "tokens_prompt": getattr(self.ctx, "total_tokens", 0),
                 "context_pct": round(
-                    getattr(self.ctx, "usage_fraction", 0) * 100, 1),
+                    self.ctx.usage_pct, 1),
             })
             for chunk in self.llm.chat(messages, tools=tools):
                 # Point B: check escape or voice interrupt after each chunk
@@ -2596,7 +2625,7 @@ class ForgeEngine:
                                 try:
                                     Path(fpath).unlink(missing_ok=True)
                                 except Exception:
-                                    pass
+                                    log.debug("Rollback unlink failed for %s", fpath, exc_info=True)
                             vr.rolled_back = True
                             print(f"  {RED}{BOLD}Step {step.number} "
                                   f"rolled back{RESET}")
@@ -2921,7 +2950,7 @@ class ForgeEngine:
             if data:
                 self._dashboard.update_data(data)
         except Exception:
-            pass
+            log.debug("Push dashboard data failed", exc_info=True)
 
     def _write_dashboard_state(self, state: str, extra: dict = None):
         """Write animation state to cross-process file for FNC launcher.
@@ -2942,7 +2971,7 @@ class ForgeEngine:
                 with open(_debug_log, "a", encoding="utf-8") as _f:
                     _f.write(f"[{context}] {err}\n")
             except Exception:
-                pass
+                log.debug("Dashboard debug log write failed for %s", context, exc_info=True)
 
         def _atomic_write(payload: dict, context: str = "write"):
             tmp_path = None
@@ -2959,7 +2988,7 @@ class ForgeEngine:
                     try:
                         os.unlink(tmp_path)
                     except Exception:
-                        pass
+                        log.debug("Failed to clean up temp file %s", tmp_path, exc_info=True)
 
         # Phase 1 — instant, on the engine thread
         now = time.time()
@@ -2974,7 +3003,7 @@ class ForgeEngine:
         try:
             self.io.set_state(state)
         except Exception:
-            pass
+            log.debug("IO state update failed for state=%s", state, exc_info=True)
 
         # Phase 2 — background, never blocks the engine
         _state = state
@@ -2990,7 +3019,7 @@ class ForgeEngine:
                     full.update(snapshot)
                     _atomic_write(full, "phase2")
             except Exception:
-                pass
+                log.debug("Dashboard snapshot worker failed", exc_info=True)
 
         threading.Thread(
             target=_snap_worker, daemon=True, name="dash-snap"
@@ -3258,7 +3287,7 @@ class ForgeEngine:
                                 self.ctx.inject_recall(
                                     recall_text, source=r["file_path"])
                 except Exception:
-                    pass
+                    log.debug("Recovery semantic recall injection failed", exc_info=True)
 
         recovered = sum(
             1 for e in self.ctx._entries
@@ -3629,7 +3658,7 @@ class ForgeEngine:
                         f.unlink()
                         pruned += 1
                 except Exception:
-                    pass
+                    log.debug("Housekeeping prune failed for %s", f, exc_info=True)
         if pruned:
             log.info("Housekeeping: pruned %d files older than %d days",
                      pruned, retention_days)
@@ -3742,7 +3771,7 @@ class ForgeEngine:
                             if m:
                                 recall_scores.append(float(m.group(1)))
             except Exception:
-                pass
+                log.debug("Recall score extraction failed during context swap", exc_info=True)
         self.continuity.record_swap(self._turn_count, recall_scores)
 
         self.event_bus.emit("context.swap", {
@@ -4031,7 +4060,7 @@ class ForgeEngine:
                     self.io.print_info(f"Voice mode switched to: {label}")
                 mode_file.unlink(missing_ok=True)
         except Exception:
-            pass
+            log.debug("Voice mode switch check failed", exc_info=True)
 
         # Check voice focus file — dashboard tells us who owns the mic
         self._check_voice_focus_file()
@@ -4053,7 +4082,7 @@ class ForgeEngine:
                 self._init_voice()
                 log.debug("Voice resumed — terminal has focus")
         except Exception:
-            pass
+            log.debug("Voice focus file check failed", exc_info=True)
 
     def _check_voice_plan_mode(self):
         """Check if dashboard voice command activated plan mode."""
@@ -4072,7 +4101,7 @@ class ForgeEngine:
                 self.planner.disarm()
                 self.io.print_info("Plan mode disabled (via voice).")
         except Exception:
-            pass
+            log.debug("Voice plan mode check failed", exc_info=True)
 
     def _check_config_trigger(self):
         """Check if dashboard saved new config; reload if trigger file exists."""
@@ -4101,7 +4130,7 @@ class ForgeEngine:
                 self.dedup.window = self.config.get("dedup_window", 5)
             log.info("Config reloaded (triggered by dashboard settings)")
         except Exception:
-            pass
+            log.debug("Config trigger reload failed", exc_info=True)
 
     def _handle_command(self, cmd: str) -> bool:
         """Handle slash commands via CommandHandler.
@@ -4157,7 +4186,7 @@ class ForgeEngine:
                 from forge.scheduler import get_schedule_info
                 _res[0] = get_schedule_info()
             except Exception:
-                pass
+                log.debug("Schedule info retrieval failed", exc_info=True)
 
         _t = threading.Thread(target=_worker, daemon=True)
         _t.start()
@@ -4181,7 +4210,7 @@ class ForgeEngine:
                     with open(_debug_log, "a", encoding="utf-8") as _f:
                         _f.write(f"[snap:{name}] {err}\n")
                 except Exception:
-                    pass
+                    log.debug("Snapshot debug log write failed for section %s", name, exc_info=True)
                 return None
 
         ctx_status  = _section("ctx",     lambda: self.ctx.status())
@@ -4200,7 +4229,7 @@ class ForgeEngine:
                 opus_cost = comp["comparisons"].get(
                     "Claude Opus (with re-reads)", {}).get("cost", 0)
             except Exception:
-                pass
+                log.debug("Opus cost extraction failed", exc_info=True)
 
         result = {
             "context": {
@@ -4317,7 +4346,7 @@ class ForgeEngine:
                             "%Y-%m-%d") if last else "--"),
                 }
             except Exception:
-                pass
+                log.debug("Shipwright snapshot worker failed", exc_info=True)
 
         _t = threading.Thread(target=_worker, daemon=True)
         _t.start()
@@ -4361,7 +4390,7 @@ class ForgeEngine:
                 "files_modified": list(self._session_files),
             })
         except Exception:
-            pass
+            log.debug("Event bus session.end emit failed", exc_info=True)
         bs = self.billing.status()
         cs = self.cache.stats()
         comp = self.billing.get_comparison()
@@ -4477,29 +4506,7 @@ class ForgeEngine:
             print(f"  {DIM}Forensics report: {report_path}{RESET}")
 
         # Telemetry upload (non-blocking, silent fail)
-        if self.config.get("telemetry_enabled", False):
-            try:
-                from forge.telemetry import upload_telemetry
-                upload_telemetry(
-                    forensics=self.forensics,
-                    memory=self.memory,
-                    stats=self.stats,
-                    billing=self.billing,
-                    crucible=self.crucible,
-                    continuity=self.continuity,
-                    plan_verifier=self.plan_verifier,
-                    reliability=getattr(self, "reliability", None),
-                    session_start=self._session_start,
-                    turn_count=self._turn_count,
-                    model=self.llm.model,
-                    cwd=self.cwd,
-                    redact=self.config.get("telemetry_redact", True),
-                    telemetry_url=self.config.get("telemetry_url", ""),
-                    blocking=False,
-                )
-                print(f"  {DIM}Telemetry: uploaded{RESET}")
-            except Exception:
-                pass
+        self._upload_telemetry_checkpoint(final=True)
 
         # Bug reporter: check ghosts + flush pending issues
         try:
@@ -4510,8 +4517,40 @@ class ForgeEngine:
                     print(f"  {CYAN}Bug reports filed: {len(urls)}{RESET}")
                     for url in urls:
                         print(f"    {DIM}{url}{RESET}")
-        except Exception as e:
-            log.debug("Bug reporter flush failed: %s", e)
+        except Exception:
+            log.debug("Bug reporter flush failed", exc_info=True)
+
+    def _upload_telemetry_checkpoint(self, final: bool = False):
+        """Upload telemetry data. Called periodically (every 25 turns) and at exit."""
+        if not self.config.get("telemetry_enabled", False):
+            return
+        try:
+            from forge.telemetry import upload_telemetry
+            upload_telemetry(
+                forensics=self.forensics,
+                memory=self.memory,
+                stats=self.stats,
+                billing=self.billing,
+                crucible=self.crucible,
+                continuity=self.continuity,
+                plan_verifier=self.plan_verifier,
+                reliability=getattr(self, "reliability", None),
+                session_start=self._session_start,
+                turn_count=self._turn_count,
+                model=self.llm.model,
+                cwd=self.cwd,
+                redact=self.config.get("telemetry_redact", True),
+                telemetry_url=self.config.get("telemetry_url", ""),
+                blocking=False,
+            )
+            if final:
+                custom = self.config.get("telemetry_url", "")
+                if custom and custom != "https://forge-nc.dev/telemetry_receiver.php":
+                    print(f"  {DIM}Telemetry: uploaded to Forge Matrix + {custom}{RESET}")
+                else:
+                    print(f"  {DIM}Telemetry: uploaded to Forge Matrix{RESET}")
+        except Exception:
+            log.debug("Telemetry checkpoint upload failed", exc_info=True)
 
         # XP summary line
         try:
@@ -4522,7 +4561,7 @@ class ForgeEngine:
                         self._bpos._genome.xp_total = self.xp_engine.total_xp
                         self._bpos._genome.xp_level = self.xp_engine.level
                     except Exception:
-                        pass
+                        log.debug("XP genome snapshot update failed", exc_info=True)
                 # Print any pending notifications (level ups, achievements)
                 for note in self.xp_engine.drain_notifications():
                     print(f"{BOLD}{CYAN}{note}{RESET}")

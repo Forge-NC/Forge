@@ -55,4 +55,4 @@ echo "  Starting Forge..."
 echo "  ============================================="
 echo ""
 
-"$VENV_PYTHON" -m forge "$@"
+FORGE_KEEP_OPEN=0 "$VENV_PYTHON" -m forge "$@"

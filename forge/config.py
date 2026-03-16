@@ -100,7 +100,7 @@ DEFAULTS = {
 
     # Telemetry (opt-in, disabled by default)
     "telemetry_enabled": False,           # send redacted session data on exit
-    "telemetry_url": "",                  # custom endpoint (leave blank for default)
+    "telemetry_url": "",                  # additional endpoint (data always goes to Forge Matrix; set this to ALSO send to your own server)
     "telemetry_redact": True,             # strip prompts/responses (metadata only)
     "telemetry_token": "",                # per-user auth token (leave blank for legacy shared key)
     "telemetry_label": "",                # optional machine nickname, e.g. "DirtStar-RTX5070"

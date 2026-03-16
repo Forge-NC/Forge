@@ -339,7 +339,7 @@
     },
     {
       "name": "gl_airtable_personnal_access_token",
-      "regex": "\\b(pat[[:alnum:]]{14}\\.[a-f0-9]{64})\\b",
+      "regex": "\\b(pat[a-zA-Z0-9]{14}\\.[a-f0-9]{64})\\b",
       "level": 2,
       "category": "secret_leak",
       "description": "Uncovered a possible Airtable Personal AccessToken, potentially compromising database access and leading to data leakage or alteration."

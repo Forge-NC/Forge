@@ -153,7 +153,7 @@ def get_tiers() -> dict:
                 _cached_tiers = merged
                 return _cached_tiers
     except Exception:
-        pass
+        log.debug("Tier config fetch from server failed", exc_info=True)
     return _FALLBACK_TIERS
 
 
@@ -392,12 +392,12 @@ class BPoS:
                 return False, "Signature does not match passport contents"
 
         except ImportError:
-            # cryptography package not installed — soft fail with warning
+            # cryptography package not installed — REJECT passport
             log.warning(
                 "cryptography package not available; passport signature "
                 "cannot be verified.  Install with: pip install cryptography"
             )
-            return True, "unverified (cryptography not installed)"
+            return False, "cryptography package required for signature verification"
         except Exception as exc:
             return False, f"Verification error: {exc}"
 
@@ -475,7 +475,7 @@ class BPoS:
                     snapshot.threat_pattern_distribution = dict(
                         det_stats.get("by_category", {}))
                 except Exception:
-                    pass
+                    log.debug("Threat pattern distribution collection failed", exc_info=True)
 
         # Reliability score
         if hasattr(engine, 'reliability') and engine.reliability:
@@ -639,7 +639,7 @@ class BPoS:
                         bill.read_text(encoding="utf-8")
                     ).get("lifetime_sessions", 0)
             except Exception:
-                pass
+                log.debug("Billing session count read failed for genome maturity", exc_info=True)
         # Sigmoid-like curve: reaches 0.5 at 50 sessions, 0.9 at 200
         import math
         return 1.0 / (1.0 + math.exp(-0.04 * (sessions - 50)))
