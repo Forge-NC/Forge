@@ -33,6 +33,11 @@ def main():
         description="Forge — Local AI coding assistant",
     )
     parser.add_argument(
+        "-V", "--version",
+        action="version",
+        version=f"%(prog)s {__import__('forge').__version__}",
+    )
+    parser.add_argument(
         "-m", "--model",
         default=None,
         help="Ollama model to use (default: qwen2.5-coder:14b)",
@@ -117,6 +122,10 @@ def main():
     else:
         cwd = os.getcwd()
 
+    # Track whether we were launched from a shortcut/GUI
+    # (where the window would vanish on exit)
+    _keep_open = os.environ.get("FORGE_KEEP_OPEN") == "1"
+
     from forge.engine import ForgeEngine
     engine = ForgeEngine(model=args.model, cwd=cwd)
 
@@ -124,20 +133,30 @@ def main():
         engine.run()
     except KeyboardInterrupt:
         print("\nInterrupted.")
+        try:
+            engine._print_exit_summary()
+        except Exception:
+            pass
+    except SystemExit:
+        pass  # /quit raises SystemExit after exit summary — already handled
     except Exception as e:
         from forge.bug_reporter import capture_crash as _capture_crash
         _capture_crash(e)
         print(f"\nFatal error: {e}")
         import traceback
         traceback.print_exc()
+        _keep_open = True  # Always pause on crash so user can read the error
+        try:
+            engine._print_exit_summary()
+        except Exception:
+            pass
 
-    # Keep console open so user can see errors
-    # (especially when launched from the dashboard)
-    try:
-        if sys.stdin and sys.stdin.isatty():
-            input("\nPress Enter to close...")
-    except (EOFError, KeyboardInterrupt):
-        pass
+    if _keep_open:
+        try:
+            if sys.stdin and sys.stdin.isatty():
+                input("\nPress Enter to close...")
+        except (EOFError, KeyboardInterrupt):
+            pass
 
 
 if __name__ == "__main__":

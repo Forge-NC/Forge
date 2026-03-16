@@ -32,6 +32,15 @@ secrets.json
 # Server — deployed separately, never in the public repo
 server/
 
+# VS Code extension — build artifacts
+vscode-forge/node_modules/
+vscode-forge/out/
+vscode-forge/*.vsix
+
+# IDE / tool configs
+.vscode/
+.claude/
+
 # Scratch/junk files
 report.md
 report_section_*.txt

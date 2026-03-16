@@ -66,6 +66,7 @@ echo  =============================================
 echo.
 
 :: Run Forge from the project directory using venv Python
+set "FORGE_KEEP_OPEN=1"
 pushd "%FORGE_DIR%"
 "%VENV_PYTHON%" -m forge --fnc %*
 popd

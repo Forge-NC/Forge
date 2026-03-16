@@ -90,7 +90,9 @@ def upload_telemetry(
                               len(zip_bytes))
                     return
 
-                url = telemetry_url or _DEFAULT_URL
+                # Save to disk first — survives hard kill (Alt+F4, crash, power loss)
+                pending_path = save_pending(zip_bytes)
+
                 machine_id = _get_machine_id()
 
                 # Per-user token takes priority over legacy shared key
@@ -123,20 +125,37 @@ def upload_telemetry(
                 except Exception:
                     pass
 
-                resp = requests.post(
-                    url,
-                    files={"bundle": (
-                        f"forge_{machine_id}.zip", zip_bytes,
-                        "application/zip")},
-                    headers=headers,
-                    data=post_data,
-                    timeout=_TIMEOUT_S,
-                )
-                if resp.status_code == 200:
-                    log.debug("Telemetry uploaded successfully")
-                else:
-                    log.debug("Telemetry upload failed: HTTP %d",
-                              resp.status_code)
+                # Always upload to Forge NC server (the Matrix)
+                urls = [_DEFAULT_URL]
+                # If user set a custom URL, also send there
+                if telemetry_url and telemetry_url != _DEFAULT_URL:
+                    urls.append(telemetry_url)
+
+                for url in urls:
+                    try:
+                        resp = requests.post(
+                            url,
+                            files={"bundle": (
+                                f"forge_{machine_id}.zip", zip_bytes,
+                                "application/zip")},
+                            headers=headers,
+                            data=post_data,
+                            timeout=_TIMEOUT_S,
+                        )
+                        if resp.status_code == 200:
+                            log.debug("Telemetry uploaded to %s", url)
+                        else:
+                            log.debug("Telemetry upload to %s failed: HTTP %d",
+                                      url, resp.status_code)
+                    except Exception as upload_err:
+                        log.debug("Telemetry upload to %s error: %s",
+                                  url, upload_err)
+                # Upload succeeded to at least the primary — remove pending
+                try:
+                    if pending_path and pending_path.exists():
+                        pending_path.unlink()
+                except OSError:
+                    pass
             finally:
                 try:
                     os.unlink(tmp)
@@ -145,6 +164,7 @@ def upload_telemetry(
 
         except Exception as e:
             log.debug("Telemetry upload error: %s", e)
+            # pending file stays on disk — will be retried next session
 
     if blocking:
         _do_upload()
@@ -154,3 +174,84 @@ def upload_telemetry(
         target=_do_upload, daemon=True, name="telemetry-upload")
     t.start()
     return t
+
+
+def upload_pending():
+    """Upload any telemetry bundles from previous sessions that didn't complete.
+
+    Called at startup. Looks for *.zip files in ~/.forge/pending_telemetry/.
+    On successful upload, deletes the file. On failure, leaves it for next time.
+    Runs in a daemon thread so it doesn't block startup.
+    """
+    pending_dir = Path.home() / ".forge" / "pending_telemetry"
+    if not pending_dir.is_dir():
+        return
+
+    zips = list(pending_dir.glob("*.zip"))
+    if not zips:
+        return
+
+    def _upload_pending():
+        import requests
+
+        # Auth token
+        try:
+            from forge.config import load_config
+            token = load_config().get("telemetry_token", "")
+        except Exception:
+            token = ""
+        if not token:
+            return
+
+        headers = {"X-Forge-Token": token}
+        machine_id = _get_machine_id()
+
+        for zip_path in zips:
+            try:
+                zip_bytes = zip_path.read_bytes()
+                if len(zip_bytes) > _MAX_ZIP_BYTES:
+                    zip_path.unlink()  # too large, discard
+                    continue
+
+                # Upload to Forge Matrix
+                resp = requests.post(
+                    _DEFAULT_URL,
+                    files={"bundle": (
+                        f"forge_{machine_id}.zip", zip_bytes,
+                        "application/zip")},
+                    headers=headers,
+                    data={"machine_id": machine_id},
+                    timeout=_TIMEOUT_S,
+                )
+                if resp.status_code == 200:
+                    zip_path.unlink()  # success — remove pending
+                    log.debug("Pending telemetry uploaded: %s", zip_path.name)
+                else:
+                    log.debug("Pending telemetry upload failed: HTTP %d",
+                              resp.status_code)
+            except Exception as e:
+                log.debug("Pending telemetry upload error: %s", e)
+
+    threading.Thread(
+        target=_upload_pending, daemon=True,
+        name="pending-telemetry-upload").start()
+
+
+def save_pending(zip_bytes: bytes):
+    """Save a telemetry bundle to disk for retry on next startup.
+
+    Called during session to ensure data survives a hard kill.
+    """
+    pending_dir = Path.home() / ".forge" / "pending_telemetry"
+    pending_dir.mkdir(parents=True, exist_ok=True)
+
+    # Clean old pending files (keep max 5, oldest first)
+    existing = sorted(pending_dir.glob("*.zip"), key=lambda p: p.stat().st_mtime)
+    while len(existing) >= 5:
+        existing.pop(0).unlink()
+
+    import time
+    pending_path = pending_dir / f"pending_{int(time.time())}_{_get_machine_id()}.zip"
+    pending_path.write_bytes(zip_bytes)
+    log.debug("Telemetry saved to pending: %s", pending_path.name)
+    return pending_path

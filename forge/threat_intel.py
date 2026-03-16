@@ -515,7 +515,7 @@ class ThreatIntelManager:
             r'\((?:\?:)?'   # open group (optionally non-capturing)
             r'\s*'          # optional whitespace
             r'(?:'
-              r'[^\\)\[\]]{0,2}[+*]'  # 1-2 char atom with +/* (like a+ or .+)
+              r'[^\\)\x5b\x5d]{0,2}[+*]'  # 1-2 char atom with +/* (like a+ or .+)
               r'|\\[wWsS][+*]'        # \w+ \W+ \s+ \S+ as first element
               r'|\.\*'                 # .* as first element
               r'|\.\+'                 # .+ as first element

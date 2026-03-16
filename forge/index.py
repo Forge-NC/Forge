@@ -261,11 +261,31 @@ class CodebaseIndex:
                 c.content[:EMBED_MAX_CHARS] for c in chunks)
             chunk_ranges.append((start, len(all_texts)))
 
-        # Phase 3: Embed everything in one call (embed() handles batching)
+        # Phase 3: Embed in batches with progress output
+        total_chunks = len(all_texts)
         log.info("Embedding %d chunks from %d files...",
-                 len(all_texts), len(pending))
+                 total_chunks, len(pending))
+        if callback:
+            try:
+                callback(f"[embedding {total_chunks} chunks...]", 0)
+            except Exception:
+                pass
+
+        EMBED_BATCH = 32  # chunks per batch — balance speed vs responsiveness
+        raw_embeddings: list = []
         try:
-            raw_embeddings = self._embed_fn(all_texts)
+            for batch_start in range(0, total_chunks, EMBED_BATCH):
+                batch_end = min(batch_start + EMBED_BATCH, total_chunks)
+                batch = all_texts[batch_start:batch_end]
+                batch_result = self._embed_fn(batch)
+                if batch_result:
+                    raw_embeddings.extend(batch_result)
+                pct = int(batch_end / total_chunks * 100)
+                if callback:
+                    try:
+                        callback(f"[embedding {batch_end}/{total_chunks} ({pct}%)]", 0)
+                    except Exception:
+                        pass
         except Exception as exc:
             log.error("Bulk embedding failed: %s", exc)
             from forge.bug_reporter import capture_ghost
