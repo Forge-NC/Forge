@@ -8,7 +8,7 @@ readme = "README.md"
 authors = [{name = "Forge-NC"}]
 keywords = ["ai", "coding-assistant", "local-llm", "ollama", "security", "ai-testing", "ai-assurance"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Environment :: GPU",
     "Intended Audience :: Developers",

@@ -38,7 +38,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     // Inline completion provider
-    const completionProvider = new ForgeCompletionProvider(client);
+    const completionProvider = new ForgeCompletionProvider();
     context.subscriptions.push(
         vscode.languages.registerInlineCompletionItemProvider(
             { pattern: '**' },
@@ -90,7 +90,6 @@ export function activate(context: vscode.ExtensionContext) {
 
                 const selected = editor.document.getText(editor.selection);
                 const lang = editor.document.languageId;
-                const model = config.get<string>('model', 'qwen2.5-coder:14b');
 
                 const prompt = `${systemPrefix}\`\`\`${lang}\n${selected}\n\`\`\``;
 

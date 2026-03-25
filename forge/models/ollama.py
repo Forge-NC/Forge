@@ -14,8 +14,8 @@ import requests
 
 log = logging.getLogger(__name__)
 
-# Default model — Qwen2.5-Coder-32B at Q4_K_M fits 16GB VRAM
-DEFAULT_MODEL = "qwen2.5-coder:32b"
+# Default model — Qwen2.5-Coder-14B at Q4_K_M fits 16GB VRAM
+DEFAULT_MODEL = "qwen2.5-coder:14b"
 OLLAMA_BASE = "http://localhost:11434"
 
 

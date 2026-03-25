@@ -16,8 +16,8 @@ assistance to your editor, running entirely on your local machine via
 - **Refactor Selection** -- restructure selected code for clarity, performance,
   or idiomatic style.
 - **Generate Tests** -- produce unit tests for the selected function or class.
-- **Crucible Threat Alerts** -- surface potential security issues detected by
-  Forge's threat-intelligence engine.
+- **Forge Crucible Security** -- Forge Crucible's 9-layer threat detection runs
+  in the Forge desktop app, keeping your codebase safe during AI-assisted work.
 
 ## Requirements
 
