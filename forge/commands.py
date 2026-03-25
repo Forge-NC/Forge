@@ -2727,10 +2727,11 @@ class CommandHandler:
                 import json
                 print(json.dumps(combined, indent=2))
 
-            # ── Upload (opt-in only) ──────────────────────────────────
+            # ── Upload (always goes to Forge Matrix) ─────────────────
+            _DEFAULT_ASSURANCE_URL = "https://forge-nc.dev/assurance_verify.php"
             auto_share = e.config.get("telemetry_enabled", False)
             if share or auto_share:
-                share_url = e.config.get("assurance_url", "")
+                share_url = e.config.get("assurance_url", "") or _DEFAULT_ASSURANCE_URL
                 if not share_url:
                     if share:
                         self.io.print_warning(
