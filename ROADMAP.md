@@ -2,22 +2,28 @@
 # From Engineering to Revenue
 
 > Written: 2026-03-24
-> Status: Pre-release (v0.9.0) — all engineering phases complete
-> Previous roadmap (Phases 1-5) fully implemented and archived
+> Updated: 2026-03-25 — LAUNCHED (repo public, PyPI live)
+> Status: v0.9.0 PUBLIC — Phase 1 nearly complete
+> Previous roadmap (Phases 1-5 engineering) fully implemented and archived
 > This document is Forge-readable. Internal AI, read this to understand the plan.
 
 ---
 
-## Where We Are
+## Where We Are (2026-03-25)
 
-Forge v0.9.0 is a complete product: 80,000+ lines of Python, 18,000+ lines of PHP server,
-a VS Code extension, 1,318 passing tests, 60 slash commands, 28 AI tools, 38 assurance
-scenarios, 30-probe behavioral fingerprinting, Ed25519-signed reports, 14 themes, XP/achievement
-system, fleet management, and a 3D model intelligence visualization (the Forge Matrix™).
+Forge v0.9.0 is live and publicly available:
+- **GitHub:** https://github.com/Forge-NC/Forge (public, 2026-03-25)
+- **PyPI:** `pip install forge-nc` (published 2026-03-25)
+- **Website:** https://forge-nc.dev (live with docs, dashboard, admin, Matrix)
+- **VS Code extension:** Built and packaged, marketplace publishing pending
 
-The website is live at forge-nc.dev with docs, dashboard, analytics, admin panel, and XP leaderboard.
+80,000+ lines of Python, 18,000+ lines of PHP server, a VS Code extension,
+1,318 passing tests, 60 slash commands, 28 AI tools, 38 assurance scenarios,
+30-probe behavioral fingerprinting, Ed25519-signed reports, 14 themes,
+XP/achievement system, fleet management, and the Forge Matrix™ 3D visualization.
 
-**What's missing is not code. It's distribution, users, and revenue.**
+**Patent clock started 2026-03-25. Filing deadline: 2027-03-25.**
+Three provisional patent applications in preparation (semantic anomaly, behavioral tripwire, continuity grading).
 
 ---
 
@@ -26,18 +32,21 @@ The website is live at forge-nc.dev with docs, dashboard, analytics, admin panel
 **Goal:** Anyone can install Forge in under 5 minutes.
 
 ### Deliverables
-- [ ] Fix all CRITICAL bugs from pre-release audit (xp_sync.php, scoreboard URL, report_view index, VS Code config propagation)
-- [ ] Fix all HIGH bugs (embed model guard for non-Ollama backends, VS Code chat XSS, unbounded history, README accuracy)
-- [ ] Make GitHub repo public
-- [ ] Publish to PyPI (`pip install forge-nc`)
-- [ ] Publish VS Code extension to marketplace
-- [ ] Update pyproject.toml classifier from Alpha to Beta
-- [ ] Commit and push all accumulated fixes
+- [x] Fix all CRITICAL bugs from pre-release audit — DONE 2026-03-24
+- [x] Fix all HIGH bugs — DONE 2026-03-24
+- [x] Make GitHub repo public — DONE 2026-03-25
+- [x] Publish to PyPI (`pip install forge-nc`) — DONE 2026-03-25
+- [ ] Publish VS Code extension to marketplace (needs Azure DevOps PAT)
+- [x] Update pyproject.toml classifier from Alpha to Beta — DONE 2026-03-24
+- [x] Commit and push all accumulated fixes — DONE 2026-03-25
+- [x] Auth system refactored: tier/role/admin separated — DONE 2026-03-25
+- [x] Account ID system: opaque IDs (FORGE-0001, fg_xxxx) — DONE 2026-03-25
+- [x] Dashboard: settings tab, fleet merge, XP opt-in — DONE 2026-03-25
 
 ### Success Criteria
-- `pip install forge-nc && forge` works on a fresh machine with Ollama installed
-- VS Code extension installable from marketplace search
-- GitHub repo has a clean README with install instructions that work
+- [x] `pip install forge-nc && forge` works — VERIFIED
+- [ ] VS Code extension installable from marketplace search — PENDING
+- [x] GitHub repo has a clean README with install instructions that work — VERIFIED
 
 ---
 
@@ -196,7 +205,16 @@ All 5 engineering phases completed:
 - Phase 5: Public Surface (break, autopsy, stress)
 
 ### Pre-Release Audit (2026-03-24)
-Full codebase audit completed. 7 critical, 8 high, 10 medium issues identified and being fixed.
+Full codebase audit completed. 7 critical, 8 high, 10 medium issues identified and fixed.
 Website restructured with two-story split (Code with Forge / Break Your AI).
 Theme system unified across all pages. Navigation simplified. Dashboard built.
-XP sync endpoint deployed. Analytics redesigned. All stats verified against codebase.
+XP sync endpoint deployed. Analytics merged into dashboard. All stats verified against codebase.
+Publications synced. Constants centralized. Telemetry dual-upload + pending recovery added.
+
+### Public Launch (2026-03-25)
+- GitHub repo made public (forking disabled — proprietary license)
+- Published to PyPI: `pip install forge-nc`
+- Auth system refactored: tier, role, and admin are now independent concepts
+- Account IDs migrated to opaque format (FORGE-0001 for origin, fg_xxxx for users)
+- Patent clock started — 3 provisional applications in preparation
+- Docs updated with pip install as primary install method
