@@ -15,10 +15,12 @@ import threading
 from pathlib import Path
 from typing import Optional
 
+from forge.constants import TELEMETRY_URL
+
 log = logging.getLogger(__name__)
 
 # Default endpoint
-_DEFAULT_URL = "https://forge-nc.dev/telemetry_receiver.php"
+_DEFAULT_URL = TELEMETRY_URL
 
 # Upload constraints
 _TIMEOUT_S = 5

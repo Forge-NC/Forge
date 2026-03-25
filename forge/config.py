@@ -11,6 +11,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from forge.constants import CHALLENGE_URL, ASSURANCE_URL, SIGNATURES_URL
+
 log = logging.getLogger(__name__)
 
 # ── Default configuration ──
@@ -91,10 +93,10 @@ DEFAULTS = {
     "behavioral_fingerprint": True,       # run 30-probe suite at session start (background)
 
     # Proof of Inference (Phase 3)
-    "challenge_url": "https://forge-nc.dev/challenge_server.php",
+    "challenge_url": CHALLENGE_URL,
 
     # AI Assurance (Phase 4)
-    "assurance_url": "https://forge-nc.dev/assurance_verify.php",
+    "assurance_url": ASSURANCE_URL,
     "auto_assurance": False,          # run /assure automatically on session.end
     "assurance_self_rate": False,     # ask model to rate own confidence + explain failures
 
@@ -122,7 +124,7 @@ DEFAULTS = {
 
     # Threat Intelligence
     "threat_signatures_enabled": True,    # load external signature database
-    "threat_signatures_url": "https://forge-nc.dev/signatures.json",  # URL for signature updates
+    "threat_signatures_url": SIGNATURES_URL,  # URL for signature updates
     "threat_auto_update": True,           # auto-check for signature updates on startup
 
     # Adaptive Model Intelligence

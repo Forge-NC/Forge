@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from forge.constants import FORGE_SERVER, TELEMETRY_URL
 from forge.context import ContextWindow, ContextFullError
 from forge.models.ollama import OllamaBackend
 from forge.tools.registry import ToolRegistry, ToolResult
@@ -1255,7 +1256,7 @@ class ForgeEngine:
                     f"Telemetry: ON — uploading to Forge Matrix + {custom_url}")
             else:
                 self.io.print_info(
-                    "Telemetry: ON — uploading to Forge Matrix (forge-nc.dev)")
+                    f"Telemetry: ON — uploading to Forge Matrix ({FORGE_SERVER})")
         else:
             self.io.print_info("Telemetry: OFF")
 
@@ -4545,7 +4546,7 @@ class ForgeEngine:
             )
             if final:
                 custom = self.config.get("telemetry_url", "")
-                if custom and custom != "https://forge-nc.dev/telemetry_receiver.php":
+                if custom and custom != TELEMETRY_URL:
                     print(f"  {DIM}Telemetry: uploaded to Forge Matrix + {custom}{RESET}")
                 else:
                     print(f"  {DIM}Telemetry: uploaded to Forge Matrix{RESET}")

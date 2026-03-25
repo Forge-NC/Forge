@@ -31,13 +31,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from forge.constants import PASSPORT_API_URL
+
 log = logging.getLogger(__name__)
 
 # Puppet considered stale after 24 hours without heartbeat
 STALE_THRESHOLD_S = 86400
 
 # Server endpoint for passport operations
-DEFAULT_PASSPORT_API = "https://forge-nc.dev/passport_api.php"
+DEFAULT_PASSPORT_API = PASSPORT_API_URL
 
 
 class PuppetRole(enum.Enum):

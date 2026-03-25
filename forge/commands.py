@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from forge.constants import TOKEN_ADMIN_URL, ASSURANCE_URL
 from forge.crucible import ThreatLevel
 from forge.ui.terminal import (
     RESET, DIM, BOLD, YELLOW, RED, CYAN, GREEN, MAGENTA, WHITE, GRAY,
@@ -1726,13 +1727,7 @@ class CommandHandler:
             if admin_token:
                 try:
                     import requests
-                    url = self.engine.config.get("telemetry_url", "")
-                    if not url:
-                        url = "https://forge-nc.dev/token_admin.php"
-                    else:
-                        url = url.replace("telemetry_receiver.php",
-                                          "token_admin.php")
-                    resp = requests.post(url, json={
+                    resp = requests.post(TOKEN_ADMIN_URL, json={
                         "action": "register",
                         "token_hash": token_hash,
                         "label": label,
@@ -1803,13 +1798,7 @@ class CommandHandler:
 
             try:
                 import requests
-                url = self.engine.config.get("telemetry_url", "")
-                if not url:
-                    url = "https://forge-nc.dev/token_admin.php"
-                else:
-                    url = url.replace("telemetry_receiver.php",
-                                      "token_admin.php")
-                resp = requests.post(url, json={
+                resp = requests.post(TOKEN_ADMIN_URL, json={
                     "action": "set_role",
                     "label": role_label,
                     "role": role_value,
@@ -2728,10 +2717,9 @@ class CommandHandler:
                 print(json.dumps(combined, indent=2))
 
             # ── Upload (always goes to Forge Matrix) ─────────────────
-            _DEFAULT_ASSURANCE_URL = "https://forge-nc.dev/assurance_verify.php"
             auto_share = e.config.get("telemetry_enabled", False)
             if share or auto_share:
-                share_url = e.config.get("assurance_url", "") or _DEFAULT_ASSURANCE_URL
+                share_url = e.config.get("assurance_url", "") or ASSURANCE_URL
                 if not share_url:
                     if share:
                         self.io.print_warning(

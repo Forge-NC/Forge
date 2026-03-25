@@ -46,6 +46,8 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Optional
 
+from forge.constants import PASSPORT_API_URL
+
 log = logging.getLogger(__name__)
 
 # ── Tier definitions ──
@@ -121,8 +123,6 @@ _FALLBACK_TIERS = {
 
 # Cache for server-fetched tiers
 _cached_tiers: Optional[dict] = None
-
-PASSPORT_API_URL = "https://forge-nc.dev/passport_api.php"
 
 
 def get_tiers() -> dict:

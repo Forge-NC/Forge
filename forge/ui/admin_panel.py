@@ -28,6 +28,7 @@ except ImportError:
     HAS_CTK = False
 
 from forge.config import ForgeConfig
+from forge.constants import TOKEN_ADMIN_URL
 from forge.ui.themes import (
     get_colors, get_fonts,
     add_theme_listener, remove_theme_listener, recolor_widget_tree,
@@ -1139,7 +1140,7 @@ class AdminPanelDialog:
         # Register server-side (best-effort, background)
         def _do_register():
             admin_token = self._config.get("telemetry_token", "")
-            url = "https://forge-nc.dev/token_admin.php"
+            url = TOKEN_ADMIN_URL
             try:
                 import urllib.request
                 payload = json.dumps({
@@ -1202,7 +1203,7 @@ class AdminPanelDialog:
     def _do_refresh_tokens(self):
         """Fetch token list from server (background thread)."""
         admin_token = self._config.get("telemetry_token", "")
-        url = "https://forge-nc.dev/token_admin.php"
+        url = TOKEN_ADMIN_URL
         try:
             import urllib.request
             req = urllib.request.Request(
@@ -1344,7 +1345,7 @@ class AdminPanelDialog:
 
         def _do():
             admin_token = self._config.get("telemetry_token", "")
-            url = "https://forge-nc.dev/token_admin.php"
+            url = TOKEN_ADMIN_URL
             try:
                 import urllib.request
                 payload = json.dumps({
@@ -1392,7 +1393,7 @@ class AdminPanelDialog:
 
         def _do():
             admin_token = self._config.get("telemetry_token", "")
-            url = "https://forge-nc.dev/token_admin.php"
+            url = TOKEN_ADMIN_URL
             try:
                 import urllib.request
                 payload = json.dumps({
