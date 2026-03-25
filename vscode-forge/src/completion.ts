@@ -21,13 +21,10 @@ function supportsFIM(model: string): boolean {
 }
 
 export class ForgeCompletionProvider implements vscode.InlineCompletionItemProvider {
-    private client: OllamaClient;
     private debounceTimer: NodeJS.Timeout | undefined;
     private lastCancel: vscode.CancellationTokenSource | undefined;
 
-    constructor(client: OllamaClient) {
-        this.client = client;
-    }
+    constructor() {}
 
     async provideInlineCompletionItems(
         document: vscode.TextDocument,
@@ -39,6 +36,10 @@ export class ForgeCompletionProvider implements vscode.InlineCompletionItemProvi
         if (!config.get<boolean>('completionEnabled', true)) {
             return undefined;
         }
+
+        // Read URL fresh from config on every request so config changes propagate
+        const url = config.get<string>('ollamaUrl', 'http://localhost:11434');
+        const client = new OllamaClient(url);
 
         // Cancel any previous pending request
         if (this.lastCancel) {
@@ -74,7 +75,7 @@ export class ForgeCompletionProvider implements vscode.InlineCompletionItemProvi
 
             if (supportsFIM(model)) {
                 // Native FIM: Ollama applies model-specific tokens automatically
-                response = await this.client.generate({
+                response = await client.generate({
                     model,
                     prompt: prefix,
                     suffix: suffix,
@@ -90,7 +91,7 @@ export class ForgeCompletionProvider implements vscode.InlineCompletionItemProvi
                 const prompt = `<|file|>${fileName}\n<|lang|>${lang}\n<|prefix|>\n${prefix}<|cursor|>${suffix}\n<|complete|>`;
                 const system = `You are a code completion engine. Output ONLY the code that should be inserted at <|cursor|>. No explanation, no markdown, no backticks. Just the raw code to insert. Keep it short and contextually appropriate.`;
 
-                response = await this.client.generate({
+                response = await client.generate({
                     model,
                     prompt,
                     system,

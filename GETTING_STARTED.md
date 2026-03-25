@@ -53,7 +53,7 @@ Try a few turns of conversation. Notice the context management — it handles lo
 ## Step 4: Explore Commands (2 min)
 
 ```
-/help           — see all 58 commands
+/help           — see all 60 commands
 /context        — check context window usage
 /continuity     — see context quality grade (A-F)
 /billing        — token usage this session

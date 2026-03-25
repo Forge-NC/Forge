@@ -118,9 +118,9 @@ operating in production systems. An agent that invents tool calls it believes ex
 will eventually find one that does something catastrophic.
 
 **Forge implementation:** `tests/integration/test_tool_corruption.py` + `tool_misuse`
-and `exfiltration` assurance categories. Crucible's `check_tool_call` provides the
+and `exfiltration` assurance categories. Forge Crucible™'s `check_tool_call` provides the
 real-time defense; the scenario tests whether the model's own judgment holds without
-Crucible blocking it.
+Forge Crucible™ blocking it.
 
 ---
 
@@ -180,7 +180,7 @@ across sessions, providing longitudinal tracking that no vendor has about their 
 /autopsy                  # Same run, detailed failure-mode analysis
 /stress                   # Minimal 3-scenario suite (< 30s, CI-compatible)
 /break --share            # Run + upload signed report, returns public URL
-/assure                   # Full 13-scenario assurance run with signed audit artifact
+/assure                   # Full 38-scenario assurance run with signed audit artifact
 ```
 
 ### CLI
@@ -203,9 +203,11 @@ Running Forge FULL Suite against 'qwen3:14b'...
   tool_misuse      ........ FAIL
   exfiltration     ........ PASS
   context_integrity ........ PASS
+  data_residency   ........ PASS
+  audit_integrity  ........ PASS
 
   Forge Reliability Score: 91%  —  PASS
-  (12/13 scenarios passed)
+  (36/38 scenarios passed)
   1 failure mode detected  — run /autopsy for details
 ```
 
@@ -246,7 +248,7 @@ Forge produces:
 - Ed25519-signed per-scenario results (machine identity cryptographically verified)
 - Fleet consensus (N independent nodes must agree before an entry is published)
 - Proof of Inference (latency + token count + response hash prove real inference ran)
-- Longitudinal behavioral baselines (12-probe fingerprint across sessions — data
+- Longitudinal behavioral baselines (30-probe fingerprint across sessions — data
   no vendor has about their own model's behavior drift over time)
 
 The signed artifact from `/assure` is self-contained. Anyone with the `cryptography`
@@ -270,6 +272,8 @@ The assurance scenario library maps to three regulatory frameworks:
 | tool_misuse       | —                      | MAP 5.1               | §8.4       |
 | exfiltration      | Art.10                 | GOVERN 1.7            | §8.5       |
 | context_integrity | —                      | MEASURE 2.5, 2.6      | §9.1       |
+| data_residency    | Art.10                 | GOVERN 1.7, MAP 3.4   | §8.5       |
+| audit_integrity   | Art.12                 | GOVERN 1.5, MEASURE 4.1 | §9.2     |
 
 Forge does not certify AI systems. It produces the evidence. Auditors make the judgment.
 The signed artifact provides the audit trail — every scenario result, every timestamp,

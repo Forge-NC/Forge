@@ -761,6 +761,9 @@ class CommandHandler:
 
     def _cmd_index(self, arg: str) -> bool:
         e = self.engine
+        if not hasattr(e.llm, 'ensure_embed_model'):
+            self.io.print_error("Semantic indexing requires Ollama backend.")
+            return True
         self.io.print_info("Checking embedding model...")
         has_embed = e.llm.ensure_embed_model(auto_pull=True)
         if not has_embed:
@@ -2399,7 +2402,7 @@ class CommandHandler:
 
             # ── XP awards ─────────────────────────────────────────────
             xp = getattr(e, 'xp_engine', None)
-            if xp and e.config.get("xp_enabled", True):
+            if xp and e.config.get("xp_enabled", False):
                 try:
                     xp.record_assure(
                         model=e.llm.model,
@@ -2572,7 +2575,7 @@ class CommandHandler:
 
             # ── XP awards ─────────────────────────────────────────────
             xp = getattr(e, 'xp_engine', None)
-            if xp and e.config.get("xp_enabled", True):
+            if xp and e.config.get("xp_enabled", False):
                 try:
                     xp.record_break(
                         model=e.llm.model,
@@ -2697,7 +2700,7 @@ class CommandHandler:
 
                 # XP: assure portion of the combo
                 xp = getattr(e, 'xp_engine', None)
-                if xp and e.config.get("xp_enabled", True):
+                if xp and e.config.get("xp_enabled", False):
                     try:
                         xp.record_assure(
                             model=e.llm.model,
@@ -2807,7 +2810,7 @@ class CommandHandler:
 
             # ── XP awards ─────────────────────────────────────────────
             xp = getattr(e, 'xp_engine', None)
-            if xp and e.config.get("xp_enabled", True):
+            if xp and e.config.get("xp_enabled", False):
                 try:
                     xp.record_stress(model=e.llm.model)
                     for note in xp.drain_notifications():

@@ -37,6 +37,10 @@ export class ForgeChatViewProvider implements vscode.WebviewViewProvider {
         const config = vscode.workspace.getConfiguration('forge');
         const model = config.get<string>('model', 'qwen2.5-coder:14b');
 
+        // Read URL fresh from config so config changes propagate immediately
+        const url = config.get<string>('ollamaUrl', 'http://localhost:11434');
+        this.client = new OllamaClient(url);
+
         // Get active editor context
         const editor = vscode.window.activeTextEditor;
         let fileContext = '';
@@ -86,6 +90,16 @@ export class ForgeChatViewProvider implements vscode.WebviewViewProvider {
 
         // Build the user message content with file context
         const userContent = fileContext ? `${fileContext}\n\n${userMessage}` : userMessage;
+
+        // Keep last 50 messages to prevent exceeding context window
+        while (this.messages.length > 50) {
+            // Keep system message (index 0), remove oldest user/assistant pair
+            if (this.messages[0]?.role === 'system') {
+                this.messages.splice(1, 2);
+            } else {
+                this.messages.splice(0, 2);
+            }
+        }
 
         // Push user message to conversation history
         this.messages.push({ role: 'user', content: userContent });
@@ -346,6 +360,8 @@ function renderMarkdown(text) {
     processed = processed.replace(/^#\\s+(.+)$/gm, '<h1>$1</h1>');
     // Links
     processed = processed.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2" target="_blank">$1</a>');
+    // Sanitize non-http(s) links (block javascript: URLs etc.)
+    processed = processed.replace(/href="(?!https?:\\/\\/)[^"]*"/g, 'href="#"');
 
     // Unordered lists: consecutive lines starting with "- "
     processed = processed.replace(/(?:^|\\n)((?:- .+(?:\\n|$))+)/g, function(match, block) {

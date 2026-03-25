@@ -21,7 +21,7 @@ AI tools help you write code. But none of them tell you whether the model you're
 
 Forge is a local AI coding assistant that also audits the AI it runs. Write code with any Ollama model. Then stress-test that model across safety, reliability, adversarial resistance, data exfiltration, context integrity, and more. Get a cryptographically signed report of exactly what happened. Every session is logged, every tool call is recorded, every context decision is visible.
 
-**The [Forge Matrix](https://forge-nc.dev/matrix.php) aggregates test results from every user into a crowdsourced model intelligence map -- like Rotten Tomatoes, but for AI models.** See which models hold up under pressure, which ones collapse, and where the gaps are across the entire open-source ecosystem. Users run the tests. The data speaks for itself.
+**The [Forge Matrix™](https://forge-nc.dev/matrix.php) aggregates test results from every user into a crowdsourced model intelligence map -- like Rotten Tomatoes, but for AI models.** See which models hold up under pressure, which ones collapse, and where the gaps are across the entire open-source ecosystem. Users run the tests. The data speaks for itself.
 
 Everything runs on your hardware. Nothing leaves your machine unless you opt in.
 
@@ -30,7 +30,7 @@ git clone https://github.com/Forge-NC/Forge.git
 cd Forge && python install.py
 ```
 
-79,000+ lines of Python. 1,280 tests. 58 commands. Zero telemetry by default.
+79,000+ lines of Python. 1,318 tests. 60 commands. Zero telemetry by default.
 
 ## The Coding Assistant
 
@@ -44,7 +44,7 @@ Download Forge, pick a model, start coding. Every user gets:
 - **Billing ledger** -- token-level cost accounting with per-turn tracking. Compare your local costs against cloud providers with `/compare`.
 - **Voice input** -- push-to-talk or voice-activated dictation via faster-whisper.
 - **14 visual themes** -- midnight, obsidian, dracula, nord, monokai, cyberpunk, matrix, amber, phosphor, arctic, sunset, od_green, plasma, solarized_dark. Hot-swap with `/theme`.
-- **Plugin system** -- 19 hooks for extending Forge behavior. Drop a `.py` file in `~/.forge/plugins/` and it loads automatically.
+- **Plugin system** -- 17 hooks for extending Forge behavior. Drop a `.py` file in `~/.forge/plugins/` and it loads automatically.
 - **Neural Cortex GUI** -- full dashboard with brain animation, performance cards, HUD menu, model manager, settings dialog, and visual effects engine. Or use the console terminal if you prefer.
 
 ## The Auditing Platform
@@ -102,21 +102,21 @@ For teams running Forge across multiple machines:
 - Fleet health dashboard with cross-machine analytics
 - SLA alerting when fleet pass rate drops below threshold
 
-## Crucible™ Security Pipeline
+## Forge Crucible™ Security Pipeline
 
 9 layers spanning the full request lifecycle:
 
 | # | Layer | Function |
 |---|-------|----------|
-| 1 | **Static Pattern Scan** | Regex detection of prompt injection signatures, shell metacharacters, LOLBins |
-| 2 | **Zero-Width Unicode** | Invisible characters that alter code behavior |
-| 3 | **Encoded Payload Detection** | Base64, nested encoding, obfuscation |
-| 4 | **Behavioral Tripwires** | Timing anomalies, call frequency spikes, honeypot canary integrity |
-| 5 | **Output Scanning** | AI-generated responses scanned before reaching user or disk |
-| 6 | **RAG Scanning** | Retrieved context validated for injection and poisoning |
-| 7 | **Rate Limiting** | Abnormal request pattern throttling |
-| 8 | **Threat Intelligence** | Updatable signature database with SHA-512 validation and version monotonicity |
-| 9 | **Tool Fencing / Sandbox** | 4-tier safety guard with filesystem sandboxing |
+| 1 | **Pattern Scanner** | Regex detection of prompt injection signatures, shell metacharacters, LOLBins, zero-width unicode, encoded payloads |
+| 2 | **Semantic Anomaly** | AI-generated responses scanned before reaching user or disk; RAG context validated for injection and poisoning |
+| 3 | **Behavioral Tripwire** | Timing anomalies, call frequency spikes, abnormal request pattern throttling |
+| 4 | **Canary Trap** | Honeypot canary integrity — planted tokens detect context exfiltration |
+| 5 | **Threat Intelligence** | Updatable signature database with SHA-512 validation and version monotonicity |
+| 6 | **Command Guard** | Dangerous command detection, LOLBin blocking, shell metacharacter filtering |
+| 7 | **Path Sandbox** | Filesystem sandboxing with 4-tier safety guard |
+| 8 | **Plan Verifier** | Multi-step plan validation with test/lint gates |
+| 9 | **Forensic Auditor** | Full audit trail with severity classification and forensic context |
 
 All threats logged with severity and full forensic context. The Crucible™ scanner (layers 1-4) runs in under 50 ms per check.
 
@@ -164,7 +164,7 @@ Forge auto-detects your GPU and recommends the best model via `/hardware`.
 
 ## Commands
 
-58 commands. Run `/help` in-session for the full list.
+60 commands. Run `/help` in-session for the full list.
 
 | Category | Commands |
 |----------|----------|
@@ -186,7 +186,7 @@ Forge auto-detects your GPU and recommends the best model via `/hardware`.
 
 ## Configuration
 
-98 configuration keys. Edit `~/.forge/config.yaml` or use `/config` in-session.
+99 configuration keys. Edit `~/.forge/config.yaml` or use `/config` in-session.
 
 ```yaml
 default_model: "qwen2.5-coder:14b"
@@ -211,7 +211,7 @@ Automated fleet-wide testing with adaptive scheduling:
 ## Testing
 
 ```bash
-pytest tests/ -v --timeout=300                            # 1,280 unit tests
+pytest tests/ -v --timeout=300                            # 1,318 unit tests
 pytest tests/integration/ -v --timeout=600                # Stub mode (no Ollama)
 pytest tests/integration/ -v --live --timeout=600         # Live mode (requires Ollama)
 python scripts/run_live_stress.py --live --full -n 1      # Full stress suite
