@@ -29,9 +29,16 @@ def get_machine_id() -> str:
 
 
 def get_machine_label() -> str:
-    """Return optional user-set nickname, or empty string."""
+    """Return user-set nickname, or auto-generate from hostname + GPU."""
     try:
         from forge.config import load_config
-        return load_config().get("telemetry_label", "")
+        label = load_config().get("telemetry_label", "")
+        if label:
+            return label
+        # Auto-generate: hostname-shortid
+        import platform
+        hostname = platform.node() or "machine"
+        short_id = get_machine_id()[:6]
+        return f"{hostname}-{short_id}"
     except Exception:
         return ""
