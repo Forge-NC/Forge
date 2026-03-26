@@ -201,6 +201,16 @@ class CommandHandler:
             self.io.print_info(
                 f"Switched to: {model_name} (provider: {provider}, "
                 f"context: {ctx_len:,})")
+            e.event_bus.emit("model.switch", {
+                "model": model_name,
+                "provider": provider,
+                "context_length": ctx_len,
+                "usable_tokens": e.ctx.max_tokens,
+            })
+            try:
+                e._write_dashboard_state("idle")
+            except Exception:
+                pass
             return True
         # Standard model switch within current provider
         available = e.llm.list_models()
@@ -211,6 +221,17 @@ class CommandHandler:
         ctx_len = e.llm.get_context_length()
         e.ctx.max_tokens = int(ctx_len * 0.8)
         self.io.print_info(f"Switched to: {arg} (context: {ctx_len:,})")
+        # Notify dashboard of model change
+        e.event_bus.emit("model.switch", {
+            "model": arg,
+            "context_length": ctx_len,
+            "usable_tokens": e.ctx.max_tokens,
+        })
+        # Update dashboard state
+        try:
+            e._write_dashboard_state("idle")
+        except Exception:
+            pass
         return True
 
     def _cmd_models(self, arg: str) -> bool:
