@@ -474,7 +474,11 @@ class ThreatIntelManager:
         return True, ""
 
     def _apply_reduce_only(self, patterns: list[dict]) -> list[dict]:
-        """Filter patterns: external cannot lower hardcoded threat levels."""
+        """Filter patterns: external cannot lower hardcoded threat levels.
+
+        Also rejects any external pattern whose name matches a hardcoded
+        pattern entirely (regardless of level) to prevent duplicates.
+        """
         filtered = []
         for p in patterns:
             name = p.get("name", "")
@@ -486,7 +490,11 @@ class ThreatIntelManager:
                         "Threat intel: reduce-only rejected '%s' "
                         "(external level %d < hardcoded %d)",
                         name, level, hardcoded_level)
-                    continue
+                else:
+                    log.debug(
+                        "Threat intel: skipping duplicate of hardcoded pattern '%s'",
+                        name)
+                continue
             filtered.append(p)
         return filtered
 
@@ -579,10 +587,11 @@ class ThreatIntelManager:
     def _read_signature_file(self, path: Path) -> Optional[dict]:
         """Read and parse a JSON signature file."""
         try:
-            raw = path.read_bytes()
-            if len(raw) > MAX_SIGNATURE_SIZE:
-                log.warning("Threat intel: file too large: %s (%d bytes)", path, len(raw))
+            file_size = path.stat().st_size
+            if file_size > MAX_SIGNATURE_SIZE:
+                log.warning("Threat intel: file too large: %s (%d bytes)", path, file_size)
                 return None
+            raw = path.read_bytes()
             return json.loads(raw.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
             log.warning("Threat intel: failed reading %s: %s", path, e)

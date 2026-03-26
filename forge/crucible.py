@@ -362,17 +362,21 @@ class Crucible:
         # Normalize Unicode to catch NFKD evasion (e.g. fullwidth chars)
         content = unicodedata.normalize("NFKD", content)
 
+        # Collect static results under lock, then do semantic scan outside
+        # lock to avoid holding it during a potentially slow embedding call.
         with self._lock:
             self.total_scans += 1
             threats = []
-
             # Layer 1: Static pattern matching
             threats.extend(self._scan_static(file_path, content))
+            do_semantic = bool(self._embedder)
 
-            # Layer 2: Semantic anomaly detection (if embedder available)
-            if self._embedder:
-                threats.extend(self._scan_semantic(file_path, content))
+        # Layer 2: Semantic anomaly detection (if embedder available)
+        if do_semantic:
+            semantic_threats = self._scan_semantic(file_path, content)
+            threats.extend(semantic_threats)
 
+        with self._lock:
             # Track for behavioral analysis
             self._last_read_file = file_path
             self._last_read_time = time.monotonic()
@@ -870,17 +874,19 @@ class Crucible:
         return None
 
     @staticmethod
-    def _deep_scan_for_canary(obj, canary: str) -> bool:
+    def _deep_scan_for_canary(obj, canary: str, depth: int = 20) -> bool:
         """Recursively scan nested dicts/lists/strings for canary."""
+        if depth <= 0:
+            return False
         if isinstance(obj, str):
             return canary in obj
         elif isinstance(obj, dict):
             for v in obj.values():
-                if Crucible._deep_scan_for_canary(v, canary):
+                if Crucible._deep_scan_for_canary(v, canary, depth - 1):
                     return True
         elif isinstance(obj, (list, tuple)):
             for item in obj:
-                if Crucible._deep_scan_for_canary(item, canary):
+                if Crucible._deep_scan_for_canary(item, canary, depth - 1):
                     return True
         return False
 
@@ -972,6 +978,8 @@ class Crucible:
             elif t.level > deduped[-1].level:
                 # Higher severity overlapping threat — replace
                 deduped[-1] = t
+                last_end = max(last_end, t.line_end)
+            else:
                 last_end = max(last_end, t.line_end)
 
         return deduped

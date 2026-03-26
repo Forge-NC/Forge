@@ -144,6 +144,10 @@ class EscapeMonitor:
                 time.sleep(0.02)  # ~50Hz
 
     def _poll_unix(self):
+        # Known limitation: on Unix, non-escape keystrokes read here are
+        # consumed and lost (Python stdin has no ungetch equivalent).
+        # This is acceptable because the monitor is only active during LLM
+        # streaming, when the user is not expected to be typing input.
         try:
             import tty
             import termios
@@ -587,6 +591,7 @@ class ForgeEngine:
         self._last_build_error: str = ""   # cross-turn build loop detection
         self._build_error_streak: int = 0  # consecutive turns with same error
         self._snap_worker_running = False  # guard against unbounded thread spawning
+        self._running = True  # set False on exit to stop background threads
 
         # Session-level tool call counter (not reset per turn)
         self._session_tool_count: int = 0
@@ -4382,6 +4387,7 @@ class ForgeEngine:
 
     def _print_exit_summary(self):
         """Print session summary on exit and record to stats."""
+        self._running = False
         elapsed = time.time() - self._session_start
 
         # Notify all event subscribers that the session is ending.

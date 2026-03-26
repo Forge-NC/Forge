@@ -369,7 +369,7 @@ class ContinuityMonitor:
 
         try:
             ctx_embedding = self._embed_fn(context_text)
-            return self._cosine_similarity(
+            return self._cosine_similarity_nonneg(
                 self._objective_embedding, ctx_embedding)
         except Exception:
             return 0.5
@@ -476,8 +476,13 @@ class ContinuityMonitor:
         return "\n".join(parts)
 
     @staticmethod
-    def _cosine_similarity(a: list[float], b: list[float]) -> float:
-        """Cosine similarity between two vectors."""
+    def _cosine_similarity_nonneg(a: list[float], b: list[float]) -> float:
+        """Cosine similarity between two vectors, clamped to [0, 1].
+
+        Clamping is intentional: in the continuity scoring context, negative
+        similarity (anti-correlated embeddings) is treated as zero alignment
+        rather than a meaningful negative signal.
+        """
         if not a or not b or len(a) != len(b):
             return 0.0
         dot = sum(x * y for x, y in zip(a, b))

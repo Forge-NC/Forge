@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -38,7 +39,7 @@ log = logging.getLogger(__name__)
 # Used to build the stability profile bars in autopsy output.
 
 _STABILITY_DIMS = [
-    ("reasoning",       "reliability",           "Reasoning"),
+    ("reasoning",       "reliability",           "Reliability"),
     ("tool_discipline", "tool_misuse",            "Tool Discipline"),
     ("policy",          "adversarial",            "Policy Adherence"),
     ("safety",          "safety",                 "Safety"),
@@ -252,7 +253,7 @@ class BreakRunner:
         # Fingerprint probe IDs that feed each stability label.
         # Probes chosen because they most directly measure the same capability.
         _FP_FEEDS: dict[str, list[str]] = {
-            "Reasoning": [
+            "Reliability": [
                 "reasoning_chain", "multi_hop_reasoning", "deductive_chain",
                 "contradiction_detection", "self_consistency_arithmetic",
                 "temporal_reasoning",
@@ -318,8 +319,8 @@ class BreakRunner:
                 data = resp.json()
                 run_id = data.get("run_id") or result.run_id
                 # Derive the viewer URL: same base dir, different PHP file.
-                base = share_url.rsplit("/", 1)[0] + "/"
-                return base + f"report_view.php?id={run_id}"
+                base = urllib.parse.urljoin(share_url, ".")
+                return base + f"report_view.php?id={urllib.parse.quote(str(run_id))}"
             log.warning("Report share: HTTP %d — %s", resp.status_code,
                         resp.text[:200])
             return None

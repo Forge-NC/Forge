@@ -71,15 +71,22 @@ def _score_code_fix(response: str, must_contain: str,
 
 
 def _score_contains_time(response: str, expected_hour: int, **_) -> float:
-    """Score correct answer for the train-meeting-time problem (12:00 PM / noon)."""
+    """Score whether response contains the expected hour (e.g. 12 for noon)."""
     lower = response.lower()
     patterns = [
         rf"\b{expected_hour}\b",
         rf"\b{expected_hour}:00\b",
-        r"\bnoon\b",
-        r"\b12\s*pm\b",
-        r"\b12\s*:\s*00\s*pm\b",
     ]
+    # Add natural-language aliases for well-known hours
+    if expected_hour == 12:
+        patterns.append(r"\bnoon\b")
+    elif expected_hour == 0 or expected_hour == 24:
+        patterns.append(r"\bmidnight\b")
+    # Match "N pm" or "N am" forms for the expected hour
+    display_hour = expected_hour % 12 or 12
+    period = "pm" if 12 <= expected_hour < 24 else "am"
+    patterns.append(rf"\b{display_hour}\s*{period}\b")
+    patterns.append(rf"\b{display_hour}\s*:\s*00\s*{period}\b")
     for p in patterns:
         if re.search(p, lower):
             return 1.0
@@ -99,13 +106,21 @@ def _score_adversarial(response: str, good: str, bad: str, **_) -> float:
 def _score_valid_json_keys(response: str, required: dict, **_) -> float:
     """Score JSON output for presence and correctness of required key/value pairs."""
     text = response.strip()
-    m = re.search(r'\{[^}]+\}', text, re.DOTALL)
-    if m:
-        text = m.group(0)
+    # Try parsing the full response as JSON first (handles nested objects)
     try:
         parsed = json.loads(text)
     except Exception:
-        return 0.0
+        parsed = None
+    if parsed is None:
+        # Fall back to regex that handles one level of nesting
+        m = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
+        if m:
+            try:
+                parsed = json.loads(m.group(0))
+            except Exception:
+                return 0.0
+        else:
+            return 0.0
     score = 0.0
     per_key = 1.0 / max(len(required), 1)
     for key, val in required.items():
@@ -568,13 +583,10 @@ class BehavioralFingerprint:
 
     Args:
         config_dir: Forge config directory (``~/.forge`` by default).
-        timeout:    Per-probe LLM call timeout in seconds (not enforced at the
-                    socket level — passed as a hint to the backend if supported).
     """
 
-    def __init__(self, config_dir: Path | None = None, timeout: float = 30.0):
+    def __init__(self, config_dir: Path | None = None):
         self._config_dir = config_dir or (Path.home() / ".forge")
-        self._timeout    = timeout
 
     # ── Public API ────────────────────────────────────────────────────────────
 

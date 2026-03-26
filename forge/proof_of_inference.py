@@ -106,6 +106,12 @@ def _load_or_generate_key(config_dir: Path):
         )
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(pem)
+        # Restrict key file permissions on Unix (owner-only read/write)
+        try:
+            import os
+            os.chmod(str(path), 0o600)
+        except (OSError, AttributeError):
+            pass  # Windows doesn't support Unix permissions
         log.info("Machine signing key generated: %s", path)
 
     pub_bytes = private_key.public_key().public_bytes(
