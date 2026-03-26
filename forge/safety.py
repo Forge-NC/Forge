@@ -138,17 +138,21 @@ def check_path_sandbox(file_path: str, allowed_roots: list[str]) -> Optional[str
     if not allowed_roots:
         return None  # No sandbox — everything allowed
 
-    resolved = Path(file_path).resolve()
-    resolved_str = str(resolved)
+    raw = Path(file_path)
 
-    # Check for symlinks that escape the sandbox
+    # Check for symlinks BEFORE resolve (prevents redirect attacks)
     try:
-        for parent in resolved.parents:
+        if raw.is_symlink():
+            return (f"Path '{file_path}' is a symlink that may escape the sandbox.")
+        for parent in raw.parents:
             if parent.is_symlink():
                 return (f"Path '{file_path}' contains a symlink at {parent} "
                         f"that may escape the sandbox.")
     except (OSError, ValueError):
         pass
+
+    resolved = raw.resolve()
+    resolved_str = str(resolved)
 
     for root in allowed_roots:
         root_resolved = str(Path(root).resolve())

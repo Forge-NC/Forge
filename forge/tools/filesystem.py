@@ -267,6 +267,8 @@ def grep_files(pattern: str, path: str = ".",
 
         files_searched += 1
         try:
+            if fp.stat().st_size > 1_000_000:
+                continue  # skip files > 1MB
             text = fp.read_text(encoding="utf-8", errors="replace")
         except Exception:
             continue

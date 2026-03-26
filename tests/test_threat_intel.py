@@ -245,15 +245,15 @@ class TestReduceOnly:
     Patterns with names not present in hardcoded_patterns are accepted at any level.
     """
 
-    def test_higher_level_accepted(self, tmp_path):
-        """External pattern same name, higher level → accepted."""
+    def test_higher_level_rejected(self, tmp_path):
+        """External pattern same name, higher level → rejected (no duplicates)."""
         sig = _make_valid_sig(patterns=[
             _make_pattern("test_pat", r"test", level=3),
         ])
         mgr = _make_manager(tmp_path, bundled_sig=sig)
-        # Hardcoded "test_pat" at level 2
+        # Hardcoded "test_pat" at level 2 — external duplicate still rejected
         mgr.load(hardcoded_patterns=[("test_pat", None, 2, None, None)])
-        assert len(mgr.get_compiled_patterns()) == 1
+        assert len(mgr.get_compiled_patterns()) == 0
 
     def test_lower_level_rejected(self, tmp_path):
         """External pattern same name, lower level → rejected."""
@@ -265,14 +265,14 @@ class TestReduceOnly:
         mgr.load(hardcoded_patterns=[("test_pat", None, 3, None, None)])
         assert len(mgr.get_compiled_patterns()) == 0
 
-    def test_same_level_accepted(self, tmp_path):
-        """External pattern same name, same level → accepted."""
+    def test_same_level_rejected(self, tmp_path):
+        """External pattern same name, same level → rejected (no duplicates)."""
         sig = _make_valid_sig(patterns=[
             _make_pattern("test_pat", r"test", level=2),
         ])
         mgr = _make_manager(tmp_path, bundled_sig=sig)
         mgr.load(hardcoded_patterns=[("test_pat", None, 2, None, None)])
-        assert len(mgr.get_compiled_patterns()) == 1
+        assert len(mgr.get_compiled_patterns()) == 0
 
     def test_new_name_accepted(self, tmp_path):
         """External pattern with new name → accepted freely."""
@@ -284,11 +284,15 @@ class TestReduceOnly:
         assert len(mgr.get_compiled_patterns()) == 1
 
     def test_mixed_valid_and_rejected(self, tmp_path):
-        """Mix of valid and reduce-only violations → partial load."""
+        """Mix of valid and reduce-only violations → partial load.
+
+        All hardcoded-name duplicates rejected regardless of level.
+        Only truly new names are accepted.
+        """
         sig = _make_valid_sig(patterns=[
-            _make_pattern("lowered", r"test1", level=0),  # Will be rejected
+            _make_pattern("lowered", r"test1", level=0),  # Hardcoded name → rejected
             _make_pattern("ok_new", r"test2", level=2),   # New name, OK
-            _make_pattern("raised", r"test3", level=3),   # Raised, OK
+            _make_pattern("raised", r"test3", level=3),   # Hardcoded name → rejected
         ])
         mgr = _make_manager(tmp_path, bundled_sig=sig)
         mgr.load(hardcoded_patterns=[
@@ -298,7 +302,7 @@ class TestReduceOnly:
         names = [p[0] for p in mgr.get_compiled_patterns()]
         assert "lowered" not in names
         assert "ok_new" in names
-        assert "raised" in names
+        assert "raised" not in names
 
     def test_reduce_only_logged(self, tmp_path):
         """Reduce-only rejection produces a log warning."""

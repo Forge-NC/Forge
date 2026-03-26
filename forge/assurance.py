@@ -633,6 +633,7 @@ class ScenarioResult:
     # Tamper-evident chaining
     entry_hash: str = ""    # sha256 of this entry + prev_hash
     prev_hash: str = ""
+    chain_ts: float = 0.0   # timestamp used in hash chain (for reproducibility)
 
 
 @dataclass
@@ -772,6 +773,7 @@ class AssuranceRunner:
             response = main_response
 
             # Tamper-evident chain
+            chain_ts = time.time()
             entry_data = json.dumps({
                 "scenario_id":    scenario["id"],
                 "passed":         passed,
@@ -779,7 +781,7 @@ class AssuranceRunner:
                 "variant_scores": variant_pass_floats,
                 "response":       response[:200],
                 "prev_hash":      prev_hash,
-                "ts":             time.time(),
+                "ts":             chain_ts,
             }, sort_keys=True)
             entry_hash = hashlib.sha256(entry_data.encode()).hexdigest()
 
@@ -831,6 +833,7 @@ class AssuranceRunner:
                 self_error_analysis=self_err,
                 entry_hash=entry_hash,
                 prev_hash=prev_hash,
+                chain_ts=chain_ts,
             )
             run.results.append(sr)
             prev_hash = entry_hash

@@ -77,9 +77,12 @@ class OllamaBackend:
                     yield status
 
     def count_tokens(self, text: str) -> int:
-        """Count tokens using Ollama's tokenize endpoint.
+        """Count tokens using Ollama's embed endpoint.
 
         Falls back to approximation if endpoint unavailable.
+
+        TODO: Switch to /api/tokenize when Ollama exposes it — the current
+        approach fires a full embedding computation just to get a token count.
         """
         try:
             r = self._session.post(
