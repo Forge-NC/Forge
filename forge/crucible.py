@@ -138,7 +138,7 @@ INJECTION_PATTERNS = [
     ("exfil_encoded_payload",
      r"(?:base64\s+-d|atob|Buffer\.from)\s*\(\s*['\"]"
      r"[A-Za-z0-9+/=]{40,}",
-     ThreatLevel.WARNING, "obfuscated_payload",
+     ThreatLevel.WARNING, "obfuscation",
      "Potentially encoded/obfuscated payload"),
 
     ("exfil_webhook",
@@ -177,12 +177,12 @@ INJECTION_PATTERNS = [
     # Suspicious patterns that are less definitive
     ("suspicious_base64_block",
      r"['\"][A-Za-z0-9+/]{80,}={0,2}['\"]",
-     ThreatLevel.SUSPICIOUS, "obfuscated_payload",
+     ThreatLevel.SUSPICIOUS, "obfuscation",
      "Large base64-encoded string (may be obfuscated payload)"),
 
     ("suspicious_eval_construct",
      r"eval\s*\(\s*(?:atob|Buffer\.from|base64|decode|decompress)\s*\(",
-     ThreatLevel.WARNING, "obfuscated_payload",
+     ThreatLevel.WARNING, "obfuscation",
      "Eval of decoded/decompressed content"),
 
     # ── Secret / PII leak detection ──
@@ -300,6 +300,7 @@ class Crucible:
         # HMAC-SHA512 chain for cryptographic non-repudiation
         self._provenance_key = secrets.token_bytes(64)  # Session-scoped HMAC key
         self._provenance_chain_hash = b"\x00" * 64       # Genesis block
+        self._trimmed_genesis = None                     # Set when provenance is trimmed
 
         # Behavioral fingerprinting — learn normal tool patterns
         self._pattern_counts: dict[str, int] = {}  # "read->edit" -> count
@@ -484,7 +485,7 @@ class Crucible:
                 "exfiltration — sending data from your machine to an "
                 "external server."
             ),
-            "obfuscated_payload": (
+            "obfuscation": (
                 "This content contains encoded or obfuscated data that "
                 "may hide malicious commands or payloads."
             ),
@@ -1103,6 +1104,8 @@ class Crucible:
             # Cap provenance log
             if len(self._provenance) > _MAX_PROVENANCE:
                 self._provenance = self._provenance[-_MAX_PROVENANCE:]
+                if self._provenance:
+                    self._trimmed_genesis = self._provenance[0].get("prev_hash", b"\x00" * 64)
 
             # Update behavioral fingerprint
             self._session_baseline.append(tool_name)
@@ -1178,7 +1181,14 @@ class Crucible:
         Returns (valid: bool, break_index: int).
         break_index = -1 if fully valid, else index of first broken link.
         """
-        prev_hash = b"\x00" * 64  # Genesis block
+        if self._trimmed_genesis is not None:
+            genesis = self._trimmed_genesis
+            if isinstance(genesis, str):
+                prev_hash = bytes.fromhex(genesis)
+            else:
+                prev_hash = genesis
+        else:
+            prev_hash = b"\x00" * 64  # Genesis block
         for i, entry in enumerate(self._provenance):
             # Reconstruct canonical entry (exclude chain metadata)
             entry_copy = {

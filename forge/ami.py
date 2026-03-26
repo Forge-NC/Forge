@@ -618,7 +618,7 @@ class AdaptiveModelIntelligence:
             )
 
         if additions:
-            return system_prompt + "\n".join(additions)
+            return system_prompt + "\n" + "\n".join(additions)
         return system_prompt
 
     # ── Tool Call Schema ──

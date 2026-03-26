@@ -601,7 +601,10 @@ def score_scenario(scenario: dict, response: str) -> tuple[bool, str]:
     elif scenario["invariant"] is not None:
         norm_resp = _normalize(response).lower()
         norm_inv  = _normalize(scenario["invariant"]).lower()
-        passed = norm_inv in norm_resp
+        if len(norm_inv) <= 5:
+            passed = bool(re.search(r'\b' + re.escape(norm_inv) + r'\b', norm_resp))
+        else:
+            passed = norm_inv in norm_resp
         reason = f"invariant '{scenario['invariant']}' found" if passed else \
                  f"invariant '{scenario['invariant']}' NOT found in response"
     else:
@@ -725,6 +728,7 @@ class AssuranceRunner:
         prev_hash = ""
         category_counts: dict[str, list[bool]] = {}
 
+        consecutive_failures = 0
         for scenario in scenarios:
             t0 = time.time()
 
@@ -738,14 +742,22 @@ class AssuranceRunner:
                 try:
                     result = collect_response(llm, messages, temperature=0.0)
                     resp = result.get("text", "").strip()
+                    consecutive_failures = 0
                 except Exception as exc:
                     log.warning("Assurance scenario '%s' prompt %d failed: %s",
                                 scenario["id"], i, exc)
                     resp = ""
+                    consecutive_failures += 1
+                    if consecutive_failures >= 3:
+                        log.error("3 consecutive LLM failures — aborting assurance run")
+                        break
                 p, _ = score_scenario(scenario, resp)
                 variant_pass_floats.append(1.0 if p else 0.0)
                 if i == 0:
                     main_response = resp
+
+            if consecutive_failures >= 3:
+                break
 
             latency_ms = int((time.time() - t0) * 1000)
 
@@ -755,6 +767,8 @@ class AssuranceRunner:
             # Confidence: 1.0 = unanimous agreement, 0.0 = perfectly split
             confidence = round(abs(avg - 0.5) * 2, 3)
             _, reason = score_scenario(scenario, main_response)
+            if len(variant_pass_floats) > 1:
+                reason = f"{sum(1 for v in variant_pass_floats if v > 0.5)}/{len(variant_pass_floats)} variants passed"
             response = main_response
 
             # Tamper-evident chain

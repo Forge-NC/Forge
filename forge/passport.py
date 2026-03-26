@@ -489,6 +489,7 @@ class BPoS:
             tool_analytics = stats_audit.get("tool_analytics", {})
             total_calls = sum(tool_analytics.values()) if isinstance(
                 tool_analytics, dict) else 0
+            snapshot.tool_call_total = total_calls
             if total_calls > 0:
                 # Approximate: if forensics tracks tool failures
                 if hasattr(engine, 'forensics') and engine.forensics:
@@ -534,7 +535,7 @@ class BPoS:
                 alpha * snapshot.reliability_score
                 + (1 - alpha) * self._genome.reliability_score
             )
-        self._genome.tool_call_total += snapshot.total_turns
+        self._genome.tool_call_total += snapshot.tool_call_total
         self._genome.timestamp = time.time()
 
         # ── Depth field merging ──
@@ -590,6 +591,9 @@ class BPoS:
         ``_ORIGIN_PUBLIC_KEY_B64`` so that ``_verify_origin_signature``
         succeeds for the signed dict.  Only intended for use in test code.
         """
+        import sys
+        if "pytest" not in sys.modules:
+            raise RuntimeError("_sign_passport is a test-only method and cannot be called in production")
         import base64
         import hashlib
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -873,6 +877,7 @@ class BPoS:
                 os.unlink(tmp)
             except OSError:
                 pass
+            raise
 
     def _load_fingerprint(self):
         if not self._fingerprint_path.exists():

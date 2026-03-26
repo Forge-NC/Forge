@@ -444,6 +444,11 @@ class OllamaBackend:
                     }
                     return
 
+            # Stream ended without a done event — emit fallback
+            for tc in tool_calls:
+                yield {"type": "tool_call", "tool_call": tc}
+            yield {"type": "done", "eval_count": 0, "prompt_eval_count": 0}
+
         except requests.exceptions.Timeout:
             yield {
                 "type": "error",

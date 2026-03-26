@@ -93,7 +93,7 @@ class OpenAIBackend:
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": 4096,
+            "max_tokens": 16384,
             "stream": stream,
         }
 
@@ -142,6 +142,13 @@ class OpenAIBackend:
             "Content-Type": "application/json",
         }
 
+    @staticmethod
+    def _safe_json(raw: str) -> dict:
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
     def _parse_non_stream(self, data: dict) -> Generator[dict, None, None]:
         usage = data.get("usage", {})
         choice = (data.get("choices") or [{}])[0]
@@ -154,7 +161,7 @@ class OpenAIBackend:
                     "tool_call": {
                         "function": {
                             "name": tc["function"]["name"],
-                            "arguments": json.loads(
+                            "arguments": self._safe_json(
                                 tc["function"].get("arguments", "{}")),
                         },
                     },
