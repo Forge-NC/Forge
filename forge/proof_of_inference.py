@@ -26,6 +26,7 @@ import base64
 import hashlib
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,7 @@ log = logging.getLogger(__name__)
 # The server selects one category per challenge.  The client must classify
 # the LLM's response into one of these coarse bins.
 RESPONSE_CATEGORIES = {
-    "numeric":    lambda t: any(c.isdigit() for c in t[:20]),
+    "numeric":    lambda t: bool(re.match(r'^\s*-?\d', t)),
     "affirmative": lambda t: t.strip().lower() in ("yes", "true", "correct", "affirmative"),
     "negative":   lambda t: t.strip().lower() in ("no", "false", "incorrect", "refused"),
     "code":       lambda t: any(kw in t for kw in ("def ", "class ", "return ", "import ", "{")),

@@ -201,7 +201,7 @@ class XPEngine:
     def __init__(self, persist_dir: Path = None):
         self._dir = persist_dir or (Path.home() / ".forge")
         self._path = self._dir / "xp.json"
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
         # State
         self.total_xp: int = 0
@@ -499,6 +499,7 @@ class XPEngine:
         for ach in newly_unlocked:
             old_level = self.level
             with self._lock:
+                old_title = self.title
                 self.total_xp += ach.bonus_xp
                 self.level = level_from_xp(self.total_xp)
                 self.title = title_for_level(self.level)
@@ -506,7 +507,7 @@ class XPEngine:
                     self._pending_notifications.append(
                         f"  *** LEVEL UP! Level {self.level} reached! ***")
                 new_title = title_for_level(self.level)
-                if new_title and new_title != self.title:
+                if new_title and new_title != old_title:
                     self._pending_notifications.append(
                         f"  *** Title unlocked: [{new_title}] ***")
                 self._save()

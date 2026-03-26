@@ -586,6 +586,7 @@ class ForgeEngine:
         self._turn_error_counts: dict[str, int] = {}  # tool error nudges
         self._last_build_error: str = ""   # cross-turn build loop detection
         self._build_error_streak: int = 0  # consecutive turns with same error
+        self._snap_worker_running = False  # guard against unbounded thread spawning
 
         # Session-level tool call counter (not reset per turn)
         self._session_tool_count: int = 0
@@ -3010,8 +3011,12 @@ class ForgeEngine:
         _state = state
         _extra = extra
 
+        if self._snap_worker_running:
+            return
+
         def _snap_worker():
             try:
+                self._snap_worker_running = True
                 snapshot = self._get_dashboard_snapshot()
                 if snapshot:
                     full = {"state": _state, "timestamp": now}
@@ -3021,6 +3026,8 @@ class ForgeEngine:
                     _atomic_write(full, "phase2")
             except Exception:
                 log.debug("Dashboard snapshot worker failed", exc_info=True)
+            finally:
+                self._snap_worker_running = False
 
         threading.Thread(
             target=_snap_worker, daemon=True, name="dash-snap"
@@ -4384,7 +4391,7 @@ class ForgeEngine:
                 "session_id": getattr(
                     getattr(self, "memory", None), "_session_id", ""),
                 "turns": self._turn_count,
-                "tokens_prompt": getattr(self, "_total_prompt_tokens", 0),
+                "tokens_prompt": self.billing.status().get("session_input", 0),
                 "tokens_generated": self._total_generated,
                 "duration_s": round(elapsed, 1),
                 "tool_calls": getattr(self, "_session_tool_count", 0),
@@ -4521,6 +4528,25 @@ class ForgeEngine:
         except Exception:
             log.debug("Bug reporter flush failed", exc_info=True)
 
+        # XP summary line (runs regardless of telemetry setting)
+        try:
+            if self.xp_engine and self.config.get("xp_enabled", False):
+                # Update genome with XP snapshot
+                if hasattr(self, '_bpos') and self._bpos:
+                    try:
+                        self._bpos._genome.xp_total = self.xp_engine.total_xp
+                        self._bpos._genome.xp_level = self.xp_engine.level
+                    except Exception:
+                        log.debug("XP genome snapshot update failed", exc_info=True)
+                # Print any pending notifications (level ups, achievements)
+                for note in self.xp_engine.drain_notifications():
+                    print(f"{BOLD}{CYAN}{note}{RESET}")
+                print(self.xp_engine.format_exit_summary())
+        except Exception as e:
+            log.debug("XP exit summary failed: %s", e)
+
+        print(f"{BOLD}{'=' * 60}{RESET}\n")
+
     def _upload_telemetry_checkpoint(self, final: bool = False):
         """Upload telemetry data. Called periodically (every 25 turns) and at exit."""
         if not self.config.get("telemetry_enabled", False):
@@ -4552,22 +4578,3 @@ class ForgeEngine:
                     print(f"  {DIM}Telemetry: uploaded to Forge Matrix{RESET}")
         except Exception:
             log.debug("Telemetry checkpoint upload failed", exc_info=True)
-
-        # XP summary line
-        try:
-            if self.xp_engine and self.config.get("xp_enabled", False):
-                # Update genome with XP snapshot
-                if hasattr(self, '_bpos') and self._bpos:
-                    try:
-                        self._bpos._genome.xp_total = self.xp_engine.total_xp
-                        self._bpos._genome.xp_level = self.xp_engine.level
-                    except Exception:
-                        log.debug("XP genome snapshot update failed", exc_info=True)
-                # Print any pending notifications (level ups, achievements)
-                for note in self.xp_engine.drain_notifications():
-                    print(f"{BOLD}{CYAN}{note}{RESET}")
-                print(self.xp_engine.format_exit_summary())
-        except Exception as e:
-            log.debug("XP exit summary failed: %s", e)
-
-        print(f"{BOLD}{'=' * 60}{RESET}\n")

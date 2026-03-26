@@ -133,6 +133,7 @@ def upload_telemetry(
                 if telemetry_url and telemetry_url != _DEFAULT_URL:
                     urls.append(telemetry_url)
 
+                any_success = False
                 for url in urls:
                     try:
                         resp = requests.post(
@@ -146,15 +147,16 @@ def upload_telemetry(
                         )
                         if resp.status_code == 200:
                             log.debug("Telemetry uploaded to %s", url)
+                            any_success = True
                         else:
                             log.debug("Telemetry upload to %s failed: HTTP %d",
                                       url, resp.status_code)
                     except Exception as upload_err:
                         log.debug("Telemetry upload to %s error: %s",
                                   url, upload_err)
-                # Upload succeeded to at least the primary — remove pending
+                # Only remove pending if at least one upload succeeded
                 try:
-                    if pending_path and pending_path.exists():
+                    if any_success and pending_path and pending_path.exists():
                         pending_path.unlink()
                 except OSError:
                     pass

@@ -323,15 +323,19 @@ class ThreatIntelManager:
                 return {"success": False, "patterns_added": 0,
                         "message": f"Invalid response: {e}"}
 
-            # SHA-512 envelope validation
+            # SHA-512 envelope validation (mandatory for integrity)
             claimed_hash = data.pop("sha512", None)
-            if claimed_hash:
-                content_bytes = json.dumps(data, sort_keys=True).encode("utf-8")
-                actual_hash = hashlib.sha512(content_bytes).hexdigest()
-                if actual_hash != claimed_hash:
-                    self._update_timestamp()
-                    return {"success": False, "patterns_added": 0,
-                            "message": "SHA-512 hash mismatch — possible tampering"}
+            if not claimed_hash:
+                log.warning("Signature file has no SHA-512 hash — rejecting for integrity")
+                self._update_timestamp()
+                return {"success": False, "patterns_added": 0,
+                        "message": "missing sha512 hash"}
+            content_bytes = json.dumps(data, sort_keys=True).encode("utf-8")
+            actual_hash = hashlib.sha512(content_bytes).hexdigest()
+            if actual_hash != claimed_hash:
+                self._update_timestamp()
+                return {"success": False, "patterns_added": 0,
+                        "message": "SHA-512 hash mismatch — possible tampering"}
 
             # Validate
             valid, err = self._validate_signature_file(data)

@@ -296,24 +296,25 @@ class ContextWindow:
 
     def status(self) -> dict:
         """Return a status dict for display."""
-        by_tag = {}
-        by_role = {}
-        for e in self._entries:
-            tag = e.tag or "general"
-            by_tag[tag] = by_tag.get(tag, 0) + e.token_count
-            by_role[e.role] = by_role.get(e.role, 0) + e.token_count
+        with self._lock:
+            by_tag = {}
+            by_role = {}
+            for e in self._entries:
+                tag = e.tag or "general"
+                by_tag[tag] = by_tag.get(tag, 0) + e.token_count
+                by_role[e.role] = by_role.get(e.role, 0) + e.token_count
 
-        return {
-            "total_tokens": self._total_tokens,
-            "max_tokens": self.max_tokens,
-            "remaining_tokens": self.remaining_tokens,
-            "usage_pct": round(self.usage_pct, 1),
-            "entry_count": len(self._entries),
-            "pinned_count": sum(1 for e in self._entries if e.pinned),
-            "by_tag": by_tag,
-            "by_role": by_role,
-            "evictions": len(self._eviction_log),
-        }
+            return {
+                "total_tokens": self._total_tokens,
+                "max_tokens": self.max_tokens,
+                "remaining_tokens": self.remaining_tokens,
+                "usage_pct": round(self.usage_pct, 1),
+                "entry_count": len(self._entries),
+                "pinned_count": sum(1 for e in self._entries if e.pinned),
+                "by_tag": by_tag,
+                "by_role": by_role,
+                "evictions": len(self._eviction_log),
+            }
 
     def drop(self, index: int) -> Optional[ContextEntry]:
         """Manually drop an entry by index. Returns the dropped entry."""
@@ -406,14 +407,15 @@ class ContextWindow:
 
     def get_partition_stats(self) -> dict:
         """Token usage broken down by partition."""
-        stats = {}
-        for e in self._entries:
-            p = e.partition or "working"
-            if p not in stats:
-                stats[p] = {"tokens": 0, "entries": 0}
-            stats[p]["tokens"] += e.token_count
-            stats[p]["entries"] += 1
-        return stats
+        with self._lock:
+            stats = {}
+            for e in self._entries:
+                p = e.partition or "working"
+                if p not in stats:
+                    stats[p] = {"tokens": 0, "entries": 0}
+                stats[p]["tokens"] += e.token_count
+                stats[p]["entries"] += 1
+            return stats
 
     def save_session(self, path: Path):
         """Save full session to disk with zero data loss."""

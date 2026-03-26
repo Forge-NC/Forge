@@ -80,7 +80,7 @@ class AnthropicBackend:
 
         payload: dict = {
             "model": self.model,
-            "max_tokens": 4096,
+            "max_tokens": 16384,
             "temperature": temperature,
             "stream": stream,
         }
@@ -239,7 +239,7 @@ class AnthropicBackend:
         prev_role = None
         for msg in messages:
             role = msg["role"]
-            if role == prev_role:
+            if role == prev_role and isinstance(msg["content"], str) and isinstance(fixed[-1]["content"], str):
                 # Merge consecutive same-role messages
                 fixed[-1]["content"] += "\n" + msg["content"]
             else:

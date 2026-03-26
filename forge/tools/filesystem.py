@@ -98,10 +98,11 @@ def write_file(file_path: str, content: str) -> str:
     err = _check_path_safety(file_path)
     if err:
         return err
-    p = Path(file_path).resolve()
-    # Block writes through symlinks (prevents redirect attacks)
-    if p.exists() and p.is_symlink():
-        return f"Error: refusing to write through symlink: {p}"
+    raw = Path(file_path)
+    # Block writes through symlinks BEFORE resolve (prevents redirect attacks)
+    if raw.is_symlink():
+        return f"Error: refusing to write through symlink: {file_path}"
+    p = raw.resolve()
     p.parent.mkdir(parents=True, exist_ok=True)
 
     # Syntax validation — reject writes that produce broken files
@@ -146,13 +147,15 @@ def edit_file(file_path: str, old_string: str, new_string: str,
     err = _check_path_safety(file_path)
     if err:
         return err
-    p = Path(file_path).resolve()
+    raw = Path(file_path)
+    # Block edits through symlinks BEFORE resolve (prevents redirect attacks)
+    if raw.is_symlink():
+        return f"Error: refusing to edit through symlink: {file_path}"
+    p = raw.resolve()
     if not p.exists():
         return f"Error: file not found: {p}"
     if not p.is_file():
         return f"Error: not a regular file: {p}"
-    if p.is_symlink():
-        return f"Error: refusing to edit through symlink: {p}"
 
     try:
         text = p.read_text(encoding="utf-8", errors="replace")

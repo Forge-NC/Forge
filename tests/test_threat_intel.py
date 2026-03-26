@@ -446,6 +446,9 @@ class TestUpdate:
     def test_update_writes_fetched_file(self, tmp_path):
         """Successful update writes fetched_signatures.json."""
         sig = _make_valid_sig(patterns=[_make_pattern("net_p", r"network_pat")])
+        # Add valid SHA-512 envelope (hash of data without sha512 key)
+        sig_hash = hashlib.sha512(json.dumps(sig, sort_keys=True).encode("utf-8")).hexdigest()
+        sig["sha512"] = sig_hash
         sig_bytes = json.dumps(sig).encode("utf-8")
 
         mgr = _make_manager(tmp_path, config={
@@ -497,6 +500,9 @@ class TestUpdate:
         mgr._loaded_version = 2
 
         sig_old = _make_valid_sig(patterns=[_make_pattern("p2", r"test2")], version=1)
+        # Add valid SHA-512 envelope
+        sig_hash = hashlib.sha512(json.dumps(sig_old, sort_keys=True).encode("utf-8")).hexdigest()
+        sig_old["sha512"] = sig_hash
         sig_bytes = json.dumps(sig_old).encode("utf-8")
 
         mgr._config_get = lambda k, d=None: {
