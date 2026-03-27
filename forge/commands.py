@@ -2779,6 +2779,19 @@ class CommandHandler:
         except Exception as exc:
             self.io.print_error(f"Break suite failed: {exc}")
             log.debug("forge break error", exc_info=True)
+
+        # Genome: collect + push after break run (richest data point)
+        try:
+            if hasattr(e, '_bpos') and e._bpos:
+                snapshot = e._bpos.collect_genome(e)
+                e._bpos.update_genome(snapshot)
+                if e._bpos.is_feature_allowed("genome_sync"):
+                    ok, msg = e._bpos.push_team_genome()
+                    if ok:
+                        self.io.print_info("Genome updated and synced.")
+        except Exception:
+            log.debug("Post-break genome update failed", exc_info=True)
+
         return True
 
     def _cmd_autopsy(self, arg: str) -> bool:
