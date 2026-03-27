@@ -1788,10 +1788,20 @@ class ForgeEngine:
             self._turn_prompt_tokens = total_prompt_tokens
             self._turn_eval_count = total_eval_count
 
-            # Periodic telemetry checkpoint (every 25 turns)
-            if (self._turn_count % 25 == 0
-                    and self.config.get("telemetry_enabled", False)):
-                self._upload_telemetry_checkpoint()
+            # Periodic checkpoints (every 25 turns)
+            if self._turn_count % 25 == 0:
+                # Telemetry upload
+                if self.config.get("telemetry_enabled", False):
+                    self._upload_telemetry_checkpoint()
+                # Genome collect + push
+                try:
+                    if hasattr(self, '_bpos') and self._bpos:
+                        snapshot = self._bpos.collect_genome(self)
+                        self._bpos.update_genome(snapshot)
+                        if self._bpos.is_feature_allowed("genome_sync"):
+                            self._bpos.push_team_genome()
+                except Exception:
+                    log.debug("Periodic genome checkpoint failed", exc_info=True)
             if total_prompt_tokens or total_eval_count:
                 self.billing.record_turn(
                     input_tokens=total_prompt_tokens,
