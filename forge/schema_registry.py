@@ -321,7 +321,6 @@ _REGISTRY: dict[str, dict] = {
         "changelog": [(1, "2026-03-05", "Initial definition")],
     },
 
-    # ── CommonSenseGuard events ──────────────────────────────────────────
     # ── Break/Assurance progress ─────────────────────────────────────────
     "break.progress": {
         "version": 1,

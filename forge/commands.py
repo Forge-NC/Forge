@@ -1847,62 +1847,6 @@ class CommandHandler:
                 "| pending | token <label> | role <label> <role>]")
         return True
 
-    # ── Command dispatch table ──
-
-    _COMMANDS = {
-        "/quit": _cmd_quit,
-        "/exit": _cmd_quit,
-        "/help": _cmd_help,
-        "/docs": _cmd_docs,
-        "/context": _cmd_context,
-        "/drop": _cmd_drop,
-        "/pin": _cmd_pin,
-        "/unpin": _cmd_unpin,
-        "/clear": _cmd_clear,
-        "/save": _cmd_save,
-        "/load": _cmd_load,
-        "/reset": _cmd_reset,
-        "/model": _cmd_model,
-        "/models": _cmd_models,
-        "/tools": _cmd_tools,
-        "/cd": _cmd_cd,
-        "/billing": _cmd_billing,
-        "/compare": _cmd_compare,
-        "/topup": _cmd_topup,
-        "/safety": _cmd_safety,
-        "/crucible": _cmd_crucible,
-        "/forensics": _cmd_forensics,
-        "/router": _cmd_router,
-        "/provenance": _cmd_provenance,
-        "/config": _cmd_config,
-        "/hardware": _cmd_hardware,
-        "/cache": _cmd_cache,
-        "/scan": _cmd_scan,
-        "/digest": _cmd_digest,
-        "/journal": _cmd_journal,
-        "/recall": _cmd_recall,
-        "/search": _cmd_search,
-        "/index": _cmd_index,
-        "/tasks": _cmd_tasks,
-        "/memory": _cmd_memory,
-        "/stats": _cmd_stats,
-        "/dashboard": _cmd_dashboard,
-        "/voice": _cmd_voice,
-        "/plugins": _cmd_plugins,
-        "/plan": _cmd_plan,
-        "/dedup": _cmd_dedup,
-        "/continuity": _cmd_continuity,
-        "/theme": _cmd_theme,
-        "/synapse": _cmd_synapse,
-        "/report": _cmd_report,
-        "/export": _cmd_export,
-        "/benchmark": _cmd_benchmark,
-        "/update": _cmd_update,
-        "/admin": _cmd_admin,
-        "/threats": _cmd_threats,
-        "/ami": _cmd_ami,
-    }
-
     # ── Shipwright commands ──
 
     def _cmd_ship(self, arg: str) -> bool:
@@ -2526,6 +2470,11 @@ class CommandHandler:
             f"  Estimated: ~{est_scenarios} scenarios, ~{est_min:.0f} min"
             f" (varies by model/GPU)")
 
+        # Suppress audio during break/assurance to prevent PortAudio segfaults
+        _audio_mgr = getattr(e, '_sound_manager', None)
+        if _audio_mgr:
+            _audio_mgr.suppress()
+
         try:
             import time as _time
             from forge.break_runner import BreakRunner, format_break_output, format_autopsy_output
@@ -2685,6 +2634,10 @@ class CommandHandler:
                 assure_report = generate_report(
                     assure_run, config_dir=Path(e._config_dir))
 
+                # Link both reports for dual attestation consistency
+                result.report["paired_run_id"] = assure_report["run_id"]
+                assure_report["paired_run_id"] = result.report["run_id"]
+
                 if as_json:
                     combined["assure"] = assure_report
                 else:
@@ -2740,9 +2693,13 @@ class CommandHandler:
                 import json
                 print(json.dumps(combined, indent=2))
 
-            # ── Upload (always goes to Forge Matrix) ─────────────────
-            auto_share = e.config.get("telemetry_enabled", False)
-            if share or auto_share:
+            # ── Upload (requires telemetry_enabled — --share alone is not enough)
+            telemetry_on = e.config.get("telemetry_enabled", False)
+            if not telemetry_on and share:
+                self.io.print_warning(
+                    "telemetry_enabled is false — --share requires opt-in telemetry. "
+                    "Set telemetry_enabled: true in config to share reports.")
+            if telemetry_on:
                 share_url = e.config.get("assurance_url", "") or ASSURANCE_URL
                 if not share_url:
                     if share:
@@ -2791,6 +2748,10 @@ class CommandHandler:
                         self.io.print_info("Genome updated and synced.")
         except Exception:
             log.debug("Post-break genome update failed", exc_info=True)
+
+        # Restore audio
+        if _audio_mgr:
+            _audio_mgr.unsuppress()
 
         return True
 
@@ -2878,13 +2839,67 @@ class CommandHandler:
         print(xp.format_profile(verbose=verbose))
         return True
 
-    # Register commands defined after the _COMMANDS dict
-    _COMMANDS["/ship"] = _cmd_ship
-    _COMMANDS["/autocommit"] = _cmd_autocommit
-    _COMMANDS["/license"] = _cmd_license
-    _COMMANDS["/puppet"] = _cmd_puppet
-    _COMMANDS["/assure"] = _cmd_assure
-    _COMMANDS["/break"] = _cmd_break
-    _COMMANDS["/autopsy"] = _cmd_autopsy
-    _COMMANDS["/stress"] = _cmd_stress
-    _COMMANDS["/profile"] = _cmd_profile
+    # ── Command dispatch table ──
+
+    _COMMANDS = {
+        "/quit": _cmd_quit,
+        "/exit": _cmd_quit,
+        "/help": _cmd_help,
+        "/docs": _cmd_docs,
+        "/context": _cmd_context,
+        "/drop": _cmd_drop,
+        "/pin": _cmd_pin,
+        "/unpin": _cmd_unpin,
+        "/clear": _cmd_clear,
+        "/save": _cmd_save,
+        "/load": _cmd_load,
+        "/reset": _cmd_reset,
+        "/model": _cmd_model,
+        "/models": _cmd_models,
+        "/tools": _cmd_tools,
+        "/cd": _cmd_cd,
+        "/billing": _cmd_billing,
+        "/compare": _cmd_compare,
+        "/topup": _cmd_topup,
+        "/safety": _cmd_safety,
+        "/crucible": _cmd_crucible,
+        "/forensics": _cmd_forensics,
+        "/router": _cmd_router,
+        "/provenance": _cmd_provenance,
+        "/config": _cmd_config,
+        "/hardware": _cmd_hardware,
+        "/cache": _cmd_cache,
+        "/scan": _cmd_scan,
+        "/digest": _cmd_digest,
+        "/journal": _cmd_journal,
+        "/recall": _cmd_recall,
+        "/search": _cmd_search,
+        "/index": _cmd_index,
+        "/tasks": _cmd_tasks,
+        "/memory": _cmd_memory,
+        "/stats": _cmd_stats,
+        "/dashboard": _cmd_dashboard,
+        "/voice": _cmd_voice,
+        "/plugins": _cmd_plugins,
+        "/plan": _cmd_plan,
+        "/dedup": _cmd_dedup,
+        "/continuity": _cmd_continuity,
+        "/theme": _cmd_theme,
+        "/synapse": _cmd_synapse,
+        "/report": _cmd_report,
+        "/export": _cmd_export,
+        "/benchmark": _cmd_benchmark,
+        "/update": _cmd_update,
+        "/admin": _cmd_admin,
+        "/threats": _cmd_threats,
+        "/ami": _cmd_ami,
+        "/ship": _cmd_ship,
+        "/autocommit": _cmd_autocommit,
+        "/license": _cmd_license,
+        "/puppet": _cmd_puppet,
+        "/assure": _cmd_assure,
+        "/break": _cmd_break,
+        "/autopsy": _cmd_autopsy,
+        "/stress": _cmd_stress,
+        "/profile": _cmd_profile,
+    }

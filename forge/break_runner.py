@@ -4,8 +4,8 @@ Exposes the internal assurance + behavioral fingerprint infrastructure
 as a single developer-facing command surface.
 
 Three modes:
-    full    (forge break)    — 31-scenario assurance suite + 30-probe fingerprint
-                                (38 with Power-tier HIPAA/SOC2 compliance scenarios)
+    full    (forge break)    — 38-scenario assurance suite + 30-probe fingerprint
+                                (31 base + 7 Power-tier HIPAA/SOC2 compliance scenarios)
     autopsy (forge autopsy)  — same run, structured failure-mode analysis
     stress  (forge stress)   — 3-category minimal suite for CI gates, < 30s
 

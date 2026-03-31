@@ -275,7 +275,16 @@ class TextToSpeech:
                 if self._stop_flag.is_set():
                     return
                 sd.play(audio, samplerate)
-                sd.wait()
+                # Sleep-wait instead of sd.wait() to avoid PortAudio segfault
+                dur = len(audio) / samplerate
+                _t = 0.0
+                while _t < dur and not self._stop_flag.is_set():
+                    time.sleep(0.1)
+                    _t += 0.1
+                try:
+                    sd.stop()
+                except Exception:
+                    pass
             except ImportError:
                 try:
                     from pydub import AudioSegment
@@ -288,7 +297,15 @@ class TextToSpeech:
                     if self._stop_flag.is_set():
                         return
                     sd.play(samples, seg.frame_rate)
-                    sd.wait()
+                    dur = len(samples) / seg.frame_rate
+                    _t = 0.0
+                    while _t < dur and not self._stop_flag.is_set():
+                        time.sleep(0.1)
+                        _t += 0.1
+                    try:
+                        sd.stop()
+                    except Exception:
+                        pass
                 except ImportError:
                     import subprocess
                     subprocess.run(

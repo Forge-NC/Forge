@@ -36,8 +36,12 @@ DEFAULTS = {
     "swap_threshold_pct": 85,         # auto-swap at this % usage
     "swap_summary_target_tokens": 500,# target swap summary size
 
+    # Context size (tokens — 0 = auto-detect from model metadata)
+    "context_size": 0,                # override context window size (0=auto)
+
     # Agent loop
     "max_agent_iterations": 15,       # max tool-call loops per turn
+    "llm_timeout": 120,              # HTTP timeout for LLM requests (seconds; thinking models auto-raise to 600)
     "shell_timeout": 30,              # default shell command timeout (seconds)
     "shell_max_output": 10000,        # truncate shell output at this many chars
 
@@ -619,6 +623,8 @@ _VALIDATORS = {
     "anthropic_api_key": lambda v: isinstance(v, str),
     "openai_base_url": lambda v: isinstance(v, str),
     "disabled_plugins": lambda v: isinstance(v, list) and all(isinstance(s, str) for s in v),
+    "context_size": lambda v: isinstance(v, int) and v >= 0,
+    "llm_timeout": lambda v: isinstance(v, (int, float)) and v > 0,
 }
 
 

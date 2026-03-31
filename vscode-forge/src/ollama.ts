@@ -45,8 +45,45 @@ export interface OllamaChatChunk {
     done: boolean;
 }
 
+export interface OllamaModelInfo {
+    name: string;
+    size: number;
+    modified_at?: string;
+    digest?: string;
+}
+
 export class OllamaClient {
     constructor(private baseUrl: string = 'http://localhost:11434') {}
+
+    async listModels(): Promise<OllamaModelInfo[]> {
+        return new Promise((resolve, reject) => {
+            const url = new URL(`${this.baseUrl}/api/tags`);
+            const client = url.protocol === 'https:' ? https : http;
+
+            const req = client.request(url, { method: 'GET', timeout: 10000 }, (res) => {
+                let data = '';
+                res.on('data', (chunk) => { data += chunk; });
+                res.on('end', () => {
+                    try {
+                        const parsed = JSON.parse(data);
+                        const models: OllamaModelInfo[] = (parsed.models || []).map((m: any) => ({
+                            name: m.name || '',
+                            size: m.size || 0,
+                            modified_at: m.modified_at,
+                            digest: m.digest,
+                        }));
+                        resolve(models);
+                    } catch {
+                        reject(new Error(`Invalid response from Ollama /api/tags: ${data.slice(0, 200)}`));
+                    }
+                });
+            });
+
+            req.on('error', (err) => reject(err));
+            req.on('timeout', () => { req.destroy(); reject(new Error('Ollama /api/tags request timed out')); });
+            req.end();
+        });
+    }
 
     async generate(opts: OllamaGenerateOptions): Promise<string> {
         const payload: Record<string, any> = {

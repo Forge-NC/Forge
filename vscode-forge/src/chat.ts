@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { OllamaClient, OllamaChatMessage } from './ollama';
 
 export class ForgeChatViewProvider implements vscode.WebviewViewProvider {
@@ -63,12 +65,44 @@ export class ForgeChatViewProvider implements vscode.WebviewViewProvider {
             }
         }
 
-        // Workspace context: open tabs and workspace folder
+        // Workspace context: open tabs, file tree, imports, diagnostics
         let workspaceContext = '';
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (workspaceFolders && workspaceFolders.length > 0) {
             const folderName = workspaceFolders[0].name;
             workspaceContext += `\nWorkspace: ${folderName}`;
+
+            // File tree: top-level files and first-level subdirectories (max 50)
+            try {
+                const rootPath = workspaceFolders[0].uri.fsPath;
+                const entries = fs.readdirSync(rootPath, { withFileTypes: true });
+                const treeItems: string[] = [];
+                for (const entry of entries) {
+                    if (treeItems.length >= 50) { break; }
+                    if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === '__pycache__') {
+                        continue;
+                    }
+                    if (entry.isDirectory()) {
+                        treeItems.push(`${entry.name}/`);
+                        // List first-level children of subdirectory
+                        try {
+                            const subEntries = fs.readdirSync(path.join(rootPath, entry.name), { withFileTypes: true });
+                            for (const sub of subEntries.slice(0, 10)) {
+                                if (treeItems.length >= 50) { break; }
+                                treeItems.push(`  ${sub.name}${sub.isDirectory() ? '/' : ''}`);
+                            }
+                            if (subEntries.length > 10) {
+                                treeItems.push(`  ... (${subEntries.length - 10} more)`);
+                            }
+                        } catch { /* permission denied or similar */ }
+                    } else {
+                        treeItems.push(entry.name);
+                    }
+                }
+                if (treeItems.length > 0) {
+                    workspaceContext += `\nFile tree:\n${treeItems.join('\n')}`;
+                }
+            } catch { /* workspace not readable */ }
         }
 
         const openTabs = vscode.window.tabGroups.all
@@ -84,6 +118,38 @@ export class ForgeChatViewProvider implements vscode.WebviewViewProvider {
 
         if (openTabs.length > 0) {
             workspaceContext += `\nOpen files: ${openTabs.join(', ')}`;
+        }
+
+        // Active file imports/requires (first 5 matching lines)
+        if (editor) {
+            const doc = editor.document;
+            const importLines: string[] = [];
+            const importPattern = /^\s*(import |from |require\(|#include )/;
+            const lineCount = Math.min(doc.lineCount, 100); // only scan first 100 lines
+            for (let i = 0; i < lineCount && importLines.length < 5; i++) {
+                const lineText = doc.lineAt(i).text;
+                if (importPattern.test(lineText)) {
+                    importLines.push(lineText.trim());
+                }
+            }
+            if (importLines.length > 0) {
+                workspaceContext += `\nActive file imports:\n${importLines.join('\n')}`;
+            }
+        }
+
+        // Diagnostics from Problems panel
+        const allDiagnostics = vscode.languages.getDiagnostics();
+        const errors: string[] = [];
+        for (const [uri, diags] of allDiagnostics) {
+            for (const diag of diags) {
+                if (diag.severity === vscode.DiagnosticSeverity.Error && errors.length < 10) {
+                    const fileName = uri.path.split(/[/\\]/).pop() || '';
+                    errors.push(`${fileName}:${diag.range.start.line + 1}: ${diag.message}`);
+                }
+            }
+        }
+        if (errors.length > 0) {
+            workspaceContext += `\nCurrent errors:\n${errors.join('\n')}`;
         }
 
         const system = `You are Forge, a local AI coding assistant. You help with code questions, debugging, refactoring, and explanations. Be concise and direct. When showing code, use markdown code blocks with the language identifier.${workspaceContext}`;
