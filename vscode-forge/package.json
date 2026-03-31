@@ -56,6 +56,35 @@
       {
         "command": "forge.toggleCompletion",
         "title": "Forge: Toggle Inline Completions"
+      },
+      {
+        "command": "forge.switchModel",
+        "title": "Forge: Switch Model"
+      },
+      {
+        "command": "forge.fixTerminalError",
+        "title": "Forge: Fix Terminal Error (from clipboard)"
+      },
+      {
+        "command": "forge.runBreak",
+        "title": "Forge: Run /break"
+      },
+      {
+        "command": "forge.runBreakFull",
+        "title": "Forge: Run /break --full"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "forge.switchModel",
+        "key": "ctrl+shift+m",
+        "mac": "cmd+shift+m"
+      },
+      {
+        "command": "forge.runBreak",
+        "key": "ctrl+shift+b",
+        "mac": "cmd+shift+b",
+        "when": "!terminalFocus"
       }
     ],
     "configuration": {

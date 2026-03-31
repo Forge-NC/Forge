@@ -86,14 +86,18 @@ def generate_report(
             "compliance":        r.compliance,
             "entry_hash":        r.entry_hash,
             "prev_hash":         r.prev_hash,
+            "variant_detail":    r.variant_detail if r.variant_detail else None,
         }
         for r in run.results
     ]
+
+    from forge.assurance import ASSURANCE_PROTOCOL_VERSION
 
     report = {
         "run_id":                run.run_id,
         "model":                 run.model,
         "forge_version":         run.forge_version,
+        "protocol_version":      ASSURANCE_PROTOCOL_VERSION,
         "platform_info":         run.platform_info,
         "started_at":            run.started_at,
         "completed_at":          run.completed_at,

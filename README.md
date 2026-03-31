@@ -30,7 +30,7 @@ git clone https://github.com/Forge-NC/Forge.git
 cd Forge && python install.py
 ```
 
-79,000+ lines of Python. 1,318 tests. 60 commands. Zero telemetry by default.
+80,000+ lines of Python. 1,318 tests. 60 commands. Zero telemetry by default.
 
 ## The Coding Assistant
 
@@ -44,7 +44,7 @@ Download Forge, pick a model, start coding. Every user gets:
 - **Billing ledger** -- token-level cost accounting with per-turn tracking. Compare your local costs against cloud providers with `/compare`.
 - **Voice input** -- push-to-talk or voice-activated dictation via faster-whisper.
 - **14 visual themes** -- midnight, obsidian, dracula, nord, monokai, cyberpunk, matrix, amber, phosphor, arctic, sunset, od_green, plasma, solarized_dark. Hot-swap with `/theme`.
-- **Plugin system** -- 17 hooks for extending Forge behavior. Drop a `.py` file in `~/.forge/plugins/` and it loads automatically.
+- **Plugin system** -- 18 hooks for extending Forge behavior. Drop a `.py` file in `~/.forge/plugins/` and it loads automatically.
 - **Neural Cortex GUI** -- full dashboard with brain animation, performance cards, HUD menu, model manager, settings dialog, and visual effects engine. Or use the console terminal if you prefer.
 
 ## The Auditing Platform
@@ -186,7 +186,7 @@ Forge auto-detects your GPU and recommends the best model via `/hardware`.
 
 ## Configuration
 
-99 configuration keys. Edit `~/.forge/config.yaml` or use `/config` in-session.
+101 configuration keys. Edit `~/.forge/config.yaml` or use `/config` in-session.
 
 ```yaml
 default_model: "qwen2.5-coder:14b"

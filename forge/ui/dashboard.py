@@ -37,6 +37,7 @@ try:
 except ImportError:
     HAS_GUI_DEPS = False
 
+from forge import __version__
 from forge.persona import get_persona, Persona, PERSONALITIES
 from forge.audio.commands import parse_voice_command
 from forge.ui.themes import (
@@ -876,7 +877,7 @@ class ForgeLauncher:
         footer.pack_propagate(False)
 
         self._footer_label = ctk.CTkLabel(
-            footer, text="  Forge v0.1.0 | 100% Local | $0.00 forever",
+            footer, text=f"  Forge v{__version__} | 100% Local | $0.00 forever",
             font=ctk.CTkFont(*FONT_MONO_SM),
             text_color=COLORS["text_dim"])
         self._footer_label.pack(side="left", padx=5, pady=2)
@@ -2702,6 +2703,9 @@ class ForgeLauncher:
                     engine = ForgeEngine(
                         cwd=os.getcwd(),
                         terminal_io=gui_io)
+                    # Expose sound manager to engine so break/assurance can suppress audio
+                    if self._sound:
+                        engine._sound_manager = self._sound
                     engine.run()
                 except Exception as e:
                     import traceback
@@ -3986,7 +3990,7 @@ class ForgeDashboard:
             footer.pack(fill="x", side="bottom")
             footer.pack_propagate(False)
             self._stat_labels["footer"] = ctk.CTkLabel(
-                footer, text="  Forge v0.1.0 | Local AI | $0.00 forever",
+                footer, text=f"  Forge v{__version__} | Local AI | $0.00 forever",
                 font=ctk.CTkFont(*FONT_MONO_SM),
                 text_color=COLORS["text_dim"])
             self._stat_labels["footer"].pack(side="left", padx=5, pady=2)

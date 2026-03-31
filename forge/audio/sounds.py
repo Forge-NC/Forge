@@ -83,9 +83,18 @@ class SoundManager:
         if not self._enabled:
             self.stop()
 
+    def suppress(self):
+        """Temporarily disable audio (e.g. during break/assurance runs to avoid PortAudio segfaults)."""
+        self._suppressed = True
+        self.stop()
+
+    def unsuppress(self):
+        """Re-enable audio after suppression."""
+        self._suppressed = False
+
     def play(self, sound_name: str):
         """Play a sound by name. Non-blocking."""
-        if not self._enabled:
+        if not self._enabled or getattr(self, '_suppressed', False):
             return
 
         with self._lock:
@@ -279,6 +288,14 @@ class SoundManager:
                 fade_audio *= envelope[:, np.newaxis]
 
             sd.play(fade_audio, samplerate)
-            sd.wait()
+            # Use sleep-based wait instead of sd.wait() — PortAudio's
+            # native semaphore can segfault on Windows when audio device
+            # state changes during playback (Bluetooth, display sleep, etc.)
+            fade_dur = fade_len / samplerate
+            time.sleep(fade_dur + 0.05)
+            try:
+                sd.stop()
+            except Exception:
+                pass
         except Exception as e:
             log.debug("Fade-out error: %s", e)

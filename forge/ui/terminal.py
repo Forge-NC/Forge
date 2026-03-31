@@ -661,7 +661,7 @@ def print_help():
             ("/break --assure", "Full break + assurance in one pass (combined Matrix score)"),
             ("/break --share", "Run and upload signed report to the Matrix"),
             ("/stress", "Run minimal 3-scenario stress suite (CI-compatible)"),
-            ("/assure", "Run AI assurance scenario suite (31 scenarios, 6 categories)"),
+            ("/assure", "Run AI assurance scenario suite (38 scenarios, 8 categories)"),
             ("/assure --share", "Run and upload report to assurance server"),
             ("/assure list", "List saved assurance reports"),
             ("/assure show <id>", "Show a saved assurance report"),

@@ -622,8 +622,8 @@ class ForgeEngine:
             # internal reasoning chains and need a longer HTTP timeout.
             _is_thinking = any(kw in model.lower() for kw in (
                 "qwen3", "deepseek-r1", "thinking", "reason"))
-            _default_timeout = 600.0 if _is_thinking else 120.0
-            _timeout = float(self.config.get("llm_timeout", _default_timeout))
+            _cfg_timeout = float(self.config.get("llm_timeout", 120))
+            _timeout = max(_cfg_timeout, 600.0) if _is_thinking else _cfg_timeout
             return OllamaBackend(model=model, timeout=_timeout)
 
     def _apply_enterprise_defaults(self):

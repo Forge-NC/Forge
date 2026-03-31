@@ -136,11 +136,15 @@ class TestPuppet:
         sync = tmp_path / "sync"
         sync.mkdir()
 
+        # Stub server requests — unit tests must not hit production API
+        _stub_server = MagicMock(return_value=(True, {"ok": True, "valid": True}))
+
         # Master setup
         master = PuppetManager(
             data_dir=tmp_path / "m", machine_id="master1")
         master._bpos = MagicMock()
         master._bpos._sign_passport.return_value = "sig"
+        master._server_request = _stub_server
         master.init_as_master(str(sync))
         master._account_id = "fg_test"
         master._master_tier = "pro"
@@ -157,6 +161,7 @@ class TestPuppet:
         puppet._bpos.get_genome_maturity.return_value = 0.0
         puppet._bpos._genome.session_count = 0
         puppet._bpos._sign_passport.return_value = "sig"
+        puppet._server_request = _stub_server
         ok, msg = puppet.init_as_puppet(
             str(passport_path), sync_dir=str(sync))
         assert ok is True
