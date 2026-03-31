@@ -1802,6 +1802,17 @@ class ForgeEngine:
                             self._bpos.push_team_genome()
                 except Exception:
                     log.debug("Periodic genome checkpoint failed", exc_info=True)
+                # License revalidation (non-blocking, background thread)
+                try:
+                    if hasattr(self, '_bpos') and self._bpos:
+                        import threading
+                        def _revalidate():
+                            changed, msg = self._bpos.revalidate_remote()
+                            if changed and msg:
+                                self.io.print_warning(msg)
+                        threading.Thread(target=_revalidate, daemon=True).start()
+                except Exception:
+                    log.debug("License revalidation dispatch failed", exc_info=True)
             if total_prompt_tokens or total_eval_count:
                 self.billing.record_turn(
                     input_tokens=total_prompt_tokens,

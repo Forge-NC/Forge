@@ -275,6 +275,64 @@ class BPoS:
             return False  # Expired
         return self._machine_id in self._passport.activations
 
+    # ── Remote license revalidation ──
+
+    def revalidate_remote(self) -> tuple[bool, str]:
+        """Check the server for tier changes or revocation.
+
+        Returns (changed, message).  If the server reports a different tier
+        than what we have locally, the local passport is updated and saved.
+        This runs silently in the background — no user interruption unless
+        tier actually changed.
+        """
+        if not self._passport or self._passport.tier == "community":
+            return False, ""
+
+        try:
+            import urllib.request
+            url = f"{PASSPORT_API_URL}?action=validate"
+            payload = json.dumps({
+                "passport_json": {
+                    "account_id": self._passport.account_id,
+                    "passport_id": self._passport.passport_id,
+                    "tier": self._passport.tier,
+                    "role": self._passport.role,
+                    "seat_count": self._passport.seat_count,
+                    "origin_signature": self._passport.origin_signature,
+                    "parent_passport_id": self._passport.parent_passport_id,
+                }
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                url, data=payload, method="POST",
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+
+            # Revoked?
+            if not data.get("valid", True):
+                reason = data.get("reason", "revoked")
+                log.warning("License revoked by server: %s — reverting to Community", reason)
+                self._passport = None
+                self._passport_path.unlink(missing_ok=True)
+                return True, f"License revoked: {reason}. Reverted to Community tier."
+
+            # Tier mismatch?
+            server_tier = data.get("tier", self._passport.tier)
+            if server_tier != self._passport.tier:
+                old = self._passport.tier
+                self._passport.tier = server_tier
+                self._save_passport()
+                log.info("Tier updated by server: %s -> %s", old, server_tier)
+                if server_tier == "community":
+                    return True, f"Your license was downgraded to Community by the administrator. Paid features are now disabled."
+                else:
+                    return True, f"Tier updated: {old} -> {server_tier}"
+
+            return False, ""
+        except Exception as exc:
+            log.debug("Remote license revalidation failed (non-fatal): %s", exc)
+            return False, ""
+
     # ── Passport management ──
 
     def activate(self, passport_data: dict) -> tuple[bool, str]:
