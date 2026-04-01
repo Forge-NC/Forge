@@ -1,19 +1,16 @@
-FROM python:3.11-slim
+FROM runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
 
 WORKDIR /app
 
-# System deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl git build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Python deps — headless Forge (no GUI, no audio, no Tkinter)
+# Python deps — headless Forge + vLLM for model weights
 RUN pip install --no-cache-dir \
     runpod \
     requests \
     cryptography \
     numpy \
-    tiktoken
+    tiktoken \
+    vllm \
+    huggingface_hub
 
 # Copy Forge package (headless subset — no GUI, no audio)
 COPY forge/ /app/forge/

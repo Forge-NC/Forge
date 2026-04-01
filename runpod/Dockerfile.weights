@@ -1,0 +1,25 @@
+# Forge Certified Audit — Model Weights Image (fat)
+# For auditing customer model weights via vLLM.
+# Uses official pre-built vLLM image — no compiling from source.
+# First build: ~5 min (pull base + pip install). Cached rebuilds: ~30s.
+
+FROM vllm/vllm-openai:latest
+
+WORKDIR /app
+
+# Lightweight deps the audit chain needs (numpy/torch already in base)
+RUN pip install --no-cache-dir \
+    runpod \
+    requests>=2.28 \
+    cryptography>=41.0 \
+    tiktoken>=0.7 \
+    huggingface_hub
+
+# Copy Forge package
+COPY forge/ /app/forge/
+COPY pyproject.toml /app/
+
+# Copy handler
+COPY runpod/handler.py /app/handler.py
+
+CMD ["python", "-u", "handler.py"]
