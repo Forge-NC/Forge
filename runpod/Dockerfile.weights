@@ -1,27 +1,32 @@
 # Forge Certified Audit — Model Weights Image (fat)
-# For auditing customer model weights via vLLM.
-# Uses official pre-built vLLM image — no compiling from source.
-# First build: ~5 min (pull base + pip install). Cached rebuilds: ~30s.
+# For auditing customer model weights via local vLLM.
+#
+# Uses runpod/pytorch base (pre-cached on RunPod workers = instant cold start).
+# vLLM installed via pip wheels (no compilation).
+# GHA Docker layer caching means the pip install layer only runs once —
+# subsequent builds only rebuild the thin forge/ code layer.
 
-FROM vllm/vllm-openai:latest
+FROM runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
 
 WORKDIR /app
 
-# Lightweight deps the audit chain needs (numpy/torch already in base)
+# Heavy deps first (cached by Docker layer cache after first build)
+RUN pip install --no-cache-dir \
+    vllm \
+    huggingface_hub
+
+# Lightweight deps the audit chain needs
 RUN pip install --no-cache-dir \
     runpod \
     requests>=2.28 \
     cryptography>=41.0 \
-    tiktoken>=0.7 \
-    huggingface_hub
+    tiktoken>=0.7
 
-# Copy Forge package
+# Copy Forge package (changes frequently — keep last for cache efficiency)
 COPY forge/ /app/forge/
 COPY pyproject.toml /app/
 
 # Copy handler
 COPY runpod/handler.py /app/handler.py
 
-# Override vLLM's ENTRYPOINT ["vllm", "serve"] — we manage vLLM ourselves
-ENTRYPOINT []
 CMD ["python", "-u", "handler.py"]
