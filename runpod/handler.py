@@ -197,19 +197,14 @@ def _run_api_endpoint_audit(
     assure_report["paired_run_id"] = break_result.report["run_id"]
 
     # ── Upload both reports to Forge server ──
-    # Base64-encode the body to prevent Cloudflare's WAF from flagging
-    # security test content (injection probes, harm prompts) in the report.
-    import base64 as _b64
-
+    # Use rv.php proxy — Cloudflare blocks POSTs to assurance_verify.php from
+    # data center IPs. rv.php forwards to verify internally via loopback.
     upload_status = {}
     for label, report in [("break", break_result.report), ("assure", assure_report)]:
         try:
-            # Wrap in a JSON envelope to match normal API traffic patterns
-            # (Cloudflare allows application/json POSTs from data centers)
-            envelope = {"payload": _b64.b64encode(json.dumps(report).encode()).decode()}
             resp = requests.post(
-                ASSURANCE_UPLOAD_URL + "?encoding=base64",
-                json=envelope,
+                ASSURANCE_UPLOAD_URL,
+                json=report,
                 timeout=30,
             )
             upload_status[label] = {"http": resp.status_code, "body": resp.text[:300]}
