@@ -22,4 +22,6 @@ COPY pyproject.toml /app/
 # Copy handler
 COPY runpod/handler.py /app/handler.py
 
+# Override vLLM's ENTRYPOINT ["vllm", "serve"] — we manage vLLM ourselves
+ENTRYPOINT []
 CMD ["python", "-u", "handler.py"]
