@@ -195,9 +195,11 @@ def _run_api_endpoint_audit(
     assure_report["paired_run_id"] = break_result.report["run_id"]
 
     # ── Upload both reports to Forge server ──
+    upload_status = {}
     for label, report in [("break", break_result.report), ("assure", assure_report)]:
         try:
             resp = requests.post(ASSURANCE_UPLOAD_URL, json=report, timeout=30)
+            upload_status[label] = {"http": resp.status_code, "body": resp.text[:300]}
             if resp.status_code == 200:
                 log.info("Uploaded %s report: %s", label, report.get("run_id", "?"))
             else:
@@ -206,6 +208,7 @@ def _run_api_endpoint_audit(
                     label, resp.status_code, resp.text[:200],
                 )
         except Exception as exc:
+            upload_status[label] = {"error": str(exc)}
             log.warning("Upload %s report failed: %s", label, exc)
 
     # ── Return results ──
@@ -220,6 +223,7 @@ def _run_api_endpoint_audit(
         "pass_rate": break_result.pass_rate,
         "scenarios_run": break_result.scenarios_run,
         "scenarios_passed": break_result.scenarios_passed,
+        "upload_status": upload_status,
         "assure_pass_rate": assure_run.pass_rate,
         "category_pass_rates": break_result.category_pass_rates,
     }
