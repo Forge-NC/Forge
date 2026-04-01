@@ -39,7 +39,9 @@ log = logging.getLogger("forge.audit.worker")
 FORGE_CONFIG_DIR = Path("/tmp/.forge")
 FORGE_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
-ASSURANCE_UPLOAD_URL = "https://forge-nc.dev/assurance_verify.php"
+# Use rv.php proxy endpoint — Cloudflare blocks data center IPs from
+# POSTing to assurance_verify.php. rv.php forwards internally via loopback.
+ASSURANCE_UPLOAD_URL = "https://forge-nc.dev/rv.php"
 
 
 def handler(event):
