@@ -1,0 +1,102 @@
+name: Build & Push Audit Images
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'forge/**'
+      - 'runpod/**'
+      - 'pyproject.toml'
+      - '.github/workflows/docker.yml'
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      build_weights:
+        description: 'Also build the fat weights image (slow)'
+        type: boolean
+        default: false
+
+env:
+  REGISTRY: ghcr.io
+  API_IMAGE: ghcr.io/${{ github.repository_owner }}/forge-audit-api
+  WEIGHTS_IMAGE: ghcr.io/${{ github.repository_owner }}/forge-audit-weights
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # ── Slim API image — builds in ~90s, runs on every push ──
+  build-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.API_IMAGE }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: runpod/Dockerfile.api
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Fat weights image — only on manual trigger or tagged release ──
+  build-weights:
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.event.inputs.build_weights == 'true'
+      || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.WEIGHTS_IMAGE }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: runpod/Dockerfile.weights
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

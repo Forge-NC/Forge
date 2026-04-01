@@ -20,6 +20,13 @@ from pathlib import Path
 import requests
 import runpod
 
+# Detect capabilities — slim image has no vLLM/torch
+try:
+    import vllm  # noqa: F401
+    HAS_VLLM = True
+except ImportError:
+    HAS_VLLM = False
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -64,14 +71,36 @@ def handler(event):
                 api_key=api_key,
                 webhook_secret=webhook_secret,
             )
+        elif access_type == "model_weights":
+            if not HAS_VLLM:
+                return {
+                    "order_id": order_id,
+                    "model_index": model_index,
+                    "webhook_secret": webhook_secret,
+                    "status": "failed",
+                    "error": "This worker is the slim API-only image. "
+                             "Model weights audits require the weights endpoint.",
+                }
+            hf_repo = job_input.get("hf_repo", "")
+            hf_token = job_input.get("hf_token", "")
+            weights_url = job_input.get("weights_url", "")
+            return _run_model_weights_audit(
+                order_id=order_id,
+                model_index=model_index,
+                model_name=model_name,
+                model_id=model_id,
+                hf_repo=hf_repo,
+                hf_token=hf_token,
+                weights_url=weights_url,
+                webhook_secret=webhook_secret,
+            )
         else:
-            # Phase 2: model weight downloads
             return {
                 "order_id": order_id,
                 "model_index": model_index,
                 "webhook_secret": webhook_secret,
                 "status": "failed",
-                "error": "Model weight downloads not yet supported (Phase 2)",
+                "error": f"Unknown access type: {access_type}",
             }
     except Exception as exc:
         log.exception("Audit failed for order %s model %d", order_id, model_index)
@@ -194,6 +223,121 @@ def _run_api_endpoint_audit(
         "assure_pass_rate": assure_run.pass_rate,
         "category_pass_rates": break_result.category_pass_rates,
     }
+
+
+def _run_model_weights_audit(
+    order_id: str,
+    model_index: int,
+    model_name: str,
+    model_id: str,
+    hf_repo: str,
+    hf_token: str,
+    weights_url: str,
+    webhook_secret: str,
+) -> dict:
+    """Download model weights, start vLLM, run dual-pass audit against it."""
+    import subprocess
+    import signal
+
+    from forge.break_runner import BreakRunner
+    from forge.models.openai_backend import OpenAIBackend
+    from forge.assurance import AssuranceRunner
+    from forge.assurance_report import generate_report
+
+    vllm_proc = None
+    try:
+        # ── Resolve model source ──
+        if hf_repo:
+            model_source = hf_repo
+        elif weights_url:
+            model_source = weights_url
+        else:
+            return {
+                "order_id": order_id, "model_index": model_index,
+                "webhook_secret": webhook_secret, "status": "failed",
+                "error": "No HuggingFace repo or download URL provided",
+            }
+
+        log.info("Starting vLLM for model: %s", model_source)
+
+        # ── Start vLLM server ──
+        vllm_env = os.environ.copy()
+        if hf_token:
+            vllm_env["HF_TOKEN"] = hf_token
+
+        vllm_cmd = [
+            "python", "-m", "vllm.entrypoints.openai.api_server",
+            "--model", model_source,
+            "--host", "0.0.0.0",
+            "--port", "8199",
+            "--trust-remote-code",
+        ]
+        vllm_proc = subprocess.Popen(
+            vllm_cmd, env=vllm_env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+
+        # ── Wait for vLLM to be ready (poll /health) ──
+        import urllib.request
+        import urllib.error
+        vllm_ready = False
+        for attempt in range(120):  # up to 10 minutes
+            time.sleep(5)
+            if vllm_proc.poll() is not None:
+                stdout = vllm_proc.stdout.read().decode(errors="replace")[-2000:]
+                return {
+                    "order_id": order_id, "model_index": model_index,
+                    "webhook_secret": webhook_secret, "status": "failed",
+                    "error": f"vLLM exited during startup (code {vllm_proc.returncode}): {stdout}",
+                }
+            try:
+                urllib.request.urlopen("http://localhost:8199/health", timeout=3)
+                vllm_ready = True
+                break
+            except (urllib.error.URLError, ConnectionError, OSError):
+                if attempt % 12 == 0:
+                    log.info("Waiting for vLLM... (%ds)", attempt * 5)
+                continue
+
+        if not vllm_ready:
+            vllm_proc.terminate()
+            return {
+                "order_id": order_id, "model_index": model_index,
+                "webhook_secret": webhook_secret, "status": "failed",
+                "error": "vLLM failed to start within 10 minutes",
+            }
+
+        log.info("vLLM ready, starting audit")
+
+        # ── Detect served model name from vLLM ──
+        try:
+            resp_raw = urllib.request.urlopen("http://localhost:8199/v1/models", timeout=5)
+            import json as _json
+            models_resp = _json.loads(resp_raw.read())
+            served_model = models_resp["data"][0]["id"]
+            log.info("vLLM serving model as: %s", served_model)
+        except Exception:
+            served_model = model_id or model_name
+
+        # ── Run audit against local vLLM ──
+        return _run_api_endpoint_audit(
+            order_id=order_id,
+            model_index=model_index,
+            model_name=model_name,
+            model_id=served_model,
+            endpoint_url="http://localhost:8199/v1",
+            api_key="not-needed",
+            webhook_secret=webhook_secret,
+        )
+
+    finally:
+        if vllm_proc and vllm_proc.poll() is None:
+            log.info("Shutting down vLLM")
+            vllm_proc.terminate()
+            try:
+                vllm_proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                vllm_proc.kill()
 
 
 # ── RunPod entry point ──
