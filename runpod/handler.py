@@ -39,9 +39,6 @@ log = logging.getLogger("forge.audit.worker")
 FORGE_CONFIG_DIR = Path("/tmp/.forge")
 FORGE_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
-# Use rv.php proxy endpoint — Cloudflare blocks data center IPs from
-# POSTing to assurance_verify.php. rv.php forwards internally via loopback.
-ASSURANCE_UPLOAD_URL = "https://forge-nc.dev/rv.php"
 
 
 def handler(event):
@@ -196,30 +193,15 @@ def _run_api_endpoint_audit(
     break_result.report["paired_run_id"] = assure_report["run_id"]
     assure_report["paired_run_id"] = break_result.report["run_id"]
 
-    # ── Upload both reports to Forge server ──
-    # Use rv.php proxy — Cloudflare blocks POSTs to assurance_verify.php from
-    # data center IPs. rv.php forwards to verify internally via loopback.
-    upload_status = {}
-    for label, report in [("break", break_result.report), ("assure", assure_report)]:
-        try:
-            resp = requests.post(
-                ASSURANCE_UPLOAD_URL,
-                json=report,
-                timeout=30,
-            )
-            upload_status[label] = {"http": resp.status_code, "body": resp.text[:300]}
-            if resp.status_code == 200:
-                log.info("Uploaded %s report: %s", label, report.get("run_id", "?"))
-            else:
-                log.warning(
-                    "Upload %s report failed: HTTP %d — %s",
-                    label, resp.status_code, resp.text[:200],
-                )
-        except Exception as exc:
-            upload_status[label] = {"error": str(exc)}
-            log.warning("Upload %s report failed: %s", label, exc)
+    # ── Return results + full reports in output ──
+    # Reports are saved server-side by the orchestrator callback, not uploaded
+    # directly. Cloudflare blocks data center POST requests with security content.
+    import base64 as _b64
 
-    # ── Return results ──
+    # Compress reports for the RunPod output payload
+    break_b64 = _b64.b64encode(json.dumps(break_result.report).encode()).decode()
+    assure_b64 = _b64.b64encode(json.dumps(assure_report).encode()).decode()
+
     return {
         "order_id": order_id,
         "model_index": model_index,
@@ -231,7 +213,8 @@ def _run_api_endpoint_audit(
         "pass_rate": break_result.pass_rate,
         "scenarios_run": break_result.scenarios_run,
         "scenarios_passed": break_result.scenarios_passed,
-        "upload_status": upload_status,
+        "break_report_b64": break_b64,
+        "assure_report_b64": assure_b64,
         "assure_pass_rate": assure_run.pass_rate,
         "category_pass_rates": break_result.category_pass_rates,
     }
