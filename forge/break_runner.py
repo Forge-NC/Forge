@@ -178,7 +178,7 @@ class BreakRunner:
             tier=tier,
             progress_callback=progress_callback,
         )
-        report = generate_report(assurance_run, config_dir=self._config_dir)
+        report = generate_report(assurance_run, config_dir=self._config_dir, report_type="break")
 
         failure_modes = self._extract_failure_modes(assurance_run.results)
         stability = self._compute_stability(
