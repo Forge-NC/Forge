@@ -257,8 +257,13 @@ def _run_model_weights_audit(
 
         # ── Start vLLM server ──
         vllm_env = os.environ.copy()
+        vllm_env["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"  # required for tensor parallelism
         if hf_token:
             vllm_env["HF_TOKEN"] = hf_token
+
+        # Detect multi-GPU (RunPod sets NVIDIA_VISIBLE_DEVICES)
+        import torch
+        gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 1
 
         vllm_cmd = [
             "python", "-m", "vllm.entrypoints.openai.api_server",
@@ -267,6 +272,9 @@ def _run_model_weights_audit(
             "--port", "8199",
             "--trust-remote-code",
         ]
+        if gpu_count > 1:
+            vllm_cmd += ["--tensor-parallel-size", str(gpu_count)]
+            log.info("Multi-GPU detected: %d GPUs, tensor-parallel-size=%d", gpu_count, gpu_count)
         vllm_proc = subprocess.Popen(
             vllm_cmd, env=vllm_env,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -276,7 +284,7 @@ def _run_model_weights_audit(
         import urllib.request
         import urllib.error
         vllm_ready = False
-        for attempt in range(120):  # up to 10 minutes
+        for attempt in range(360):  # up to 30 minutes (large models need time to load)
             time.sleep(5)
             if vllm_proc.poll() is not None:
                 stdout = vllm_proc.stdout.read().decode(errors="replace")[-2000:]
@@ -299,7 +307,7 @@ def _run_model_weights_audit(
             return {
                 "order_id": order_id, "model_index": model_index,
                 "webhook_secret": webhook_secret, "status": "failed",
-                "error": "vLLM failed to start within 10 minutes",
+                "error": f"vLLM failed to start within 30 minutes ({gpu_count} GPU(s))",
             }
 
         log.info("vLLM ready, starting audit")
