@@ -259,6 +259,7 @@ def _run_model_weights_audit(
         # (avoids vLLM/transformers HF download issues in containers)
         if not model_source.startswith("http"):
             try:
+                os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)  # runpod base sets this but lacks the package
                 from huggingface_hub import snapshot_download
                 log.info("Downloading model from HuggingFace: %s", model_source)
                 local_path = snapshot_download(
