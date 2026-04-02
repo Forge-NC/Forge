@@ -61,6 +61,7 @@ def generate_report(
     run: "AssuranceRun",
     config_dir: Path | None = None,
     save: bool = True,
+    report_type: str = "assure",
 ) -> dict:
     """Sign and serialise a completed AssuranceRun.
 
@@ -94,6 +95,7 @@ def generate_report(
     from forge.assurance import ASSURANCE_PROTOCOL_VERSION
 
     report = {
+        "report_type":           report_type,
         "run_id":                run.run_id,
         "model":                 run.model,
         "forge_version":         run.forge_version,

@@ -1,7 +1,7 @@
 {
   "signature_version": 1,
   "description": "Forge threat signatures \u2014 260 patterns from gitleaks (MIT), curated injections, supply chain, and PII detectors.",
-  "generated": "2026-03-14T08:00:06Z",
+  "generated": "2026-04-02T08:00:06Z",
   "sources": {
     "gitleaks": 221,
     "curated": 40,
@@ -339,7 +339,7 @@
     },
     {
       "name": "gl_airtable_personnal_access_token",
-      "regex": "\\b(pat[a-zA-Z0-9]{14}\\.[a-f0-9]{64})\\b",
+      "regex": "\\b(pat[[:alnum:]]{14}\\.[a-f0-9]{64})\\b",
       "level": 2,
       "category": "secret_leak",
       "description": "Uncovered a possible Airtable Personal AccessToken, potentially compromising database access and leading to data leakage or alteration."
@@ -1942,5 +1942,5 @@
       "description": "20+ file writes in 60s \u2014 possible ransomware or exfil staging"
     }
   ],
-  "sha512": "5a2eb2b759444a6bb789213763250bb826267534fc4abe7347909b92f21c3b5f63ed9dbe72a5f3c11c6c87676e8ef7b4d9771a0439676b66bed4b25929fef913"
+  "sha512": "c4e875367263c0207f27215361a2a842ec7e0830ecbaf518ee206d34480ee61e96fddf1c46dcf92a8ee00f28e73462dce02535f6f9e091dcd0eaeb49a0057e45"
 }
