@@ -366,5 +366,47 @@ def _run_model_weights_audit(
                 vllm_proc.kill()
 
 
-# ── RunPod entry point ──
-runpod.serverless.start({"handler": handler})
+# ── Pod mode: HTTP server for ultra tier ──
+
+def _run_pod_mode():
+    """Run as a standalone HTTP server inside a GPU pod.
+
+    The orchestrator passes job input via FORGE_JOB_INPUT env var (base64).
+    We run the audit, POST results to FORGE_WEBHOOK_URL, then exit (pod is
+    destroyed by the orchestrator on completion).
+    """
+    import base64 as _b64
+
+    webhook_url = os.environ.get("FORGE_WEBHOOK_URL", "")
+    job_b64 = os.environ.get("FORGE_JOB_INPUT", "")
+
+    if not job_b64 or not webhook_url:
+        log.error("Pod mode: missing FORGE_JOB_INPUT or FORGE_WEBHOOK_URL")
+        sys.exit(1)
+
+    job_input = json.loads(_b64.b64decode(job_b64))
+    log.info("Pod mode: starting audit for order %s", job_input.get("order_id"))
+
+    event = {"input": job_input}
+    result = handler(event)
+
+    # POST results back to orchestrator webhook
+    log.info("Pod mode: posting results to %s", webhook_url)
+    try:
+        resp = requests.post(
+            webhook_url,
+            json={"status": "COMPLETED", "output": result},
+            timeout=30,
+        )
+        log.info("Pod mode: webhook response %d", resp.status_code)
+    except Exception as exc:
+        log.error("Pod mode: webhook POST failed: %s", exc)
+
+    log.info("Pod mode: audit complete, exiting")
+
+
+# ── Entry point ──
+if os.environ.get("FORGE_POD_MODE") == "1":
+    _run_pod_mode()
+else:
+    runpod.serverless.start({"handler": handler})
