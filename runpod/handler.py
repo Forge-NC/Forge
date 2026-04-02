@@ -241,7 +241,7 @@ def _run_model_weights_audit(
 
     vllm_proc = None
     try:
-        # ── Resolve model source ──
+        # ── Resolve and pre-download model ──
         if hf_repo:
             model_source = hf_repo
         elif weights_url:
@@ -252,6 +252,28 @@ def _run_model_weights_audit(
                 "webhook_secret": webhook_secret, "status": "failed",
                 "error": "No HuggingFace repo or download URL provided",
             }
+
+        log.info("Resolving model: %s", model_source)
+
+        # Pre-download from HuggingFace so vLLM gets a local path
+        # (avoids vLLM/transformers HF download issues in containers)
+        if not model_source.startswith("http"):
+            try:
+                from huggingface_hub import snapshot_download
+                log.info("Downloading model from HuggingFace: %s", model_source)
+                local_path = snapshot_download(
+                    model_source,
+                    token=hf_token or None,
+                    cache_dir="/tmp/hf_models",
+                )
+                log.info("Model downloaded to: %s", local_path)
+                model_source = local_path
+            except Exception as dl_exc:
+                return {
+                    "order_id": order_id, "model_index": model_index,
+                    "webhook_secret": webhook_secret, "status": "failed",
+                    "error": f"Failed to download model from HuggingFace: {dl_exc}",
+                }
 
         log.info("Starting vLLM for model: %s", model_source)
 
