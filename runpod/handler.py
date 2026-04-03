@@ -92,6 +92,8 @@ def handler(event):
                 hf_token=hf_token,
                 weights_url=weights_url,
                 webhook_secret=webhook_secret,
+                vllm_flags=job_input.get("vllm_flags", ""),
+                vllm_env=job_input.get("vllm_env", ""),
             )
         else:
             return {
@@ -229,6 +231,8 @@ def _run_model_weights_audit(
     hf_token: str,
     weights_url: str,
     webhook_secret: str,
+    vllm_flags: str = "",
+    vllm_env: str = "",
 ) -> dict:
     """Download model weights, start vLLM, run dual-pass audit against it."""
     import subprocess
@@ -287,7 +291,7 @@ def _run_model_weights_audit(
             vllm_env["HF_TOKEN"] = hf_token
 
         # Apply customer-provided env vars (from enterprise intake form)
-        custom_env = job_input.get("vllm_env", "")
+        custom_env = vllm_env
         if custom_env:
             for pair in custom_env.split(","):
                 pair = pair.strip()
@@ -336,7 +340,7 @@ def _run_model_weights_audit(
             log.info("Multi-GPU: %d x %.0fGB = %.0fGB total, TP=%d", gpu_count, per_gpu_gb, total_vram_gb, gpu_count)
 
         # Apply customer-provided vLLM flags (from enterprise intake form)
-        custom_flags = job_input.get("vllm_flags", "")
+        custom_flags = vllm_flags
         if custom_flags:
             import shlex
             extra = shlex.split(custom_flags)
