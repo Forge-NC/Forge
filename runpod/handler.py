@@ -281,6 +281,8 @@ def _run_model_weights_audit(
         # ── Start vLLM server ──
         vllm_env = os.environ.copy()
         vllm_env["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"  # required for tensor parallelism
+        vllm_env["VLLM_USE_V1"] = "0"  # required for DeepSeek V3 MoE support
+        vllm_env["VLLM_MARLIN_USE_ATOMIC_ADD"] = "1"  # required for AWQ quantization
         if hf_token:
             vllm_env["HF_TOKEN"] = hf_token
 
@@ -288,16 +290,40 @@ def _run_model_weights_audit(
         import torch
         gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 1
 
+        # Detect per-GPU VRAM to select appropriate vLLM settings
+        per_gpu_gb = torch.cuda.get_device_properties(0).total_mem / (1024**3) if torch.cuda.is_available() else 48
+        total_vram_gb = per_gpu_gb * gpu_count
+
         vllm_cmd = [
             "python", "-m", "vllm.entrypoints.openai.api_server",
             "--model", model_source,
             "--host", "0.0.0.0",
             "--port", "8199",
             "--trust-remote-code",
+            "--enable-chunked-prefill",
+            "--enable-prefix-caching",
         ]
+
+        # Memory-constrained settings for 48GB GPUs (A6000/L40S)
+        if per_gpu_gb < 60:
+            vllm_cmd += [
+                "--max-model-len", "4096",
+                "--gpu-memory-utilization", "0.95",
+                "--max-num-seqs", "4",
+                "--enforce-eager",
+            ]
+            log.info("48GB GPU mode: max-model-len=4096, gpu-mem=0.95, eager")
+        else:
+            # 80GB+ GPUs (A100/H100/H200) — more headroom
+            vllm_cmd += [
+                "--max-model-len", "65536",
+                "--gpu-memory-utilization", "0.95",
+            ]
+            log.info("80GB+ GPU mode: max-model-len=65536, gpu-mem=0.95")
+
         if gpu_count > 1:
             vllm_cmd += ["--tensor-parallel-size", str(gpu_count)]
-            log.info("Multi-GPU detected: %d GPUs, tensor-parallel-size=%d", gpu_count, gpu_count)
+            log.info("Multi-GPU: %d x %.0fGB = %.0fGB total, TP=%d", gpu_count, per_gpu_gb, total_vram_gb, gpu_count)
         vllm_proc = subprocess.Popen(
             vllm_cmd, env=vllm_env,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -327,10 +353,15 @@ def _run_model_weights_audit(
 
         if not vllm_ready:
             vllm_proc.terminate()
+            try:
+                stdout = vllm_proc.stdout.read().decode(errors="replace")[-3000:]
+            except Exception:
+                stdout = "(could not read vLLM output)"
+            log.error("vLLM startup timeout. Last output:\n%s", stdout)
             return {
                 "order_id": order_id, "model_index": model_index,
                 "webhook_secret": webhook_secret, "status": "failed",
-                "error": f"vLLM failed to start within 60 minutes ({gpu_count} GPU(s))",
+                "error": f"vLLM failed to start within 60 minutes ({gpu_count} GPU(s)). Last output: {stdout[-500:]}",
             }
 
         log.info("vLLM ready, starting audit")
