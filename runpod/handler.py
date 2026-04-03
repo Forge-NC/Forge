@@ -286,6 +286,16 @@ def _run_model_weights_audit(
         if hf_token:
             vllm_env["HF_TOKEN"] = hf_token
 
+        # Apply customer-provided env vars (from enterprise intake form)
+        custom_env = job_input.get("vllm_env", "")
+        if custom_env:
+            for pair in custom_env.split(","):
+                pair = pair.strip()
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    vllm_env[k.strip()] = v.strip()
+                    log.info("Custom env: %s=%s", k.strip(), v.strip())
+
         # Detect multi-GPU (RunPod sets NVIDIA_VISIBLE_DEVICES)
         import torch
         gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 1
@@ -324,6 +334,16 @@ def _run_model_weights_audit(
         if gpu_count > 1:
             vllm_cmd += ["--tensor-parallel-size", str(gpu_count)]
             log.info("Multi-GPU: %d x %.0fGB = %.0fGB total, TP=%d", gpu_count, per_gpu_gb, total_vram_gb, gpu_count)
+
+        # Apply customer-provided vLLM flags (from enterprise intake form)
+        custom_flags = job_input.get("vllm_flags", "")
+        if custom_flags:
+            import shlex
+            extra = shlex.split(custom_flags)
+            vllm_cmd += extra
+            log.info("Custom vLLM flags: %s", extra)
+
+        log.info("vLLM command: %s", " ".join(vllm_cmd))
         vllm_proc = subprocess.Popen(
             vllm_cmd, env=vllm_env,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
