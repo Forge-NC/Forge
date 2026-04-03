@@ -93,7 +93,7 @@ def handler(event):
                 weights_url=weights_url,
                 webhook_secret=webhook_secret,
                 vllm_flags=job_input.get("vllm_flags", ""),
-                vllm_env=job_input.get("vllm_env", ""),
+                custom_vllm_env=job_input.get("vllm_env", ""),
             )
         else:
             return {
@@ -232,7 +232,7 @@ def _run_model_weights_audit(
     weights_url: str,
     webhook_secret: str,
     vllm_flags: str = "",
-    vllm_env: str = "",
+    custom_vllm_env: str = "",
 ) -> dict:
     """Download model weights, start vLLM, run dual-pass audit against it."""
     import subprocess
@@ -291,7 +291,7 @@ def _run_model_weights_audit(
             vllm_env["HF_TOKEN"] = hf_token
 
         # Apply customer-provided env vars (from enterprise intake form)
-        custom_env = vllm_env
+        custom_env = custom_vllm_env
         if custom_env:
             for pair in custom_env.split(","):
                 pair = pair.strip()
