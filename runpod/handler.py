@@ -305,7 +305,7 @@ def _run_model_weights_audit(
         gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 1
 
         # Detect per-GPU VRAM to select appropriate vLLM settings
-        per_gpu_gb = torch.cuda.get_device_properties(0).total_mem / (1024**3) if torch.cuda.is_available() else 48
+        per_gpu_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3) if torch.cuda.is_available() else 48
         total_vram_gb = per_gpu_gb * gpu_count
 
         vllm_cmd = [
