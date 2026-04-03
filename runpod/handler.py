@@ -307,7 +307,7 @@ def _run_model_weights_audit(
         import urllib.request
         import urllib.error
         vllm_ready = False
-        for attempt in range(360):  # up to 30 minutes (large models need time to load)
+        for attempt in range(720):  # up to 60 minutes (671B+ models need extended load time)
             time.sleep(5)
             if vllm_proc.poll() is not None:
                 stdout = vllm_proc.stdout.read().decode(errors="replace")[-2000:]
@@ -330,7 +330,7 @@ def _run_model_weights_audit(
             return {
                 "order_id": order_id, "model_index": model_index,
                 "webhook_secret": webhook_secret, "status": "failed",
-                "error": f"vLLM failed to start within 30 minutes ({gpu_count} GPU(s))",
+                "error": f"vLLM failed to start within 60 minutes ({gpu_count} GPU(s))",
             }
 
         log.info("vLLM ready, starting audit")
