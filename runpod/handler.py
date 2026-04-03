@@ -80,7 +80,7 @@ def handler(event):
                     "error": "This worker is the slim API-only image. "
                              "Model weights audits require the weights endpoint.",
                 }
-            hf_repo = job_input.get("hf_repo", "")
+            hf_repo = job_input.get("hf_repo", "") or job_input.get("model_id", "")
             hf_token = job_input.get("hf_token", "")
             weights_url = job_input.get("weights_url", "")
             return _run_model_weights_audit(
