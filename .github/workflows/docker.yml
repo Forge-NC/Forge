@@ -114,10 +114,13 @@ jobs:
           SHA="${{ steps.sha.outputs.short }}"
           IMAGE="ghcr.io/forge-nc/forge-audit-weights:${SHA}"
           echo "Updating RunPod templates to ${IMAGE}"
-          for TPL_ID in 19t7r9l7df i2alm4nqvb c3ii4yjwdk dxy7hi9d76 bwlv4zki0z; do
+          TPLS='19t7r9l7df:forge-audit-weights i2alm4nqvb:forge-audit-weights-medium c3ii4yjwdk:forge-audit-weights-large dxy7hi9d76:forge-audit-weights-xl bwlv4zki0z:forge-audit-weights-xxl'
+          for entry in $TPLS; do
+            TPL_ID="${entry%%:*}"
+            TPL_NAME="${entry##*:}"
             curl -s -H "Content-Type: application/json" -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
               "https://api.runpod.io/graphql" \
-              -d "{\"query\": \"mutation { saveTemplate(input: { id: \\\"${TPL_ID}\\\", imageName: \\\"${IMAGE}\\\", isServerless: true }) { id imageName } }\"}" \
+              -d "{\"query\": \"mutation { saveTemplate(input: { id: \\\"${TPL_ID}\\\", name: \\\"${TPL_NAME}\\\", imageName: \\\"${IMAGE}\\\", dockerArgs: \\\"\\\", env: [], isServerless: true, containerDiskInGb: 500, volumeInGb: 0, startJupyter: false, startSsh: false }) { id imageName } }\"}" \
               | jq -r '.data.saveTemplate.imageName // .errors[0].message'
           done
           echo "All templates updated to :${SHA}"
