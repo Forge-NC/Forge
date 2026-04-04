@@ -97,6 +97,12 @@ def handler(event):
     api_key = job_input.get("api_key", "")
     webhook_secret = job_input.get("webhook_secret", "")
 
+    # Attach remote log handler for live terminal output in admin dashboard
+    forge_server = job_input.get("forge_server", "https://forge-nc.dev")
+    _remote_handler = RemoteLogHandler(forge_server, order_id, flush_every=5)
+    _remote_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
+    logging.getLogger().addHandler(_remote_handler)
+
     log.info(
         "Starting audit: order=%s model=%s (%s) endpoint=%s",
         order_id, model_name, model_id, endpoint_url[:50] + "..." if len(endpoint_url) > 50 else endpoint_url,
