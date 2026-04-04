@@ -406,13 +406,15 @@ def _run_model_weights_audit(
             ]
             log.info("48GB GPU mode: max-model-len=4096, gpu-mem=0.95, eager")
         else:
-            # 80GB+ GPUs (A100/H100/H200) — more headroom
+            # 80GB+ GPUs (A100/H100/H200)
+            # Use 4096 context — audit prompts are short, saves KV cache alloc time
+            # Customers don't need 65K context for behavioral testing
             vllm_cmd += [
-                "--max-model-len", "65536",
+                "--max-model-len", "4096",
                 "--gpu-memory-utilization", "0.95",
                 "--enforce-eager",
             ]
-            log.info("80GB+ GPU mode: max-model-len=65536, gpu-mem=0.95, eager")
+            log.info("80GB+ GPU mode: max-model-len=4096, gpu-mem=0.95, eager")
 
         if gpu_count > 1:
             vllm_cmd += ["--tensor-parallel-size", str(gpu_count)]
