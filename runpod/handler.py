@@ -424,11 +424,11 @@ def _run_model_weights_audit(
 # ── Pod mode: HTTP server for ultra tier ──
 
 def _run_pod_mode():
-    """Run as a standalone HTTP server inside a GPU pod.
+    """Run audit inside a GPU pod, POST results to orchestrator webhook.
 
     The orchestrator passes job input via FORGE_JOB_INPUT env var (base64).
-    We run the audit, POST results to FORGE_WEBHOOK_URL, then exit (pod is
-    destroyed by the orchestrator on completion).
+    We run the audit, POST results to FORGE_WEBHOOK_URL, then exit.
+    The orchestrator destroys the pod on completion.
     """
     import base64 as _b64
 
@@ -439,25 +439,49 @@ def _run_pod_mode():
         log.error("Pod mode: missing FORGE_JOB_INPUT or FORGE_WEBHOOK_URL")
         sys.exit(1)
 
-    job_input = json.loads(_b64.b64decode(job_b64))
-    log.info("Pod mode: starting audit for order %s", job_input.get("order_id"))
+    result = None
+    order_id = "unknown"
+    webhook_secret = ""
 
-    event = {"input": job_input}
-    result = handler(event)
-
-    # POST results back to orchestrator webhook
-    log.info("Pod mode: posting results to %s", webhook_url)
     try:
-        resp = requests.post(
-            webhook_url,
-            json={"status": "COMPLETED", "output": result},
-            timeout=30,
-        )
-        log.info("Pod mode: webhook response %d", resp.status_code)
-    except Exception as exc:
-        log.error("Pod mode: webhook POST failed: %s", exc)
+        job_input = json.loads(_b64.b64decode(job_b64))
+        order_id = job_input.get("order_id", "unknown")
+        webhook_secret = job_input.get("webhook_secret", "")
+        log.info("Pod mode: starting audit for order %s", order_id)
 
-    log.info("Pod mode: audit complete, exiting")
+        event = {"input": job_input}
+        result = handler(event)
+        log.info("Pod mode: handler returned status=%s", result.get("status", "?"))
+
+    except Exception as exc:
+        log.exception("Pod mode: handler crashed")
+        result = {
+            "order_id": order_id,
+            "model_index": 0,
+            "webhook_secret": webhook_secret,
+            "status": "failed",
+            "error": f"Pod handler crash: {exc}",
+        }
+
+    # POST results back to orchestrator webhook (always, even on failure)
+    status_str = "COMPLETED" if result.get("status") == "completed" else "FAILED"
+    log.info("Pod mode: posting %s to %s", status_str, webhook_url)
+    for attempt in range(3):
+        try:
+            resp = requests.post(
+                webhook_url,
+                json={"status": status_str, "output": result},
+                timeout=60,
+            )
+            log.info("Pod mode: webhook response %d", resp.status_code)
+            if resp.status_code < 400:
+                break
+            log.warning("Pod mode: webhook returned %d, retrying...", resp.status_code)
+        except Exception as exc:
+            log.error("Pod mode: webhook POST attempt %d failed: %s", attempt + 1, exc)
+        time.sleep(5)
+
+    log.info("Pod mode: done, exiting")
 
 
 # ── Entry point ──
