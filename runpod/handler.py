@@ -392,8 +392,6 @@ def _run_model_weights_audit(
             "--host", "0.0.0.0",
             "--port", "8199",
             "--trust-remote-code",
-            "--enable-chunked-prefill",
-            "--enable-prefix-caching",
         ]
 
         # Memory-constrained settings for 48GB GPUs (A6000/L40S)
@@ -434,6 +432,19 @@ def _run_model_weights_audit(
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
 
+        # Stream vLLM stdout to log in a background thread
+        import threading
+        def _stream_vllm_output(proc):
+            try:
+                for raw_line in iter(proc.stdout.readline, b''):
+                    line = raw_line.decode(errors='replace').rstrip()
+                    if line:
+                        log.info("[vLLM] %s", line)
+            except Exception:
+                pass
+        _vllm_thread = threading.Thread(target=_stream_vllm_output, args=(vllm_proc,), daemon=True)
+        _vllm_thread.start()
+
         # ── Wait for vLLM to be ready (poll /health) ──
         import urllib.request
         import urllib.error
@@ -441,11 +452,11 @@ def _run_model_weights_audit(
         for attempt in range(720):  # up to 60 minutes (671B+ models need extended load time)
             time.sleep(5)
             if vllm_proc.poll() is not None:
-                stdout = vllm_proc.stdout.read().decode(errors="replace")[-2000:]
+                log.error("vLLM exited during startup with code %s. Check [vLLM] log lines above.", vllm_proc.returncode)
                 return {
                     "order_id": order_id, "model_index": model_index,
                     "webhook_secret": webhook_secret, "status": "failed",
-                    "error": f"vLLM exited during startup (code {vllm_proc.returncode}): {stdout}",
+                    "error": f"vLLM exited during startup (code {vllm_proc.returncode}). Output streamed to logs.",
                 }
             try:
                 urllib.request.urlopen("http://localhost:8199/health", timeout=3)
@@ -458,15 +469,11 @@ def _run_model_weights_audit(
 
         if not vllm_ready:
             vllm_proc.terminate()
-            try:
-                stdout = vllm_proc.stdout.read().decode(errors="replace")[-3000:]
-            except Exception:
-                stdout = "(could not read vLLM output)"
-            log.error("vLLM startup timeout. Last output:\n%s", stdout)
+            log.error("vLLM startup timeout after 60 minutes (%d GPUs). Check [vLLM] log lines above.", gpu_count)
             return {
                 "order_id": order_id, "model_index": model_index,
                 "webhook_secret": webhook_secret, "status": "failed",
-                "error": f"vLLM failed to start within 60 minutes ({gpu_count} GPU(s)). Last output: {stdout[-500:]}",
+                "error": f"vLLM failed to start within 60 minutes ({gpu_count} GPU(s)). vLLM output was streamed to logs.",
             }
 
         log.info("vLLM ready, starting audit")
