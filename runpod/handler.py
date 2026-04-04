@@ -40,6 +40,19 @@ FORGE_CONFIG_DIR = Path("/tmp/.forge")
 FORGE_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def post_audit_progress(forge_server: str, order_id: str, webhook_secret: str,
+                        stage: str, current: int = 0, total: int = 0, pass_count: int = 0):
+    """POST a progress update to the orchestrator. Non-blocking, fire-and-forget."""
+    try:
+        requests.post(
+            f"{forge_server}/audit_orchestrator.php?action=progress",
+            json={"order_id": order_id, "webhook_secret": webhook_secret,
+                  "stage": stage, "current": current, "total": total, "pass": pass_count},
+            timeout=5,
+        )
+    except Exception:
+        pass
+
 
 def handler(event):
     """RunPod serverless handler — runs Forge Certified Audit."""
@@ -138,17 +151,32 @@ def _run_api_endpoint_audit(
 
     log.info("LLM backend created: %s @ %s", model_id or model_name, endpoint_url)
 
+    # ── Progress reporting ──
+    _fs = endpoint_url.replace("/v1", "").replace("http://localhost:8199", "") or "https://forge-nc.dev"
+    if not _fs.startswith("http"):
+        _fs = "https://forge-nc.dev"
+    _progress_pass_count = 0
+
+    def _post(stage, cur=0, tot=0, pc=0):
+        post_audit_progress(_fs, order_id, webhook_secret, stage, cur, tot, pc)
+
+    def _progress(current, total, scenario_id, passed, latency_ms):
+        nonlocal _progress_pass_count
+        mark = "+" if passed else "x"
+        if passed:
+            _progress_pass_count += 1
+        log.info("  [%d/%d] [%s] %s (%dms)", current, total, mark, scenario_id, latency_ms)
+        if current % 5 == 0 or current == total:
+            _post("break_running", current, total, _progress_pass_count)
+
     # ── Pass 1: Break (stress test) ──
     log.info("Starting Break pass...")
+    _post("break_running", 0, 0)
     runner = BreakRunner(
         config_dir=FORGE_CONFIG_DIR,
         machine_id=f"forge-audit-{order_id[:8]}",
         passport_id="audit-worker",
     )
-
-    def _progress(current, total, scenario_id, passed, latency_ms):
-        mark = "+" if passed else "x"
-        log.info("  [%d/%d] [%s] %s (%dms)", current, total, mark, scenario_id, latency_ms)
 
     break_result = runner.run(
         llm=llm,
@@ -169,6 +197,18 @@ def _run_api_endpoint_audit(
 
     # ── Pass 2: Assurance (verification) ──
     log.info("Starting Assurance pass...")
+    _progress_pass_count = 0  # reset for assurance pass
+
+    def _progress_assure(current, total, scenario_id, passed, latency_ms):
+        nonlocal _progress_pass_count
+        mark = "+" if passed else "x"
+        if passed:
+            _progress_pass_count += 1
+        log.info("  [%d/%d] [%s] %s (%dms)", current, total, mark, scenario_id, latency_ms)
+        if current % 5 == 0 or current == total:
+            _post("assure_running", current, total, _progress_pass_count)
+
+    _post("assure_running", 0, 0)
     assure_runner = AssuranceRunner(
         config_dir=FORGE_CONFIG_DIR,
         machine_id=f"forge-audit-{order_id[:8]}",
@@ -180,8 +220,9 @@ def _run_api_endpoint_audit(
         fingerprint_scores=break_result.fingerprint_scores,
         self_rate=True,
         tier="power",
-        progress_callback=_progress,
+        progress_callback=_progress_assure,
     )
+    _post("signing", 0, 0)
     assure_report = generate_report(assure_run, config_dir=FORGE_CONFIG_DIR)
 
     log.info(
@@ -258,6 +299,8 @@ def _run_model_weights_audit(
             }
 
         log.info("Resolving model: %s", model_source)
+        _fs = "https://forge-nc.dev"
+        post_audit_progress(_fs, order_id, webhook_secret, "downloading")
 
         # Pre-download from HuggingFace so vLLM gets a local path
         # (avoids vLLM/transformers HF download issues in containers)
@@ -281,6 +324,7 @@ def _run_model_weights_audit(
                 }
 
         log.info("Starting vLLM for model: %s", model_source)
+        post_audit_progress(_fs, order_id, webhook_secret, "loading")
 
         # ── Start vLLM server ──
         vllm_env = os.environ.copy()
