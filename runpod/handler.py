@@ -40,6 +40,36 @@ FORGE_CONFIG_DIR = Path("/tmp/.forge")
 FORGE_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
+class RemoteLogHandler(logging.Handler):
+    """Logging handler that buffers log lines and POSTs them to the orchestrator."""
+
+    def __init__(self, forge_server: str, order_id: str, flush_every: int = 10):
+        super().__init__()
+        self._url = f"{forge_server}/audit_orchestrator.php?action=log"
+        self._order_id = order_id
+        self._buffer = []
+        self._flush_every = flush_every
+
+    def emit(self, record):
+        try:
+            line = self.format(record)
+            self._buffer.append(line)
+            if len(self._buffer) >= self._flush_every:
+                self.flush()
+        except Exception:
+            pass
+
+    def flush(self):
+        if not self._buffer:
+            return
+        lines = self._buffer[:50]
+        self._buffer = self._buffer[50:]
+        try:
+            requests.post(self._url, json={"order_id": self._order_id, "lines": lines}, timeout=5)
+        except Exception:
+            pass
+
+
 def post_audit_progress(forge_server: str, order_id: str, webhook_secret: str,
                         stage: str, current: int = 0, total: int = 0, pass_count: int = 0):
     """POST a progress update to the orchestrator. Non-blocking, fire-and-forget."""
@@ -498,6 +528,11 @@ def _run_pod_mode():
         webhook_secret = job_input.get("webhook_secret", "")
         forge_server = job_input.get("forge_server", "https://forge-nc.dev")
         log.info("Pod mode: starting audit for order %s", order_id)
+
+        # Attach remote log handler so admin can see live output
+        remote_handler = RemoteLogHandler(forge_server, order_id, flush_every=5)
+        remote_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
+        logging.getLogger().addHandler(remote_handler)
 
         # Early progress POST so admin dashboard knows we're alive
         post_audit_progress(forge_server, order_id, webhook_secret, "pod_started")
