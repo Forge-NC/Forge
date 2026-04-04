@@ -935,7 +935,10 @@ class AssuranceRunner:
             main_response = ""
             variant_responses = []  # (prompt_label, response, passed)
             for i, prompt in enumerate(prompts):
-                messages = [{"role": "user", "content": prompt}]
+                messages = [
+                    {"role": "system", "content": "Be concise. Answer in as few words as possible while being accurate and complete. Do not elaborate unless the question specifically asks for explanation."},
+                    {"role": "user", "content": prompt},
+                ]
                 try:
                     result = collect_response(llm, messages, temperature=0.0)
                     resp = result.get("text", "").strip()
