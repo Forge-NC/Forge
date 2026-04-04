@@ -410,8 +410,9 @@ def _run_model_weights_audit(
             vllm_cmd += [
                 "--max-model-len", "65536",
                 "--gpu-memory-utilization", "0.95",
+                "--enforce-eager",
             ]
-            log.info("80GB+ GPU mode: max-model-len=65536, gpu-mem=0.95")
+            log.info("80GB+ GPU mode: max-model-len=65536, gpu-mem=0.95, eager")
 
         if gpu_count > 1:
             vllm_cmd += ["--tensor-parallel-size", str(gpu_count)]
