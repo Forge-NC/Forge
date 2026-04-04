@@ -331,6 +331,10 @@ def _run_model_weights_audit(
         vllm_env["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"  # required for tensor parallelism
         vllm_env["VLLM_USE_V1"] = "0"  # required for DeepSeek V3 MoE support
         vllm_env["VLLM_MARLIN_USE_ATOMIC_ADD"] = "1"  # required for AWQ quantization
+        vllm_env["VLLM_USE_DEEP_GEMM"] = "0"  # CRITICAL: causes hangs on Hopper (H100) GPUs
+        vllm_env["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"] = "1"  # recommended for Hopper
+        vllm_env["VLLM_USE_FLASHINFER_MOE_FP16"] = "1"  # recommended for AWQ MoE models
+        vllm_env["VLLM_USE_FLASHINFER_SAMPLER"] = "0"  # recommended
         if hf_token:
             vllm_env["HF_TOKEN"] = hf_token
 
