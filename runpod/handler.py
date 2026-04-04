@@ -490,12 +490,17 @@ def _run_pod_mode():
     result = None
     order_id = "unknown"
     webhook_secret = ""
+    forge_server = "https://forge-nc.dev"
 
     try:
         job_input = json.loads(_b64.b64decode(job_b64))
         order_id = job_input.get("order_id", "unknown")
         webhook_secret = job_input.get("webhook_secret", "")
+        forge_server = job_input.get("forge_server", "https://forge-nc.dev")
         log.info("Pod mode: starting audit for order %s", order_id)
+
+        # Early progress POST so admin dashboard knows we're alive
+        post_audit_progress(forge_server, order_id, webhook_secret, "pod_started")
 
         event = {"input": job_input}
         result = handler(event)
@@ -512,24 +517,50 @@ def _run_pod_mode():
         }
 
     # POST results back to orchestrator webhook (always, even on failure)
+    # Try multiple URL patterns to bypass Cloudflare WAF blocking data center IPs
     status_str = "COMPLETED" if result.get("status") == "completed" else "FAILED"
-    log.info("Pod mode: posting %s to %s", status_str, webhook_url)
-    for attempt in range(3):
-        try:
-            resp = requests.post(
-                webhook_url,
-                json={"status": status_str, "output": result},
-                timeout=60,
-            )
-            log.info("Pod mode: webhook response %d", resp.status_code)
-            if resp.status_code < 400:
-                break
-            log.warning("Pod mode: webhook returned %d, retrying...", resp.status_code)
-        except Exception as exc:
-            log.error("Pod mode: webhook POST attempt %d failed: %s", attempt + 1, exc)
-        time.sleep(5)
+    payload = {"status": status_str, "output": result}
+    webhook_urls = [
+        webhook_url,
+        webhook_url.replace("audit_orchestrator.php", "rv.php"),  # proxy bypass
+    ]
 
-    log.info("Pod mode: done, exiting")
+    posted = False
+    for url in webhook_urls:
+        log.info("Pod mode: posting %s to %s", status_str, url)
+        for attempt in range(3):
+            try:
+                resp = requests.post(url, json=payload, timeout=60)
+                log.info("Pod mode: webhook response %d from %s", resp.status_code, url)
+                if resp.status_code < 400:
+                    posted = True
+                    break
+                log.warning("Pod mode: %d on attempt %d, retrying...", resp.status_code, attempt + 1)
+            except Exception as exc:
+                log.error("Pod mode: POST attempt %d to %s failed: %s", attempt + 1, url, exc)
+            time.sleep(5)
+        if posted:
+            break
+
+    if not posted:
+        log.error("Pod mode: ALL webhook POST attempts failed. Results lost.")
+
+    # Self-terminate the pod to prevent restart loop
+    # RunPod pods have restartPolicy: Always — exiting would restart the container
+    pod_id = os.environ.get("RUNPOD_POD_ID", "")
+    if pod_id:
+        log.info("Pod mode: self-terminating pod %s", pod_id)
+        try:
+            import subprocess
+            subprocess.run(["runpodctl", "pod", "stop", pod_id], timeout=10, capture_output=True)
+        except Exception as exc:
+            log.warning("Pod mode: self-terminate failed: %s (orchestrator will clean up)", exc)
+
+    log.info("Pod mode: done, sleeping to prevent restart")
+    # Sleep indefinitely instead of exiting — prevents restart loop
+    # The orchestrator or self-terminate will kill the pod
+    while True:
+        time.sleep(3600)
 
 
 # ── Entry point ──
