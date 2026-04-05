@@ -202,7 +202,7 @@ def _run_api_endpoint_audit(
         if passed:
             _progress_pass_count += 1
         log.info("  [%d/%d] [%s] %s (%dms)", current, total, mark, scenario_id, latency_ms)
-        if current % 5 == 0 or current == total:
+        if current % 2 == 0 or current == total:
             _post("break_running", current, total, _progress_pass_count)
 
     # ── Pass 1: Break (stress test) ──
@@ -241,7 +241,7 @@ def _run_api_endpoint_audit(
         if passed:
             _progress_pass_count += 1
         log.info("  [%d/%d] [%s] %s (%dms)", current, total, mark, scenario_id, latency_ms)
-        if current % 5 == 0 or current == total:
+        if current % 2 == 0 or current == total:
             _post("assure_running", current, total, _progress_pass_count)
 
     _post("assure_running", 0, 0)
