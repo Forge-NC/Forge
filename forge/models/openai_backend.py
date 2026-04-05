@@ -93,7 +93,7 @@ class OpenAIBackend:
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": 1280,
+            "max_tokens": 225,
             "stream": stream,
         }
 
