@@ -44,3 +44,4 @@ vscode-forge/*.vsix
 # Scratch/junk files
 report.md
 report_section_*.txt
+runpodctl.exe
