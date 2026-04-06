@@ -1,0 +1,18 @@
+option batch abort
+option confirm off
+open forgenc@107.161.23.171
+lcd "C:\Users\theup\Desktop\Forge\discord-bot"
+cd /discord-bot
+put bot.py
+put config.py
+put forge_api.py
+put requirements.txt
+put .env
+put run_bot.sh
+mkdir cogs
+cd /discord-bot/cogs
+put "cogs\__init__.py"
+put "cogs\welcome.py"
+put "cogs\audits.py"
+put "cogs\moderation.py"
+exit

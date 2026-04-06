@@ -1,0 +1,7 @@
+option batch abort
+option confirm off
+open forgenc@107.161.23.171
+lcd "C:\Users\theup\Desktop\Forge\discord-bot"
+cd /discord-bot
+put start.py
+exit

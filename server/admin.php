@@ -5,6 +5,7 @@
  * Master management, token management, revenue overview,
  * webhook log viewer, and system health.
  */
+date_default_timezone_set('America/Chicago');
 require_once __DIR__ . '/includes/auth_guard.php';
 
 // Admin access (origin + any user with is_admin flag)
@@ -82,8 +83,75 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'save_s
         exit;
     }
 
+    // Model registry CRUD
+    if (isset($_POST['registry_action'])) {
+        $reg_path = __DIR__ . '/data/model_registry.json';
+        $reg = file_exists($reg_path) ? json_decode(file_get_contents($reg_path), true) : ['models' => []];
+        $reg_action = $_POST['registry_action'];
+        $reg_model_id = $_POST['registry_model_id'] ?? '';
+
+        if ($reg_action === 'save' && $reg_model_id) {
+            $entry = [
+                'display_name' => $_POST['reg_display_name'] ?? $reg_model_id,
+                'architecture' => $_POST['reg_architecture'] ?? '',
+                'model_type' => $_POST['reg_model_type'] ?? '',
+                'params_b' => (float)($_POST['reg_params_b'] ?? 0),
+                'quantization' => $_POST['reg_quantization'] ?: null,
+                'quant_bits' => (int)($_POST['reg_quant_bits'] ?? 0) ?: null,
+                'is_moe' => !empty($_POST['reg_is_moe']),
+                'num_experts' => (int)($_POST['reg_num_experts'] ?? 0),
+                'num_attention_heads' => (int)($_POST['reg_num_attention_heads'] ?? 0),
+                'weight_size_gb' => (float)($_POST['reg_weight_size_gb'] ?? 0),
+                'min_vram_gb' => (float)($_POST['reg_min_vram_gb'] ?? 0),
+                'recommended_gpu' => $_POST['reg_recommended_gpu'] ?? '',
+                'recommended_tp' => (int)($_POST['reg_recommended_tp'] ?? 0),
+                'max_model_len' => (int)($_POST['reg_max_model_len'] ?? 4096),
+                'enforce_eager' => !empty($_POST['reg_enforce_eager']),
+                'vllm_env' => [],
+                'vllm_flags' => [],
+                'startup_time_estimate_min' => (int)($_POST['reg_startup_time'] ?? 5),
+                'notes' => array_filter(array_map('trim', explode("\n", $_POST['reg_notes'] ?? ''))),
+                'verified_date' => $_POST['reg_verified_date'] ?: null,
+                'verified_by' => $_POST['reg_verified_by'] ?: null,
+            ];
+            // Parse vllm_env from key=value lines
+            foreach (explode("\n", $_POST['reg_vllm_env'] ?? '') as $line) {
+                $line = trim($line);
+                if ($line && strpos($line, '=') !== false) {
+                    [$k, $v] = explode('=', $line, 2);
+                    $entry['vllm_env'][trim($k)] = trim($v);
+                }
+            }
+            $reg['models'][$reg_model_id] = $entry;
+        } elseif ($reg_action === 'delete' && $reg_model_id) {
+            unset($reg['models'][$reg_model_id]);
+        } elseif ($reg_action === 'verify' && $reg_model_id && isset($reg['models'][$reg_model_id])) {
+            $reg['models'][$reg_model_id]['verified_date'] = date('Y-m-d');
+            $reg['models'][$reg_model_id]['verified_by'] = 'forge-origin';
+        } elseif ($reg_action === 'unverify' && $reg_model_id && isset($reg['models'][$reg_model_id])) {
+            $reg['models'][$reg_model_id]['verified_date'] = null;
+            $reg['models'][$reg_model_id]['verified_by'] = null;
+        }
+
+        file_put_contents($reg_path, json_encode($reg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), LOCK_EX);
+        echo json_encode(['ok' => true, 'action' => $reg_action, 'model_id' => $reg_model_id]);
+        exit;
+    }
+
+    // Tax estimator config
+    $tax_fields = ['tax_w2_income', 'tax_w2_withholding', 'tax_salary_split_pct', 'tax_dev_hours_ytd', 'tax_dev_hourly_rate'];
+    $tax_changed = false;
+    foreach ($tax_fields as $tf) {
+        if (isset($_POST[$tf]) && $_POST[$tf] !== '') {
+            $audit_cfg[$tf] = (float)$_POST[$tf];
+            $tax_changed = true;
+        }
+    }
+
     file_put_contents($audit_config_path, json_encode($audit_cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
-    echo json_encode(['ok' => true, 'audit_maintenance' => $audit_cfg['audit_maintenance'] ?? false]);
+    $resp = ['ok' => true, 'audit_maintenance' => $audit_cfg['audit_maintenance'] ?? false];
+    if ($tax_changed) $resp['tax_saved'] = true;
+    echo json_encode($resp);
     exit;
 }
 
@@ -881,7 +949,7 @@ $site_events = array();
 $site_range = isset($_GET['range']) ? $_GET['range'] : '7d';
 
 $active_view = isset($_GET['view']) ? $_GET['view'] : 'overview';
-$valid_views = array('overview', 'users', 'masters', 'tokens', 'revenue', 'webhooks', 'system', 'site', 'telemetry', 'audit', 'billing', 'expenses', 'settings');
+$valid_views = array('overview', 'users', 'masters', 'tokens', 'revenue', 'webhooks', 'system', 'site', 'telemetry', 'audit', 'billing', 'expenses', 'registry', 'settings');
 if (!in_array($active_view, $valid_views)) $active_view = 'overview';
 
 if ($active_view === 'site') {
@@ -1345,6 +1413,7 @@ require_once __DIR__ . '/includes/header.php';
         <a href="/admin/audit"<?php echo $active_view === 'audit' ? ' class="active"' : ''; ?>><span class="nav-icon">&#128209;</span> Audit Log</a>
         <a href="/admin/billing"<?php echo $active_view === 'billing' ? ' class="active"' : ''; ?>><span class="nav-icon">&#128179;</span> Billing &amp; Costs</a>
         <a href="/admin/expenses"<?php echo $active_view === 'expenses' ? ' class="active"' : ''; ?>><span class="nav-icon">&#128206;</span> Expenses</a>
+        <a href="/admin/registry"<?php echo $active_view === 'registry' ? ' class="active"' : ''; ?>><span class="nav-icon">&#128218;</span> Model Registry</a>
         <a href="/admin/settings"<?php echo $active_view === 'settings' ? ' class="active"' : ''; ?>><span class="nav-icon">&#9881;</span> Settings</a>
         <div class="nav-divider"></div>
         <a href="/" style="color:var(--text-muted)"><span class="nav-icon">&#8594;</span> View Website</a>
@@ -3065,7 +3134,10 @@ require_once __DIR__ . '/includes/header.php';
             <div style="margin-top:12px">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
                     <span style="font-size:0.72em;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px">Live Output</span>
-                    <span id="log-status-<?php echo htmlspecialchars($ro['order_id'] ?? ''); ?>" style="font-size:0.68em;color:var(--accent)">connecting...</span>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <button onclick="var t=document.getElementById('log-terminal-<?php echo htmlspecialchars($ro['order_id'] ?? ''); ?>');navigator.clipboard.writeText(t.innerText).then(function(){if(typeof showToast==='function')showToast('Copied')})" class="btn btn-sm" style="padding:1px 8px;font-size:0.65em;background:rgba(102,217,239,0.1);color:var(--accent);border:1px solid rgba(102,217,239,0.3)">Copy</button>
+                        <span id="log-status-<?php echo htmlspecialchars($ro['order_id'] ?? ''); ?>" style="font-size:0.68em;color:var(--accent)">connecting...</span>
+                    </div>
                 </div>
                 <div id="log-terminal-<?php echo htmlspecialchars($ro['order_id'] ?? ''); ?>" style="background:#1a1b16;border:1px solid #333;border-radius:6px;padding:10px 12px;font-family:'Cascadia Code','Fira Code',monospace;font-size:0.72em;line-height:1.6;color:#a8a890;max-height:250px;overflow-y:auto;white-space:pre-wrap;word-break:break-all"></div>
             </div>
@@ -3074,6 +3146,7 @@ require_once __DIR__ . '/includes/header.php';
         <style>
         @keyframes pulse-node { 0%,100% { opacity:1; } 50% { opacity:0.6; } }
         @keyframes pulse-line { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+        @keyframes pulse-queue { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
         </style>
         <script>
         // Auto-refresh every 15 seconds while audits are running
@@ -3099,6 +3172,21 @@ require_once __DIR__ . '/includes/header.php';
                     if (m.status === 'completed' || m.status === 'failed') {
                         location.reload();
                         return;
+                    }
+
+                    // GPU queue wait indicator
+                    var queueEl = document.getElementById('gpu-queue-wait-<?php echo htmlspecialchars($ro['order_id'] ?? ''); ?>');
+                    if (d.gpu_queue_wait) {
+                        if (!queueEl) {
+                            queueEl = document.createElement('div');
+                            queueEl.id = 'gpu-queue-wait-<?php echo htmlspecialchars($ro['order_id'] ?? ''); ?>';
+                            queueEl.style.cssText = 'text-align:center;padding:8px;margin-bottom:12px;font-size:0.78em;color:var(--yellow);animation:pulse-queue 2s ease-in-out infinite';
+                            queueEl.innerHTML = 'Waiting for GPU availability...';
+                            var pipeDiv = document.querySelector('[data-pipeline="<?php echo htmlspecialchars($ro['order_id'] ?? ''); ?>"]');
+                            if (pipeDiv) pipeDiv.parentNode.insertBefore(queueEl, pipeDiv);
+                        }
+                    } else if (queueEl) {
+                        queueEl.remove();
                     }
 
                     // Update pipeline nodes in-place
@@ -3197,6 +3285,23 @@ require_once __DIR__ . '/includes/header.php';
         }
         setInterval(pollLogs, 3000);
         pollLogs();
+        </script>
+        <?php endif; ?>
+
+        <?php if (empty($running_orders)): ?>
+        <script>
+        // No running audits — poll for new ones and reload when one starts
+        var _auditCheckInterval = setInterval(function() {
+            <?php foreach ($audit_orders as $_ao): ?>
+            <?php if (in_array($_ao['status'] ?? '', ['deposit_paid', 'paid'])): ?>
+            fetch('/audit_orchestrator.php?action=status&order_id=<?php echo urlencode($_ao['order_id'] ?? ''); ?>')
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (d.status === 'running') { clearInterval(_auditCheckInterval); location.reload(); }
+                });
+            <?php endif; ?>
+            <?php endforeach; ?>
+        }, 10000);
         </script>
         <?php endif; ?>
 
@@ -3307,6 +3412,9 @@ require_once __DIR__ . '/includes/header.php';
                                 <?php endif; ?>
                                 <?php endforeach; ?>
 <?php endif; ?>
+<?php if (in_array($ao_status, ['completed', 'failed', 'running'])): ?>
+                                <button class="btn btn-sm" style="padding:2px 6px;font-size:0.65em;background:rgba(168,168,144,0.1);color:var(--text-dim);border:1px solid var(--border)" onclick="showAuditLogs('<?php echo htmlspecialchars($ao['order_id'] ?? ''); ?>')">Logs</button>
+<?php endif; ?>
 <?php if ($ao_status === 'failed' && !empty($ao_models[0]['error'])): ?>
                                 <div style="font-size:0.68em;color:var(--red);margin-top:4px;max-width:200px;overflow:hidden;text-overflow:ellipsis" title="<?php echo htmlspecialchars($ao_models[0]['error'] ?? ''); ?>"><?php echo htmlspecialchars(substr($ao_models[0]['error'] ?? '', 0, 80)); ?></div>
 <?php endif; ?>
@@ -3364,6 +3472,7 @@ require_once __DIR__ . '/includes/header.php';
                                 <a href="/report/<?php echo urlencode($_am['run_id']); ?>" class="btn btn-secondary" style="padding:2px 6px;font-size:0.65em">View</a>
                                 <?php endif; ?>
                                 <?php endforeach; ?>
+                                <button class="btn btn-sm" style="padding:2px 6px;font-size:0.65em;background:rgba(168,168,144,0.1);color:var(--text-dim);border:1px solid var(--border)" onclick="showAuditLogs('<?php echo htmlspecialchars($ao['order_id'] ?? ''); ?>')">Logs</button>
                             </td>
 <?php endif; ?>
                         </tr>
@@ -3373,6 +3482,55 @@ require_once __DIR__ . '/includes/header.php';
             </div>
         </div>
         <?php endif; ?>
+
+        <!-- Audit log viewer modal -->
+        <div id="audit-log-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:9999;padding:40px">
+            <div style="max-width:900px;margin:0 auto;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;height:calc(100vh - 80px);display:flex;flex-direction:column">
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border)">
+                    <h3 style="margin:0" id="audit-log-title">Audit Logs</h3>
+                    <div style="display:flex;gap:8px">
+                        <button onclick="var c=document.getElementById('audit-log-content');navigator.clipboard.writeText(c.innerText).then(function(){if(typeof showToast==='function')showToast('Copied to clipboard')})" class="btn btn-sm" style="padding:4px 12px;background:rgba(102,217,239,0.1);color:var(--accent);border:1px solid var(--accent)">Copy</button>
+                        <button onclick="document.getElementById('audit-log-modal').style.display='none'" class="btn btn-sm" style="padding:4px 12px">&times; Close</button>
+                    </div>
+                </div>
+                <div id="audit-log-content" style="flex:1;overflow-y:auto;padding:12px 16px;background:#1a1b16;font-family:'Cascadia Code','Fira Code',monospace;font-size:0.72em;line-height:1.6;color:#a8a890;white-space:pre-wrap;word-break:break-all"></div>
+            </div>
+        </div>
+        <script>
+        function showAuditLogs(orderId) {
+            var modal = document.getElementById('audit-log-modal');
+            var content = document.getElementById('audit-log-content');
+            var title = document.getElementById('audit-log-title');
+            title.textContent = 'Audit Logs — ' + orderId;
+            content.innerHTML = '<span style="color:var(--accent)">Loading...</span>';
+            modal.style.display = 'block';
+            fetch('/audit_orchestrator.php?action=logs&order_id=' + encodeURIComponent(orderId) + '&after=0')
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    content.innerHTML = '';
+                    if (!d.lines || d.lines.length === 0) {
+                        content.innerHTML = '<span style="color:var(--text-dim)">No logs available for this audit.</span>';
+                        return;
+                    }
+                    d.lines.forEach(function(line) {
+                        var div = document.createElement('div');
+                        if (line.indexOf('ERROR') >= 0 || line.indexOf('FAILED') >= 0) {
+                            div.style.color = '#f92672';
+                        } else if (line.indexOf('WARNING') >= 0) {
+                            div.style.color = '#e6db74';
+                        } else if (line.indexOf('[+]') >= 0 || line.indexOf('complete') >= 0 || line.indexOf('ready') >= 0) {
+                            div.style.color = '#a6e22e';
+                        }
+                        div.textContent = line;
+                        content.appendChild(div);
+                    });
+                })
+                .catch(function(e) {
+                    content.innerHTML = '<span style="color:var(--red)">Failed to load logs: ' + e.message + '</span>';
+                });
+            modal.addEventListener('click', function(e) { if (e.target === modal) modal.style.display = 'none'; });
+        }
+        </script>
 
         <!-- Reports table with filter -->
         <div class="card" style="padding:20px">
@@ -3463,6 +3621,7 @@ require_once __DIR__ . '/includes/header.php';
                             <td rowspan="2" style="white-space:nowrap;vertical-align:middle">
                                 <a href="/report/<?php echo urlencode($break_id); ?>" class="btn btn-secondary" style="padding:2px 8px;font-size:0.75em">Break</a>
                                 <a href="/report/<?php echo urlencode($assure_id); ?>" class="btn btn-secondary" style="padding:2px 8px;font-size:0.75em">Assure</a>
+                                <a href="/debrief/<?php echo urlencode($break_id); ?>" class="btn btn-sm" style="padding:2px 8px;font-size:0.75em;background:rgba(102,217,239,0.1);color:var(--accent);border:1px solid rgba(102,217,239,0.3)" target="_blank">Debrief</a>
                                 <a href="/report/<?php echo urlencode($break_id); ?>" class="btn btn-secondary" style="padding:2px 8px;font-size:0.75em">PDF</a>
 <?php if (!$pair_certified): ?>
                                 <button class="btn btn-sm" style="padding:2px 8px;font-size:0.75em;background:rgba(255,215,0,0.12);color:#ffd700;border:1px solid #8b7500" onclick="certifyFromAdmin('<?php echo htmlspecialchars($break_id); ?>','<?php echo htmlspecialchars($assure_id); ?>')">Certify Pair</button>
@@ -3505,6 +3664,7 @@ require_once __DIR__ . '/includes/header.php';
                             <td class="text-dim"><?php echo $dur; ?></td>
                             <td style="white-space:nowrap">
                                 <a href="/report/<?php echo urlencode($rid); ?>" class="btn btn-secondary" style="padding:2px 8px;font-size:0.75em">View</a>
+                                <a href="/debrief/<?php echo urlencode($rid); ?>" class="btn btn-sm" style="padding:2px 8px;font-size:0.75em;background:rgba(102,217,239,0.1);color:var(--accent);border:1px solid rgba(102,217,239,0.3)" target="_blank">Debrief</a>
                                 <a href="/report/<?php echo urlencode($rid); ?>" class="btn btn-secondary" style="padding:2px 8px;font-size:0.75em">PDF</a>
 <?php if (!$is_certified): ?>
                                 <button class="btn btn-sm" style="padding:2px 8px;font-size:0.75em;background:rgba(255,215,0,0.12);color:#ffd700;border:1px solid #8b7500" onclick="certifyFromAdmin('<?php echo htmlspecialchars($rid); ?>')">Certify</button>
@@ -4107,24 +4267,81 @@ $_qtax_months = max(1, (int)ceil((time() - strtotime('2026-01-01')) / (30*86400)
 $_qtax_monthly_rate = $_qtax_months > 0 ? $_qtax_revenue / $_qtax_months : 0;
 $_qtax_projected_annual = $_qtax_monthly_rate * 12;
 
-// Configurable W2 income (stored in audit_config or default)
-$_qtax_w2 = (float)($_scfg['tax_w2_income'] ?? 83700); // combined household
-$_qtax_w2_withholding = (float)($_scfg['tax_w2_withholding'] ?? 9700);
+// Configurable W2 income (stored in audit_config, editable in Settings)
+$_qtax_w2 = (float)($_scfg['tax_w2_income'] ?? 113000); // combined household ($38k + $75k)
+$_qtax_w2_withholding = (float)($_scfg['tax_w2_withholding'] ?? 14000); // est. combined federal withholding
 
-// S-Corp salary split (50% salary, 50% distribution)
-$_qtax_salary_pct = 0.5;
+// S-Corp salary split (configurable in Settings)
+$_qtax_salary_pct = (float)($_scfg['tax_salary_split_pct'] ?? 50) / 100;
 $_qtax_salary = $_qtax_projected_annual * $_qtax_salary_pct;
 $_qtax_distribution = $_qtax_projected_annual - $_qtax_salary;
 
-// Estimated deductions
-$_qtax_biz_expenses = $rp_total_30d * 12 + 3000; // projected annual RunPod + hosting/tools
-$_qtax_taxable = $_qtax_w2 + $_qtax_salary + $_qtax_distribution - $_qtax_biz_expenses - 30000; // std deduction
+// ── FICA on S-Corp salary ──
+// Employer half (7.65%) is a deductible business expense
+//
+// ┌─────────────────────────────────────────────────────────────────────┐
+// │ TAX YEAR 2026 — UPDATE ANNUALLY                                    │
+// │                                                                     │
+// │ Source: IRS Revenue Procedure 2025-32                               │
+// │ URL:    https://www.irs.gov/pub/irs-drop/rp-25-32.pdf              │
+// │ Also:   https://taxfoundation.org/data/all/federal/2026-tax-brackets│
+// │ SS cap: https://www.ssa.gov/oact/cola/cbb.html                     │
+// │ WI:     https://www.revenue.wi.gov/Pages/FAQS/pcs-taxrates.aspx    │
+// │                                                                     │
+// │ Each October/November the IRS publishes next year's numbers.        │
+// │ Search: "IRS revenue procedure [year] tax inflation adjustments"    │
+// │ Update: std deduction, bracket thresholds, SS wage cap below.       │
+// │ WI brackets rarely change — check WI DOR in January.               │
+// └─────────────────────────────────────────────────────────────────────┘
+$_qtax_tax_year = 2026; // ← UPDATE THIS when you update the numbers below
+$_qtax_stale = ((int)date('Y')) > $_qtax_tax_year;
+$_qtax_ss_cap = 184500; // 2026 SS wage base
+$_qtax_ss_wages = min($_qtax_salary, $_qtax_ss_cap);
+$_qtax_fica_ss = $_qtax_ss_wages * 0.124; // 12.4% combined SS
+$_qtax_fica_med = $_qtax_salary * 0.029; // 2.9% combined Medicare
+$_qtax_fica_addl = max(0, ($_qtax_w2 + $_qtax_salary) - 250000) * 0.009; // 0.9% Additional Medicare (MFJ >$250k)
+$_qtax_fica = $_qtax_fica_ss + $_qtax_fica_med + $_qtax_fica_addl;
+$_qtax_fica_employer_deduction = $_qtax_fica_ss / 2 + $_qtax_fica_med / 2; // employer half is deductible
+
+// ── Business expenses & NOL ──
+// Actual YTD expenses from expenses.jsonl + RunPod API data
+$_qtax_ytd_expenses = 0;
+$_qtax_exp_path = __DIR__ . '/data/expenses.jsonl';
+if (file_exists($_qtax_exp_path)) {
+    foreach (file($_qtax_exp_path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $_el) {
+        $_ex = json_decode($_el, true);
+        if ($_ex) $_qtax_ytd_expenses += (float)($_ex['amount'] ?? 0);
+    }
+}
+$_qtax_ytd_expenses += $rp_total_30d; // actual RunPod billing (matches expenses page)
+$_qtax_projected_expenses = $_qtax_ytd_expenses + ($rp_total_30d * max(0, 12 - $_qtax_months)); // project remaining months
+
+// Net business income (negative = loss)
+$_qtax_net_biz = $_qtax_projected_annual - $_qtax_projected_expenses - $_qtax_fica_employer_deduction;
+$_qtax_is_loss = $_qtax_net_biz < 0;
+$_qtax_nol = $_qtax_is_loss ? abs($_qtax_net_biz) : 0;
+
+// 2026 MFJ standard deduction: $32,200 (TCJA permanent per OBBBA, Rev Proc 2025-32)
+$_qtax_std_deduction = 32200;
+
+// Taxable income: W2 + Forge net income (or minus NOL loss pass-through)
+// S-Corp loss flows through K-1 and reduces personal taxable income
+if ($_qtax_is_loss) {
+    // Loss year: no salary/distribution, loss reduces W2 taxable income
+    $_qtax_taxable = $_qtax_w2 - $_qtax_nol - $_qtax_std_deduction;
+} else {
+    // Profit year: salary + distributions added to W2 income
+    $_qtax_taxable = $_qtax_w2 + $_qtax_salary + $_qtax_distribution - $_qtax_projected_expenses - $_qtax_fica_employer_deduction - $_qtax_std_deduction;
+}
 $_qtax_taxable = max(0, $_qtax_taxable);
 
-// Rough MFJ brackets 2026
+// Calculate what W2-only tax would be (to show savings from loss)
+$_qtax_w2_only_taxable_for_nol = max(0, $_qtax_w2 - $_qtax_std_deduction);
+
+// 2026 MFJ federal brackets (TCJA permanent, Rev Proc 2025-32)
 $_qtax_fed_tax = 0;
 if ($_qtax_taxable > 0) {
-    $brackets = [[23200, 0.10], [71050, 0.12], [100525, 0.22], [191950, 0.24], [243725, 0.32], [609350, 0.35]];
+    $brackets = [[24800, 0.10], [100800, 0.12], [211400, 0.22], [403550, 0.24], [512450, 0.32], [768700, 0.35]];
     $remaining = $_qtax_taxable;
     $prev = 0;
     foreach ($brackets as $b) {
@@ -4138,8 +4355,22 @@ if ($_qtax_taxable > 0) {
     if ($remaining > 0) $_qtax_fed_tax += $remaining * 0.37;
 }
 
-// FICA on salary only (S-Corp)
-$_qtax_fica = $_qtax_salary * 0.153;
+// 2026 Wisconsin MFJ state income tax
+$_qtax_wi_tax = 0;
+if ($_qtax_taxable > 0) {
+    $wi_brackets = [[19580, 0.035], [67300, 0.044], [431060, 0.053]];
+    $wi_remaining = $_qtax_taxable;
+    $wi_prev = 0;
+    foreach ($wi_brackets as $wb) {
+        $wi_span = $wb[0] - $wi_prev;
+        $wi_chunk = min($wi_remaining, $wi_span);
+        $_qtax_wi_tax += $wi_chunk * $wb[1];
+        $wi_remaining -= $wi_chunk;
+        $wi_prev = $wb[0];
+        if ($wi_remaining <= 0) break;
+    }
+    if ($wi_remaining > 0) $_qtax_wi_tax += $wi_remaining * 0.0765;
+}
 
 // R&D credit estimate (from expenses tab if available)
 $_qtax_rd_expenses = 0;
@@ -4157,10 +4388,46 @@ $_qtax_dev_hours = (float)($_scfg['tax_dev_hours_ytd'] ?? 320);
 $_qtax_dev_rate = (float)($_scfg['tax_dev_hourly_rate'] ?? 150);
 $_qtax_rd_labor = $_qtax_dev_hours * $_qtax_dev_rate;
 $_qtax_rd_total = $_qtax_rd_expenses + $_qtax_rd_labor + $rp_total_30d * 12;
-$_qtax_rd_credit = $_qtax_rd_total * 0.115; // 6.5% fed + 5% WI
+// Fed R&D credit: ASC method 6% for startups with no prior-year QREs (IRC §41(c)(5))
+// WI R&D credit: 2.875% for new researchers (no prior QREs)
+// Only applicable when Forge has actual business activity/revenue
+if ($_qtax_projected_annual > 0) {
+    $_qtax_rd_credit_fed = $_qtax_rd_total * 0.06;
+    $_qtax_rd_credit_wi = $_qtax_rd_total * 0.02875;
+} else {
+    $_qtax_rd_credit_fed = 0;
+    $_qtax_rd_credit_wi = 0;
+}
+$_qtax_rd_credit = $_qtax_rd_credit_fed + $_qtax_rd_credit_wi;
 
-$_qtax_total_tax = $_qtax_fed_tax + $_qtax_fica - $_qtax_rd_credit;
+// Total tax from ALL sources (W2 + Forge)
+$_qtax_total_tax = $_qtax_fed_tax + $_qtax_wi_tax + $_qtax_fica - $_qtax_rd_credit;
+// What you owe additionally beyond W2 withholding, divided into quarters
 $_qtax_quarterly = max(0, ($_qtax_total_tax - $_qtax_w2_withholding) / 4);
+
+// Calculate W2-only tax to determine Forge impact (positive or negative)
+$_qtax_w2_only_taxable = max(0, $_qtax_w2 - $_qtax_std_deduction);
+$_qtax_w2_only_fed = 0;
+if ($_qtax_w2_only_taxable > 0) {
+    $brackets = [[24800, 0.10], [100800, 0.12], [211400, 0.22], [403550, 0.24], [512450, 0.32], [768700, 0.35]];
+    $_wr = $_qtax_w2_only_taxable; $_wp = 0;
+    foreach ($brackets as $b) { $s = $b[0]-$_wp; $c = min($_wr,$s); $_qtax_w2_only_fed += $c*$b[1]; $_wr -= $c; $_wp = $b[0]; if ($_wr<=0) break; }
+    if ($_wr > 0) $_qtax_w2_only_fed += $_wr * 0.37;
+}
+$_qtax_w2_only_wi = 0;
+if ($_qtax_w2_only_taxable > 0) {
+    $wi_brackets = [[19580, 0.035], [67300, 0.044], [431060, 0.053]];
+    $_wr = $_qtax_w2_only_taxable; $_wp = 0;
+    foreach ($wi_brackets as $wb) { $s = $wb[0]-$_wp; $c = min($_wr,$s); $_qtax_w2_only_wi += $c*$wb[1]; $_wr -= $c; $_wp = $wb[0]; if ($_wr<=0) break; }
+    if ($_wr > 0) $_qtax_w2_only_wi += $_wr * 0.0765;
+}
+// Forge impact: negative = Forge saves you money (loss), positive = Forge adds tax
+$_qtax_forge_fed = $_qtax_fed_tax - $_qtax_w2_only_fed;
+$_qtax_forge_wi = $_qtax_wi_tax - $_qtax_w2_only_wi;
+$_qtax_nol_savings = 0;
+if ($_qtax_is_loss) {
+    $_qtax_nol_savings = ($_qtax_w2_only_fed + $_qtax_w2_only_wi) - ($_qtax_fed_tax + $_qtax_wi_tax);
+}
 
 // Next quarterly due date
 $_qtax_quarters = [
@@ -4175,7 +4442,48 @@ foreach ($_qtax_quarters as $q) {
 }
 ?>
 <div class="card" style="margin-bottom:24px;padding:20px">
-    <h3 style="margin-bottom:16px">Quarterly Tax Estimator</h3>
+    <h3 style="margin-bottom:16px">Quarterly Tax Estimator
+        <?php if ($_qtax_stale): ?>
+        <span style="font-size:0.55em;font-weight:400;color:#f92672;margin-left:8px;vertical-align:middle">&#9888; Using <?php echo $_qtax_tax_year; ?> tax tables — update for <?php echo date('Y'); ?></span>
+        <?php endif; ?>
+    </h3>
+    <?php if ($_qtax_is_loss): ?>
+    <!-- NOL / Loss Year -->
+    <div style="background:rgba(102,217,239,0.05);border:1px solid rgba(102,217,239,0.2);border-radius:8px;padding:16px;margin-bottom:16px">
+        <div style="font-size:12px;color:var(--accent);font-weight:600;margin-bottom:12px">Net Operating Loss (K-1 Pass-Through)</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px">
+            <div>
+                <div style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">YTD Revenue</div>
+                <div style="font-size:18px;font-weight:700;color:var(--text-dim)">$<?php echo number_format($_qtax_revenue, 0); ?></div>
+            </div>
+            <div>
+                <div style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">YTD Expenses</div>
+                <div style="font-size:18px;font-weight:700;color:var(--red)">$<?php echo number_format($_qtax_ytd_expenses, 0); ?></div>
+                <div style="font-size:9px;color:var(--text-dim)">Projected: $<?php echo number_format($_qtax_projected_expenses, 0); ?></div>
+            </div>
+            <div>
+                <div style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Business Loss</div>
+                <div style="font-size:18px;font-weight:700;color:var(--red)">-$<?php echo number_format($_qtax_nol, 0); ?></div>
+                <div style="font-size:9px;color:var(--text-dim)">Flows to K-1 → Schedule E</div>
+            </div>
+            <div>
+                <div style="font-size:10px;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">W2 Tax Savings</div>
+                <div style="font-size:18px;font-weight:700;color:var(--green)">$<?php echo number_format($_qtax_nol_savings, 0); ?></div>
+                <div style="font-size:9px;color:var(--text-dim)">Loss reduces your W2 taxable income</div>
+            </div>
+            <div>
+                <div style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">R&D Credit (future)</div>
+                <div style="font-size:18px;font-weight:700;color:var(--text-dim)">$<?php echo number_format($_qtax_rd_total * 0.08875, 0); ?></div>
+                <div style="font-size:9px;color:var(--text-dim)">Available when revenue starts</div>
+            </div>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:12px;border-top:1px solid rgba(102,217,239,0.1);padding-top:8px">
+            No quarterly estimated payment needed. The business loss offsets W2 income on your joint return, increasing your refund by ~$<?php echo number_format($_qtax_nol_savings, 0); ?>.
+            Give these numbers to your CPA for the K-1.
+        </div>
+    </div>
+    <?php else: ?>
+    <!-- Profit Year -->
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:16px">
         <div>
             <div style="font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">YTD Revenue</div>
@@ -4184,14 +4492,31 @@ foreach ($_qtax_quarters as $q) {
         <div>
             <div style="font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Projected Annual</div>
             <div style="font-size:20px;font-weight:700;color:var(--text-bright)">$<?php echo number_format($_qtax_projected_annual, 0); ?></div>
+            <div style="font-size:9px;color:var(--text-dim)">Expenses: $<?php echo number_format($_qtax_projected_expenses, 0); ?></div>
         </div>
         <div>
-            <div style="font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Est. Annual Tax</div>
-            <div style="font-size:20px;font-weight:700;color:var(--red)">$<?php echo number_format(max(0, $_qtax_total_tax), 0); ?></div>
+            <div style="font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Forge Federal Tax</div>
+            <div style="font-size:20px;font-weight:700;color:<?php echo $_qtax_forge_fed > 0 ? 'var(--red)' : 'var(--text-dim)'; ?>">$<?php echo number_format(max(0, $_qtax_forge_fed), 0); ?></div>
+            <div style="font-size:9px;color:var(--text-dim)">Total w/ W2: $<?php echo number_format(max(0, $_qtax_fed_tax), 0); ?></div>
+        </div>
+        <div>
+            <div style="font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Forge Wisconsin Tax</div>
+            <div style="font-size:20px;font-weight:700;color:<?php echo $_qtax_forge_wi > 0 ? 'var(--red)' : 'var(--text-dim)'; ?>">$<?php echo number_format(max(0, $_qtax_forge_wi), 0); ?></div>
+            <div style="font-size:9px;color:var(--text-dim)">Total w/ W2: $<?php echo number_format(max(0, $_qtax_wi_tax), 0); ?></div>
+        </div>
+        <div>
+            <div style="font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Forge FICA</div>
+            <div style="font-size:20px;font-weight:700;color:<?php echo $_qtax_fica > 0 ? 'var(--red)' : 'var(--text-dim)'; ?>">$<?php echo number_format($_qtax_fica, 0); ?></div>
+            <div style="font-size:9px;color:var(--text-dim)">S-Corp salary portion</div>
         </div>
         <div>
             <div style="font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">R&D Credit</div>
-            <div style="font-size:20px;font-weight:700;color:var(--green)">-$<?php echo number_format($_qtax_rd_credit, 0); ?></div>
+            <div style="font-size:20px;font-weight:700;color:<?php echo $_qtax_rd_credit > 0 ? 'var(--green)' : 'var(--text-dim)'; ?>"><?php echo $_qtax_rd_credit > 0 ? '-$' . number_format($_qtax_rd_credit, 0) : '$0'; ?></div>
+            <?php if ($_qtax_rd_credit > 0): ?>
+            <div style="font-size:9px;color:var(--text-dim)">Fed $<?php echo number_format($_qtax_rd_credit_fed, 0); ?> + WI $<?php echo number_format($_qtax_rd_credit_wi, 0); ?></div>
+            <?php elseif ($_qtax_projected_annual <= 0): ?>
+            <div style="font-size:9px;color:var(--text-dim)">Requires business revenue</div>
+            <?php endif; ?>
         </div>
         <div>
             <div style="font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Quarterly Payment</div>
@@ -4202,9 +4527,11 @@ foreach ($_qtax_quarters as $q) {
             <div style="font-size:16px;font-weight:600;color:var(--text-bright)"><?php echo $_qtax_next; ?></div>
         </div>
     </div>
+    <?php endif; /* end profit/loss display */ ?>
     <div style="font-size:11px;color:var(--text-dim);border-top:1px solid var(--border);padding-top:10px">
-        Assumes: MFJ, $<?php echo number_format($_qtax_w2, 0); ?> household W2, S-Corp 50/50 salary/distribution split, $<?php echo number_format($_qtax_w2_withholding, 0); ?> W2 withholding.
-        Configurable in <code>audit_config.json</code> (tax_w2_income, tax_w2_withholding, tax_dev_hours_ytd, tax_dev_hourly_rate).
+        Assumes: MFJ, $<?php echo number_format($_qtax_w2, 0); ?> household W2, S-Corp <?php echo (int)($_qtax_salary_pct*100); ?>/<?php echo (int)((1-$_qtax_salary_pct)*100); ?> salary/distribution split, $<?php echo number_format($_qtax_w2_withholding, 0); ?> W2 withholding, $<?php echo number_format($_qtax_std_deduction, 0); ?> std deduction.
+        R&D: ASC §41(c)(5) startup rate (6% fed + 2.875% WI). FICA employer half deducted. SS cap $<?php echo number_format($_qtax_ss_cap, 0); ?>.
+        Configurable in Settings (Origin only).
         <strong>This is an estimate — consult your CPA.</strong>
     </div>
 </div>
@@ -4837,6 +5164,371 @@ function editExpense(id, field, value) {
 </script>
 <?php } // end origin-only expenses ?>
 
+<?php elseif ($active_view === 'registry'): ?>
+<!-- ══════════════ MODEL REGISTRY ══════════════ -->
+<?php if (!$is_origin) { echo '<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">Origin access required.</div>'; } else {
+$_reg_path = __DIR__ . '/data/model_registry.json';
+$_reg = file_exists($_reg_path) ? json_decode(file_get_contents($_reg_path), true) : ['models' => []];
+$_reg_models = $_reg['models'] ?? [];
+$_gpu_tiers = ['auto' => 'Auto-detect', 'small' => 'Small (1x A6000)', 'medium' => 'Medium (1x A100)', 'large' => 'Large (2x A100)', 'xl' => 'XL (4x A6000)', 'xml' => 'XML (4x A100)', 'xxl' => 'XXL (8x H100)', 'ultra' => 'Ultra (Pod 8x H100)'];
+?>
+<h2 style="margin-bottom:24px">Model Registry <span class="badge" style="font-size:0.65em;margin-left:8px"><?php echo count($_reg_models); ?> models</span></h2>
+
+<?php
+// Group models by family and sort by params within each group
+$_reg_families = [];
+foreach ($_reg_models as $mid => $m) {
+    $type = $m['model_type'] ?? 'other';
+    $family_map = [
+        'llama' => 'Llama', 'qwen2' => 'Qwen', 'mistral' => 'Mistral', 'mixtral' => 'Mixtral',
+        'phi3' => 'Phi', 'phi' => 'Phi', 'gemma2' => 'Gemma', 'command-r' => 'Command R',
+        'deepseek_v3' => 'DeepSeek', 'deepseek_v2' => 'DeepSeek', 'yi' => 'Yi',
+        'falcon' => 'Falcon', 'starcoder2' => 'StarCoder',
+    ];
+    $family = $family_map[$type] ?? ucfirst($type);
+    $_reg_families[$family][] = ['id' => $mid, 'data' => $m];
+}
+// Sort families alphabetically, models by params descending within each
+ksort($_reg_families);
+foreach ($_reg_families as &$fmodels) {
+    usort($fmodels, function($a, $b) { return ($b['data']['params_b'] ?? 0) - ($a['data']['params_b'] ?? 0); });
+}
+unset($fmodels);
+?>
+<div class="card" style="padding:20px;margin-bottom:24px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <input type="text" id="reg-search" placeholder="Search models..." oninput="filterRegistryTable()" style="padding:6px 12px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:0.85em;width:250px">
+        <button onclick="showRegEditor()" class="btn" style="padding:8px 16px;background:var(--accent);color:#111;font-weight:600;font-size:0.85em">+ Add Model</button>
+    </div>
+    <div style="overflow-x:auto">
+        <table id="reg-table" style="min-width:900px">
+            <thead><tr>
+                <th style="width:30%;cursor:pointer" data-sortable data-sort-idx="0" onclick="sortRegistryTable(0)">Model <span class="sort-arrow" style="font-size:0.7em;color:var(--text-dim)">&#9652;</span></th>
+                <th style="cursor:pointer" data-sortable data-sort-idx="1" onclick="sortRegistryTable(1)">Size <span class="sort-arrow" style="font-size:0.7em;color:var(--text-dim)">&#9652;</span></th>
+                <th style="cursor:pointer" data-sortable data-sort-idx="2" onclick="sortRegistryTable(2)">Quant <span class="sort-arrow" style="font-size:0.7em;color:var(--text-dim)">&#9652;</span></th>
+                <th style="cursor:pointer" data-sortable data-sort-idx="3" onclick="sortRegistryTable(3)">Tier <span class="sort-arrow" style="font-size:0.7em;color:var(--text-dim)">&#9652;</span></th>
+                <th style="cursor:pointer" data-sortable data-sort-idx="4" onclick="sortRegistryTable(4)">TP <span class="sort-arrow" style="font-size:0.7em;color:var(--text-dim)">&#9652;</span></th>
+                <th style="cursor:pointer" data-sortable data-sort-idx="5" onclick="sortRegistryTable(5)">VRAM <span class="sort-arrow" style="font-size:0.7em;color:var(--text-dim)">&#9652;</span></th>
+                <th style="cursor:pointer" data-sortable data-sort-idx="6" onclick="sortRegistryTable(6)">Status <span class="sort-arrow" style="font-size:0.7em;color:var(--text-dim)">&#9652;</span></th>
+                <th></th>
+            </tr></thead>
+            <tbody>
+            <?php foreach ($_reg_families as $family => $fmodels): ?>
+                <tr class="reg-family-header" style="background:rgba(102,217,239,0.04)">
+                    <td colspan="8" style="padding:10px 12px;font-weight:700;font-size:0.9em;color:var(--accent);letter-spacing:0.3px"><?php echo htmlspecialchars($family); ?> <span style="font-weight:400;font-size:0.8em;color:var(--text-dim)">(<?php echo count($fmodels); ?>)</span></td>
+                </tr>
+                <?php foreach ($fmodels as $entry):
+                    $mid = $entry['id'];
+                    $m = $entry['data'];
+                    $verified = !empty($m['verified_date']);
+                    $moe = !empty($m['is_moe']);
+                    $quant_label = $m['quantization'] ? strtoupper($m['quantization']) . ' ' . ($m['quant_bits'] ?? '') . 'b' : 'FP16';
+                    $gpu_tier = strtoupper($m['recommended_gpu'] ?? 'auto');
+                    $tier_colors = ['SMALL'=>'','MEDIUM'=>'','LARGE'=>'badge-blue','XL'=>'badge-blue','XML'=>'badge-purple','XXL'=>'badge-purple','ULTRA'=>'badge-red'];
+                    $tier_cls = $tier_colors[$gpu_tier] ?? '';
+                    // Short display name: strip "Instruct AWQ" etc for table, show full in title
+                    $short_name = $m['display_name'] ?? $mid;
+                ?>
+                <tr data-model-id="<?php echo htmlspecialchars($mid); ?>">
+                    <td>
+                        <div style="font-weight:600;font-size:0.85em"><?php echo htmlspecialchars($short_name); ?><?php echo $moe ? ' <span class="badge badge-purple" style="font-size:0.6em;vertical-align:middle">MoE</span>' : ''; ?></div>
+                        <div style="font-size:0.7em;color:var(--text-dim);font-family:monospace" title="<?php echo htmlspecialchars($mid); ?>"><?php echo htmlspecialchars($mid); ?></div>
+                    </td>
+                    <td style="font-weight:600;font-size:0.9em" data-sort="<?php echo ($m['params_b'] ?? 0); ?>"><?php echo ($m['params_b'] ?? 0); ?>B</td>
+                    <td><span style="font-size:0.82em"><?php echo $quant_label; ?></span></td>
+                    <td data-sort="<?php echo $gpu_tier; ?>"><span class="badge <?php echo $tier_cls; ?>" style="font-size:0.7em"><?php echo $gpu_tier; ?></span></td>
+                    <td style="font-size:0.85em;color:var(--text-dim)" data-sort="<?php echo ($m['recommended_tp'] ?? 0); ?>">TP=<?php echo ($m['recommended_tp'] ?? '?'); ?></td>
+                    <td style="font-size:0.85em" data-sort="<?php echo ($m['min_vram_gb'] ?? 0); ?>"><?php echo ($m['min_vram_gb'] ?? 0); ?>GB</td>
+                    <td><?php echo $verified
+                        ? '<span class="badge badge-green" style="font-size:0.65em">Verified</span>'
+                        : '<span class="badge" style="font-size:0.65em;opacity:0.5">Unverified</span>'; ?></td>
+                    <td style="white-space:nowrap">
+                        <button class="btn btn-sm" style="padding:2px 8px;font-size:0.65em;background:rgba(168,168,144,0.1);border:1px solid var(--border)" onclick='editRegModel(<?php echo json_encode($mid); ?>, <?php echo json_encode($m, JSON_HEX_APOS | JSON_HEX_QUOT); ?>)'>Edit</button>
+                        <?php if ($is_origin): ?>
+                        <?php if ($verified): ?>
+                        <button class="btn btn-sm" style="padding:2px 8px;font-size:0.65em;background:rgba(230,219,116,0.1);color:var(--yellow);border:1px solid rgba(230,219,116,0.3)" onclick="verifyRegModel(<?php echo json_encode($mid); ?>, false)" title="Remove verification">Unverify</button>
+                        <?php else: ?>
+                        <button class="btn btn-sm" style="padding:2px 8px;font-size:0.65em;background:rgba(166,226,46,0.1);color:var(--green);border:1px solid rgba(166,226,46,0.3)" onclick="verifyRegModel(<?php echo json_encode($mid); ?>, true)" title="Mark as verified by Origin">Verify</button>
+                        <?php endif; ?>
+                        <?php endif; ?>
+                        <button class="btn btn-sm" style="padding:2px 8px;font-size:0.65em;background:rgba(249,38,114,0.1);color:var(--red);border:1px solid rgba(249,38,114,0.3)" onclick="deleteRegModel(<?php echo json_encode($mid); ?>)">Del</button>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Registry Editor Modal -->
+<div id="reg-editor-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:9999;padding:20px;overflow-y:auto">
+    <div style="max-width:700px;margin:0 auto;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:24px">
+        <h3 id="reg-editor-title" style="margin-bottom:16px">Add Model to Registry</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <?php
+            // DRY field definitions with tooltips
+            $_rf = 'width:100%;padding:8px 10px;background:var(--bg-code);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:0.88em';
+            $_rl = 'font-size:11px;color:var(--text-dim);display:block;margin-bottom:2px';
+            $_tip = 'cursor:help;border-bottom:1px dotted var(--text-dim)';
+            ?>
+            <div style="grid-column:1/-1">
+                <label style="<?php echo $_rl; ?>"><span style="<?php echo $_tip; ?>" title="The HuggingFace repository path (e.g. org/model-name). This is what customers enter when ordering an audit.">HuggingFace Model ID *</span></label>
+                <input type="text" id="reg-model-id" placeholder="org/model-name-AWQ" style="<?php echo $_rf; ?>">
+            </div>
+            <div>
+                <label style="<?php echo $_rl; ?>"><span style="<?php echo $_tip; ?>" title="Human-readable name shown in reports and the admin dashboard.">Display Name</span></label>
+                <input type="text" id="reg-display-name" style="<?php echo $_rf; ?>">
+            </div>
+            <div>
+                <label style="<?php echo $_rl; ?>"><span style="<?php echo $_tip; ?>" title="The Python class name from the model's config.json (e.g. LlamaForCausalLM, Qwen2ForCausalLM). vLLM uses this to pick the right model loader.">Architecture</span></label>
+                <input type="text" id="reg-architecture" placeholder="LlamaForCausalLM" style="<?php echo $_rf; ?>">
+            </div>
+            <div>
+                <label style="<?php echo $_rl; ?>"><span style="<?php echo $_tip; ?>" title="Short family name used to group models in the registry (e.g. llama, qwen2, mistral, falcon). Lowercase, no spaces.">Model Type</span></label>
+                <input type="text" id="reg-model-type" placeholder="llama" style="<?php echo $_rf; ?>">
+            </div>
+            <div>
+                <label style="<?php echo $_rl; ?>"><span style="<?php echo $_tip; ?>" title="Total parameter count in billions. For MoE models, this is the TOTAL params (not active). Used to auto-select GPU tier.">Parameters (B)</span></label>
+                <input type="number" id="reg-params-b" style="<?php echo $_rf; ?>">
+            </div>
+            <div>
+                <label style="<?php echo $_rl; ?>"><span style="<?php echo $_tip; ?>" title="Weight compression method. AWQ and GPTQ are 4-bit quantizations that reduce VRAM ~4x. FP8 is 8-bit (H100+ only). FP16 is full precision.">Quantization</span></label>
+                <select id="reg-quantization" style="<?php echo $_rf; ?>">
+                    <option value="">FP16 (none)</option><option value="awq">AWQ</option><option value="gptq">GPTQ</option><option value="fp8">FP8</option>
+                </select>
+            </div>
+            <div>
+                <label style="<?php echo $_rl; ?>"><span style="<?php echo $_tip; ?>" title="Bits per weight after quantization. AWQ/GPTQ are typically 4-bit. FP8 is 8-bit. Lower = smaller model but slightly lower quality.">Quant Bits</span></label>
+                <input type="number" id="reg-quant-bits" value="4" style="<?php echo $_rf; ?>">
+            </div>
+            <div>
+                <label style="<?php echo $_rl; ?>"><span style="<?php echo $_tip; ?>" title="Approximate size of the weight files on disk/in VRAM. Rough formula: params_b x bits / 8. A 70B model at 4-bit = ~35GB.">Weight Size (GB)</span></label>
+                <input type="number" id="reg-weight-size" style="<?php echo $_rf; ?>">
+            </div>
+            <div>
+                <label style="<?php echo $_rl; ?>"><span style="<?php echo $_tip; ?>" title="Minimum total GPU VRAM needed. This is weight size + overhead for KV cache, CUDA kernels, and activation memory. Typically 20-40% more than weight size.">Min VRAM (GB)</span></label>
+                <input type="number" id="reg-min-vram" style="<?php echo $_rf; ?>">
+            </div>
+            <div>
+                <label style="<?php echo $_rl; ?>"><span style="<?php echo $_tip; ?>" title="Number of query attention heads (Q heads). Must divide evenly by the tensor parallel count. Found in the model's config.json as num_attention_heads.">Attention Heads</span></label>
+                <input type="number" id="reg-attn-heads" style="<?php echo $_rf; ?>">
+            </div>
+            <div>
+                <label style="<?php echo $_rl; ?>"><span style="<?php echo $_tip; ?>" title="Which GPU tier to run this model on. The orchestrator uses this to pick the right RunPod endpoint. 'auto' lets the system decide based on model size.">GPU Tier</span></label>
+                <select id="reg-gpu-tier" style="<?php echo $_rf; ?>">
+                    <?php foreach ($_gpu_tiers as $tk => $tl): ?>
+                    <option value="<?php echo $tk; ?>"><?php echo htmlspecialchars($tl); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div>
+                <label style="<?php echo $_rl; ?>"><span style="<?php echo $_tip; ?>" title="Tensor Parallelism — splits the model across N GPUs. Must equal the GPU count for that tier. Attention heads and KV heads must divide evenly by this number.">Tensor Parallel</span></label>
+                <input type="number" id="reg-tp" value="1" style="<?php echo $_rf; ?>">
+            </div>
+            <div>
+                <label style="<?php echo $_rl; ?>"><span style="<?php echo $_tip; ?>" title="Maximum context window for vLLM. Higher = more VRAM for KV cache. Our audits use short prompts so 4096 is fine. Only increase if the model needs it.">Max Model Len</span></label>
+                <input type="number" id="reg-max-model-len" value="4096" style="<?php echo $_rf; ?>">
+            </div>
+            <div>
+                <label style="<?php echo $_rl; ?>"><span style="<?php echo $_tip; ?>" title="Estimated time for vLLM to download weights, load them into GPU memory, and become ready to serve. Used for timeout calculations.">Startup Estimate (min)</span></label>
+                <input type="number" id="reg-startup-time" value="5" style="<?php echo $_rf; ?>">
+            </div>
+            <div style="display:flex;gap:16px;align-items:center">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.88em" title="Disables CUDA graph capture and torch.compile. Required for MoE models and large models that hang during graph capture. Slightly slower inference but much more stable. When in doubt, leave ON.">
+                    <input type="checkbox" id="reg-enforce-eager" checked style="accent-color:var(--accent)"> <span style="<?php echo $_tip; ?>">Enforce Eager</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.88em" title="Mixture of Experts — model has multiple 'expert' sub-networks and a router that picks which ones to activate per token. Uses more total VRAM but only runs a fraction of params per inference. Examples: Mixtral, DeepSeek V2/V3.">
+                    <input type="checkbox" id="reg-is-moe" style="accent-color:var(--accent)"> <span style="<?php echo $_tip; ?>">MoE</span>
+                </label>
+            </div>
+            <div>
+                <label style="<?php echo $_rl; ?>"><span style="<?php echo $_tip; ?>" title="Number of expert sub-networks in a MoE model. Only applies when MoE is checked. Mixtral 8x7B has 8, DeepSeek V3 has 256. Set to 0 for non-MoE models.">Num Experts (MoE only)</span></label>
+                <input type="number" id="reg-num-experts" value="0" style="<?php echo $_rf; ?>">
+            </div>
+            <div style="grid-column:1/-1">
+                <label style="<?php echo $_rl; ?>"><span style="<?php echo $_tip; ?>" title="Environment variables passed to the vLLM process. Used for model-specific workarounds. Common ones: VLLM_MARLIN_USE_ATOMIC_ADD=1 (AWQ), VLLM_USE_DEEP_GEMM=0 (prevents hangs on H100), VLLM_USE_V1=0 (required for some MoE models).">vLLM Environment Variables (one KEY=VALUE per line)</span></label>
+                <textarea id="reg-vllm-env" rows="3" style="<?php echo $_rf; ?>;font-family:monospace;font-size:0.82em" placeholder="VLLM_MARLIN_USE_ATOMIC_ADD=1&#10;TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1"></textarea>
+            </div>
+            <div style="grid-column:1/-1">
+                <label style="<?php echo $_rl; ?>">Notes (one per line)</label>
+                <textarea id="reg-notes" rows="3" style="<?php echo $_rf; ?>;font-size:0.82em" placeholder="Known issues, performance notes, etc."></textarea>
+            </div>
+            <input type="hidden" id="reg-verified-date" value="">
+            <input type="hidden" id="reg-verified-by" value="">
+            <div style="grid-column:1/-1;font-size:11px;color:var(--text-dim);padding:8px 0;border-top:1px solid var(--border)">
+                Verification is set automatically when an audit completes for this model, or manually by Origin via the Verify button in the table.
+            </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px">
+            <button onclick="saveRegModel()" class="btn" style="padding:8px 20px;background:var(--accent);color:#111;font-weight:600">Save</button>
+            <button onclick="document.getElementById('reg-editor-modal').style.display='none'" class="btn" style="padding:8px 20px">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script>
+var _regSortCol = null, _regSortAsc = true;
+function filterRegistryTable() {
+    var q = document.getElementById('reg-search').value.toLowerCase();
+    document.querySelectorAll('#reg-table tbody tr').forEach(function(r) {
+        if (r.classList.contains('reg-family-header')) {
+            // Show family header if any child matches
+            var next = r.nextElementSibling;
+            var anyMatch = false;
+            while (next && !next.classList.contains('reg-family-header')) {
+                if (!q || next.textContent.toLowerCase().indexOf(q) >= 0) anyMatch = true;
+                next = next.nextElementSibling;
+            }
+            r.style.display = anyMatch ? '' : 'none';
+        } else {
+            r.style.display = (!q || r.textContent.toLowerCase().indexOf(q) >= 0) ? '' : 'none';
+        }
+    });
+}
+function sortRegistryTable(colIdx) {
+    if (_regSortCol === colIdx) { _regSortAsc = !_regSortAsc; } else { _regSortCol = colIdx; _regSortAsc = true; }
+    var tbody = document.querySelector('#reg-table tbody');
+    var rows = Array.from(tbody.querySelectorAll('tr:not(.reg-family-header)'));
+    var headers = tbody.querySelectorAll('tr.reg-family-header');
+    headers.forEach(function(h) { h.remove(); });
+
+    rows.sort(function(a, b) {
+        var aCell = a.cells[colIdx], bCell = b.cells[colIdx];
+        var aVal = (aCell.getAttribute('data-sort') || aCell.textContent).trim();
+        var bVal = (bCell.getAttribute('data-sort') || bCell.textContent).trim();
+        var aNum = parseFloat(aVal), bNum = parseFloat(bVal);
+        var result;
+        if (!isNaN(aNum) && !isNaN(bNum)) { result = aNum - bNum; }
+        else { result = aVal.localeCompare(bVal); }
+        return _regSortAsc ? result : -result;
+    });
+
+    rows.forEach(function(r) { tbody.appendChild(r); });
+
+    // Update header arrows
+    document.querySelectorAll('#reg-table thead th[data-sortable]').forEach(function(th, i) {
+        var arrow = th.querySelector('.sort-arrow');
+        if (arrow) arrow.textContent = _regSortCol === parseInt(th.dataset.sortIdx) ? (_regSortAsc ? ' \u25B2' : ' \u25BC') : ' \u25B4';
+    });
+}
+function showRegEditor(title) {
+    document.getElementById('reg-editor-title').textContent = title || 'Add Model to Registry';
+    document.getElementById('reg-editor-modal').style.display = 'block';
+    // Clear form
+    ['reg-model-id','reg-display-name','reg-architecture','reg-model-type','reg-params-b','reg-quant-bits','reg-weight-size','reg-min-vram','reg-attn-heads','reg-tp','reg-max-model-len','reg-startup-time','reg-vllm-env','reg-notes','reg-verified-date','reg-verified-by','reg-num-experts'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.value = el.type === 'number' ? (id === 'reg-max-model-len' ? '4096' : id === 'reg-tp' ? '1' : id === 'reg-startup-time' ? '5' : '') : '';
+    });
+    document.getElementById('reg-quantization').value = 'awq';
+    document.getElementById('reg-quant-bits').value = '4';
+    document.getElementById('reg-gpu-tier').value = 'auto';
+    document.getElementById('reg-enforce-eager').checked = true;
+    document.getElementById('reg-is-moe').checked = false;
+    document.getElementById('reg-model-id').readOnly = false;
+}
+function editRegModel(modelId, data) {
+    showRegEditor('Edit: ' + (data.display_name || modelId));
+    document.getElementById('reg-model-id').value = modelId;
+    document.getElementById('reg-model-id').readOnly = true;
+    document.getElementById('reg-display-name').value = data.display_name || '';
+    document.getElementById('reg-architecture').value = data.architecture || '';
+    document.getElementById('reg-model-type').value = data.model_type || '';
+    document.getElementById('reg-params-b').value = data.params_b || '';
+    document.getElementById('reg-quantization').value = data.quantization || '';
+    document.getElementById('reg-quant-bits').value = data.quant_bits || '';
+    document.getElementById('reg-weight-size').value = data.weight_size_gb || '';
+    document.getElementById('reg-min-vram').value = data.min_vram_gb || '';
+    document.getElementById('reg-attn-heads').value = data.num_attention_heads || '';
+    document.getElementById('reg-gpu-tier').value = data.recommended_gpu || 'auto';
+    document.getElementById('reg-tp').value = data.recommended_tp || 1;
+    document.getElementById('reg-max-model-len').value = data.max_model_len || 4096;
+    document.getElementById('reg-startup-time').value = data.startup_time_estimate_min || 5;
+    document.getElementById('reg-enforce-eager').checked = !!data.enforce_eager;
+    document.getElementById('reg-is-moe').checked = !!data.is_moe;
+    document.getElementById('reg-num-experts').value = data.num_experts || 0;
+    // vllm_env object to key=value lines
+    var envLines = [];
+    if (data.vllm_env && typeof data.vllm_env === 'object') {
+        Object.keys(data.vllm_env).forEach(function(k) { envLines.push(k + '=' + data.vllm_env[k]); });
+    }
+    document.getElementById('reg-vllm-env').value = envLines.join('\n');
+    document.getElementById('reg-notes').value = (data.notes || []).join('\n');
+    document.getElementById('reg-verified-date').value = data.verified_date || '';
+    document.getElementById('reg-verified-by').value = data.verified_by || '';
+}
+function saveRegModel() {
+    var fd = new FormData();
+    fd.append('csrf_token', '<?php echo $csrf_token; ?>');
+    fd.append('registry_action', 'save');
+    fd.append('registry_model_id', document.getElementById('reg-model-id').value);
+    fd.append('reg_display_name', document.getElementById('reg-display-name').value);
+    fd.append('reg_architecture', document.getElementById('reg-architecture').value);
+    fd.append('reg_model_type', document.getElementById('reg-model-type').value);
+    fd.append('reg_params_b', document.getElementById('reg-params-b').value);
+    fd.append('reg_quantization', document.getElementById('reg-quantization').value);
+    fd.append('reg_quant_bits', document.getElementById('reg-quant-bits').value);
+    fd.append('reg_weight_size_gb', document.getElementById('reg-weight-size').value);
+    fd.append('reg_min_vram_gb', document.getElementById('reg-min-vram').value);
+    fd.append('reg_num_attention_heads', document.getElementById('reg-attn-heads').value);
+    fd.append('reg_recommended_gpu', document.getElementById('reg-gpu-tier').value);
+    fd.append('reg_recommended_tp', document.getElementById('reg-tp').value);
+    fd.append('reg_max_model_len', document.getElementById('reg-max-model-len').value);
+    fd.append('reg_startup_time', document.getElementById('reg-startup-time').value);
+    fd.append('reg_enforce_eager', document.getElementById('reg-enforce-eager').checked ? '1' : '');
+    fd.append('reg_is_moe', document.getElementById('reg-is-moe').checked ? '1' : '');
+    fd.append('reg_num_experts', document.getElementById('reg-num-experts').value);
+    fd.append('reg_vllm_env', document.getElementById('reg-vllm-env').value);
+    fd.append('reg_notes', document.getElementById('reg-notes').value);
+    fd.append('reg_verified_date', document.getElementById('reg-verified-date').value);
+    fd.append('reg_verified_by', document.getElementById('reg-verified-by').value);
+    fetch('/admin.php?action=save_settings', {method:'POST', body: fd, credentials:'same-origin'})
+        .then(r => r.json())
+        .then(d => {
+            if (d.ok) {
+                document.getElementById('reg-editor-modal').style.display = 'none';
+                if (typeof showToast === 'function') showToast('Model saved to registry');
+                setTimeout(function() { location.reload(); }, 500);
+            } else {
+                alert(d.error || 'Failed to save');
+            }
+        });
+}
+function verifyRegModel(modelId, doVerify) {
+    var action = doVerify ? 'verify' : 'unverify';
+    if (!doVerify && !confirm('Remove verification for ' + modelId + '?')) return;
+    var fd = new FormData();
+    fd.append('csrf_token', '<?php echo $csrf_token; ?>');
+    fd.append('registry_action', action);
+    fd.append('registry_model_id', modelId);
+    fetch('/admin.php?action=save_settings', {method:'POST', body: fd, credentials:'same-origin'})
+        .then(r => r.json())
+        .then(d => {
+            if (d.ok) {
+                if (typeof showToast === 'function') showToast(doVerify ? 'Model verified by Origin' : 'Verification removed');
+                setTimeout(function() { location.reload(); }, 500);
+            }
+        });
+}
+function deleteRegModel(modelId) {
+    if (!confirm('Delete ' + modelId + ' from registry?')) return;
+    var fd = new FormData();
+    fd.append('csrf_token', '<?php echo $csrf_token; ?>');
+    fd.append('registry_action', 'delete');
+    fd.append('registry_model_id', modelId);
+    fetch('/admin.php?action=save_settings', {method:'POST', body: fd, credentials:'same-origin'})
+        .then(r => r.json())
+        .then(d => {
+            if (d.ok) {
+                var row = document.querySelector('tr[data-model-id="' + modelId + '"]');
+                if (row) row.remove();
+                if (typeof showToast === 'function') showToast('Model removed');
+            }
+        });
+}
+</script>
+<?php } ?>
+
 <?php elseif ($active_view === 'settings'): ?>
 <!-- ══════════════ SETTINGS ══════════════ -->
 <?php
@@ -4912,6 +5604,83 @@ $_s_stripe_mode = (strpos($_s_stripe['secret_key'] ?? '', 'test') !== false) ? '
         </table>
     </div>
 </div>
+
+<!-- Tax Estimator Config (Origin only) -->
+<div class="card" style="margin-bottom:24px;padding:24px">
+    <h3 style="margin-bottom:16px">Tax Estimator Config</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:16px">
+        <div>
+            <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px">Combined Household W2 Income</label>
+            <div style="display:flex;align-items:center;gap:4px">
+                <span style="color:var(--text-dim)">$</span>
+                <input type="number" id="tax-w2-income" value="<?php echo (int)($_scfg['tax_w2_income'] ?? 113000); ?>"
+                    style="width:100%;padding:8px 10px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:0.88em">
+            </div>
+            <div style="font-size:10px;color:var(--text-dim);margin-top:2px">Your W2 + spouse W2 combined gross</div>
+        </div>
+        <div>
+            <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px">Combined W2 Federal Withholding (YTD)</label>
+            <div style="display:flex;align-items:center;gap:4px">
+                <span style="color:var(--text-dim)">$</span>
+                <input type="number" id="tax-w2-withholding" value="<?php echo (int)($_scfg['tax_w2_withholding'] ?? 14000); ?>"
+                    style="width:100%;padding:8px 10px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:0.88em">
+            </div>
+            <div style="font-size:10px;color:var(--text-dim);margin-top:2px">Check your last paystub — federal tax withheld × remaining pay periods</div>
+        </div>
+        <div>
+            <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px">S-Corp Salary Split (%)</label>
+            <div style="display:flex;align-items:center;gap:4px">
+                <input type="number" id="tax-salary-split" value="<?php echo (int)($_scfg['tax_salary_split_pct'] ?? 50); ?>" min="0" max="100"
+                    style="width:80px;padding:8px 10px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:0.88em">
+                <span style="color:var(--text-dim)">% salary / <?php echo 100 - (int)($_scfg['tax_salary_split_pct'] ?? 50); ?>% distribution</span>
+            </div>
+            <div style="font-size:10px;color:var(--text-dim);margin-top:2px">Lower salary = less FICA, but must be "reasonable compensation"</div>
+        </div>
+        <div>
+            <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px">R&D Dev Hours (YTD)</label>
+            <input type="number" id="tax-dev-hours" value="<?php echo (int)($_scfg['tax_dev_hours_ytd'] ?? 320); ?>"
+                style="width:100%;padding:8px 10px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:0.88em">
+            <div style="font-size:10px;color:var(--text-dim);margin-top:2px">Hours spent developing Forge (not running the business)</div>
+        </div>
+        <div>
+            <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px">R&D Hourly Rate</label>
+            <div style="display:flex;align-items:center;gap:4px">
+                <span style="color:var(--text-dim)">$</span>
+                <input type="number" id="tax-dev-rate" value="<?php echo (int)($_scfg['tax_dev_hourly_rate'] ?? 150); ?>"
+                    style="width:100%;padding:8px 10px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:0.88em">
+            </div>
+            <div style="font-size:10px;color:var(--text-dim);margin-top:2px">Market rate for comparable software engineer</div>
+        </div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+        <button onclick="saveTaxConfig()" class="btn" style="padding:8px 20px;background:var(--accent);color:#111;font-weight:600;font-size:0.88em">Save Tax Config</button>
+        <span id="tax-save-status" style="font-size:12px;color:var(--green);display:none">Saved</span>
+    </div>
+</div>
+
+<script>
+function saveTaxConfig() {
+    var fd = new FormData();
+    fd.append('csrf_token', '<?php echo $csrf_token; ?>');
+    fd.append('tax_w2_income', document.getElementById('tax-w2-income').value);
+    fd.append('tax_w2_withholding', document.getElementById('tax-w2-withholding').value);
+    fd.append('tax_salary_split_pct', document.getElementById('tax-salary-split').value);
+    fd.append('tax_dev_hours_ytd', document.getElementById('tax-dev-hours').value);
+    fd.append('tax_dev_hourly_rate', document.getElementById('tax-dev-rate').value);
+    fetch('/admin.php?action=save_settings', {method:'POST', body: fd, credentials:'same-origin'})
+        .then(r => r.json())
+        .then(d => {
+            if (d.ok) {
+                var s = document.getElementById('tax-save-status');
+                s.style.display = 'inline';
+                setTimeout(function(){ s.style.display = 'none'; }, 3000);
+                if (typeof showToast === 'function') showToast('Tax config saved — reload Billing tab to see updated estimates');
+            } else {
+                alert(d.error || 'Failed to save');
+            }
+        });
+}
+</script>
 
 <script>
 function toggleMaintenance(enabled) {
