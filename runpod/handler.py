@@ -559,9 +559,19 @@ def _run_batch_break(
 
     results = []
 
-    # Load dedup list — skip models already completed on this worker
+    # Load dedup list — check server for existing reports + local tracking
     _completed_path = Path("/tmp/.forge/batch_completed.json")
     already_done = json.loads(_completed_path.read_text()) if _completed_path.exists() else []
+
+    # Also check server for models that already have reports
+    try:
+        req = urllib.request.Request(f"{forge_server}/audit_orchestrator.php?action=report_models")
+        resp = urllib.request.urlopen(req, timeout=10)
+        server_models = json.loads(resp.read()).get("models", [])
+        already_done = list(set(already_done + server_models))
+        log.info("Server has reports for %d models, %d total to skip", len(server_models), len(already_done))
+    except Exception:
+        log.info("Could not check server for existing reports, using local dedup only")
 
     for mi, hf_repo in enumerate(models):
         if hf_repo in already_done:
