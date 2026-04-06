@@ -171,7 +171,10 @@ FORGE_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 # Direct API endpoint (bypasses Cloudflare) for handler-to-server POSTs.
 # The main forge-nc.dev domain is Cloudflare-protected and blocks datacenter IPs.
 # api.forge-nc.dev is DNS-only (gray cloud), goes straight to origin.
+# All requests must include X-Forge-Api-Secret header for auth.
+# Secret is passed via FORGE_API_SECRET env var (set in RunPod template).
 FORGE_API_SERVER = "http://api.forge-nc.dev"
+FORGE_API_SECRET = os.environ.get("FORGE_API_SECRET", "")
 
 
 class RemoteLogHandler(logging.Handler):
@@ -199,7 +202,8 @@ class RemoteLogHandler(logging.Handler):
         lines = self._buffer[:50]
         self._buffer = self._buffer[50:]
         try:
-            requests.post(self._url, json={"order_id": self._order_id, "lines": lines}, timeout=5)
+            requests.post(self._url, json={"order_id": self._order_id, "lines": lines},
+                         headers={"X-Forge-Api-Secret": FORGE_API_SECRET}, timeout=5)
         except Exception:
             pass
 
@@ -212,6 +216,7 @@ def post_audit_progress(forge_server: str, order_id: str, webhook_secret: str,
             f"{FORGE_API_SERVER}/audit_orchestrator.php?action=progress",
             json={"order_id": order_id, "webhook_secret": webhook_secret,
                   "stage": stage, "current": current, "total": total, "pass": pass_count},
+            headers={"X-Forge-Api-Secret": FORGE_API_SECRET},
             timeout=5,
         )
     except Exception:
@@ -706,6 +711,7 @@ def _run_batch_break(
     # Also check server for models that already have reports
     try:
         req = urllib.request.Request(f"{FORGE_API_SERVER}/audit_orchestrator.php?action=report_models")
+        req.add_header("X-Forge-Api-Secret", FORGE_API_SECRET)
         resp = urllib.request.urlopen(req, timeout=10)
         server_models = json.loads(resp.read()).get("models", [])
         already_done = list(set(already_done + server_models))
@@ -881,7 +887,10 @@ def _run_batch_break(
                     req = urllib.request.Request(
                         f"{FORGE_API_SERVER}/audit_orchestrator.php?action=upload_report",
                         data=upload_payload,
-                        headers={"Content-Type": "application/json"},
+                        headers={
+                            "Content-Type": "application/json",
+                            "X-Forge-Api-Secret": FORGE_API_SECRET,
+                        },
                     )
                     urllib.request.urlopen(req, timeout=30)
                 except Exception as upload_exc:
