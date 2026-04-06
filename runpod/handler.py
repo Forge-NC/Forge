@@ -728,6 +728,12 @@ def _run_batch_break(
         log.info("=== Batch break %d/%d: %s ===", mi + 1, len(models), hf_repo)
         vllm_proc = None
 
+        # Attach remote log handler so we can see logs on the server
+        _batch_log_id = f"batch-{hf_repo.replace('/', '-')[:40]}"
+        _batch_log_handler = RemoteLogHandler(FORGE_API_SERVER, _batch_log_id, flush_every=5)
+        _batch_log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
+        logging.getLogger().addHandler(_batch_log_handler)
+
         try:
             # Download model
             os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
@@ -927,6 +933,12 @@ def _run_batch_break(
                     vllm_proc.wait(timeout=15)
                 except subprocess.TimeoutExpired:
                     vllm_proc.kill()
+            # Flush and remove batch log handler
+            try:
+                _batch_log_handler.flush()
+                logging.getLogger().removeHandler(_batch_log_handler)
+            except Exception:
+                pass
 
     return {
         "status": "completed",

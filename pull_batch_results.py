@@ -14,7 +14,7 @@ REMOTE_DIR = "/home/forgenc/public_html/data/assurance/reports"
 CTX = ssl.create_default_context()
 
 ENDPOINTS = {
-    "small": "saxvu76pwg997x",
+    "small": "crb1fmcwmv8r1j",
     "medium": "qpaycqqpg23i1z",
     "large": "fderlpmi2u2v3p",
     "xxl": "ihpp1qyzlwu5i9",
