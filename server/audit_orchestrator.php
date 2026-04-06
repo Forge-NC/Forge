@@ -200,7 +200,7 @@ function _estimate_params_from_url(string $url): float {
 function select_gpu_tier(array $config, float $params_b): array {
     $tiers = $config['runpod_weights_endpoints'] ?? [];
     // Walk tiers in order from smallest to largest
-    foreach (['small', 'medium', 'large', 'xl'] as $tier_name) {
+    foreach (['small', 'medium', 'large', 'xl', 'xml', 'xxl'] as $tier_name) {
         $tier = $tiers[$tier_name] ?? null;
         if (!$tier) continue;
         if ($params_b <= ($tier['max_params_b'] ?? 0)) {
@@ -758,6 +758,22 @@ if ($action === 'runpod_complete' && $method === 'POST') {
         $order_updates['status'] = $all_passed ? 'completed' : 'partial';
         $order_updates['completed_at'] = date('c');
 
+        // ── Auto-verify completed models in registry ──
+        foreach ($models as $m) {
+            if ($m['status'] !== 'completed') continue;
+            $hf_repo = $m['model_id'] ?? '';
+            if ($hf_repo) {
+                $reg_path = __DIR__ . '/data/model_registry.json';
+                $reg = file_exists($reg_path) ? json_decode(file_get_contents($reg_path), true) : ['models' => []];
+                if (isset($reg['models'][$hf_repo]) && empty($reg['models'][$hf_repo]['verified_date'])) {
+                    $reg['models'][$hf_repo]['verified_date'] = date('Y-m-d');
+                    $reg['models'][$hf_repo]['verified_by'] = 'forge-origin';
+                    file_put_contents($reg_path, json_encode($reg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), LOCK_EX);
+                    error_log("Auto-verified model in registry: {$hf_repo}");
+                }
+            }
+        }
+
         // ── Origin-certify all completed reports ──
         foreach ($models as $m) {
             if ($m['status'] !== 'completed') continue;
@@ -1077,7 +1093,7 @@ if ($action === 'logs' && $method === 'GET') {
 
     $fh = fopen($log_file, 'r');
     fseek($fh, $after);
-    $new_content = fread($fh, min($size - $after, 65536)); // max 64KB per read
+    $new_content = fread($fh, min($size - $after, 524288)); // max 512KB per read
     fclose($fh);
 
     $lines = array_filter(explode("\n", $new_content), fn($l) => $l !== '');
@@ -1091,6 +1107,35 @@ if ($action === 'status' && $method === 'GET') {
     $order = get_audit_order($order_id);
     if (!$order) json_out(404, ['error' => 'Order not found']);
 
+    // Check RunPod job status for queue detection
+    $rp_queue_wait = false;
+    $progress = $order['progress'] ?? [];
+    $stage = $progress['stage'] ?? 'dispatched';
+    if ($order['status'] === 'running' && in_array($stage, ['dispatched', ''])) {
+        // No progress updates yet — check if RunPod job is still queued
+        $models = $order['models'] ?? [];
+        $job_id = $models[0]['runpod_job_id'] ?? '';
+        $gpu_tier = $models[0]['gpu_tier'] ?? '';
+        if ($job_id && $gpu_tier) {
+            $config = load_audit_config();
+            $endpoint_id = $config['runpod_weights_endpoints'][$gpu_tier]['endpoint_id'] ?? '';
+            $rp_key = $config['runpod_api_key'] ?? '';
+            if ($endpoint_id && $rp_key) {
+                $ch = curl_init("https://api.runpod.ai/v2/{$endpoint_id}/status/{$job_id}");
+                curl_setopt_array($ch, [
+                    CURLOPT_HTTPHEADER => ["Authorization: Bearer {$rp_key}"],
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT => 5,
+                ]);
+                $rp_resp = json_decode(curl_exec($ch), true);
+                curl_close($ch);
+                if (($rp_resp['status'] ?? '') === 'IN_QUEUE') {
+                    $rp_queue_wait = true;
+                }
+            }
+        }
+    }
+
     // Strip sensitive data
     $safe = $order;
     unset($safe['webhook_secret'], $safe['stripe_session'], $safe['stripe_customer']);
@@ -1100,7 +1145,24 @@ if ($action === 'status' && $method === 'GET') {
         }
         unset($m);
     }
+    $safe['gpu_queue_wait'] = $rp_queue_wait;
     json_out(200, $safe);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// POST ?action=upload_report — Accept a report from batch break runner
+// ═══════════════════════════════════════════════════════════════════════════
+
+if ($action === 'upload_report' && $method === 'POST') {
+    $raw = file_get_contents('php://input');
+    $data = json_decode($raw, true);
+    if (!$data || empty($data['report_b64'])) json_out(400, ['error' => 'Missing report_b64']);
+
+    $report_json = base64_decode($data['report_b64'], true);
+    if (!$report_json) json_out(400, ['error' => 'Invalid base64']);
+
+    _save_report_locally($report_json);
+    json_out(200, ['ok' => true, 'source' => $data['source'] ?? 'unknown']);
 }
 
 json_out(400, ['error' => 'Unknown action']);

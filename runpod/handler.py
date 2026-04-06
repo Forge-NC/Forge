@@ -119,6 +119,25 @@ def handler(event):
                 api_key=api_key,
                 webhook_secret=webhook_secret,
             )
+        elif access_type == "batch_break":
+            if not HAS_VLLM:
+                return {
+                    "order_id": order_id, "model_index": model_index,
+                    "webhook_secret": webhook_secret, "status": "failed",
+                    "error": "batch_break requires the weights image with vLLM.",
+                }
+            models = job_input.get("models", [])
+            if not models:
+                return {
+                    "order_id": order_id, "model_index": model_index,
+                    "webhook_secret": webhook_secret, "status": "failed",
+                    "error": "No models list provided for batch_break.",
+                }
+            return _run_batch_break(
+                models=models,
+                forge_server=job_input.get("forge_server", "https://forge-nc.dev"),
+                vllm_env=job_input.get("vllm_env", ""),
+            )
         elif access_type == "model_weights":
             if not HAS_VLLM:
                 return {
@@ -512,6 +531,244 @@ def _run_model_weights_audit(
                 vllm_proc.wait(timeout=15)
             except subprocess.TimeoutExpired:
                 vllm_proc.kill()
+
+
+# ── Batch break: uncertified break runs across multiple models ──
+
+def _run_batch_break(
+    models: list[str],
+    forge_server: str = "https://forge-nc.dev",
+    vllm_env: str = "",
+) -> dict:
+    """Run uncertified /break --full on a list of models sequentially.
+
+    For each model: download weights, start vLLM, run break pass (single pass,
+    no Parallax verification), upload report to server, kill vLLM, next model.
+
+    Reports are NOT Origin-certified. They populate the Matrix as community data.
+    """
+    import subprocess
+    import signal
+    import urllib.request
+    import urllib.error
+    import base64 as _b64
+
+    from forge.break_runner import BreakRunner
+    from forge.models.openai_backend import OpenAIBackend
+    from forge.assurance_report import generate_report
+
+    results = []
+
+    # Load dedup list — skip models already completed on this worker
+    _completed_path = Path("/tmp/.forge/batch_completed.json")
+    already_done = json.loads(_completed_path.read_text()) if _completed_path.exists() else []
+
+    for mi, hf_repo in enumerate(models):
+        if hf_repo in already_done:
+            log.info("=== Batch break %d/%d: %s — SKIPPED (already completed) ===", mi + 1, len(models), hf_repo)
+            results.append({"model": hf_repo, "status": "skipped"})
+            continue
+
+        log.info("=== Batch break %d/%d: %s ===", mi + 1, len(models), hf_repo)
+        vllm_proc = None
+
+        try:
+            # Download model
+            os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
+            from huggingface_hub import snapshot_download
+            log.info("Downloading: %s", hf_repo)
+            local_path = snapshot_download(hf_repo, cache_dir="/tmp/hf_models")
+            log.info("Downloaded to: %s", local_path)
+
+            # Start vLLM
+            import torch
+            gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 1
+            per_gpu_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3) if torch.cuda.is_available() else 48
+
+            env = os.environ.copy()
+            env["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+            env["VLLM_MARLIN_USE_ATOMIC_ADD"] = "1"
+            env["VLLM_USE_DEEP_GEMM"] = "0"
+            env["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"] = "1"
+            if vllm_env:
+                for pair in vllm_env.split(","):
+                    pair = pair.strip()
+                    if "=" in pair:
+                        k, v = pair.split("=", 1)
+                        env[k.strip()] = v.strip()
+
+            cmd = [
+                "python", "-m", "vllm.entrypoints.openai.api_server",
+                "--model", local_path,
+                "--host", "0.0.0.0", "--port", "8199",
+                "--trust-remote-code",
+                "--max-model-len", "4096",
+                "--gpu-memory-utilization", "0.95",
+                "--enforce-eager",
+            ]
+            if gpu_count > 1:
+                cmd += ["--tensor-parallel-size", str(gpu_count)]
+
+            log.info("vLLM command: %s", " ".join(cmd))
+            vllm_proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+            import threading
+            def _stream(proc):
+                try:
+                    for raw in iter(proc.stdout.readline, b''):
+                        line = raw.decode(errors='replace').rstrip()
+                        if line:
+                            log.info("[vLLM] %s", line)
+                except Exception:
+                    pass
+            threading.Thread(target=_stream, args=(vllm_proc,), daemon=True).start()
+
+            # Wait for ready
+            ready = False
+            for attempt in range(360):  # 30 min max
+                time.sleep(5)
+                if vllm_proc.poll() is not None:
+                    log.error("vLLM exited during startup for %s", hf_repo)
+                    break
+                try:
+                    urllib.request.urlopen("http://localhost:8199/health", timeout=3)
+                    ready = True
+                    break
+                except (urllib.error.URLError, ConnectionError, OSError):
+                    if attempt % 12 == 0:
+                        log.info("Waiting for vLLM... (%ds)", attempt * 5)
+
+            if not ready:
+                log.error("vLLM startup failed for %s", hf_repo)
+                results.append({"model": hf_repo, "status": "failed", "error": "vLLM startup failed"})
+                continue
+
+            # Detect served model name
+            try:
+                resp_raw = urllib.request.urlopen("http://localhost:8199/v1/models", timeout=5)
+                import json as _json
+                served_model = _json.loads(resp_raw.read())["data"][0]["id"]
+            except Exception:
+                served_model = hf_repo
+
+            log.info("vLLM ready, running break on %s", served_model)
+
+            # Run /break --full (break + assurance dual pass, uncertified)
+            llm = OpenAIBackend(
+                model=served_model,
+                api_key="not-needed",
+                base_url="http://localhost:8199/v1",
+            )
+
+            def _progress(current, total, scenario_id, passed, latency_ms):
+                mark = "+" if passed else "x"
+                log.info("  [%d/%d] [%s] %s (%dms)", current, total, mark, scenario_id, latency_ms)
+
+            # Pass 1: Break
+            log.info("Starting Break pass for %s...", hf_repo)
+            runner = BreakRunner(
+                config_dir=FORGE_CONFIG_DIR,
+                machine_id="forge-batch-worker",
+                passport_id="batch-break",
+            )
+
+            break_result = runner.run(
+                llm=llm,
+                model=hf_repo,
+                mode="full",
+                include_fingerprint=True,
+                self_rate=False,
+                tier="power",
+                progress_callback=_progress,
+            )
+
+            log.info("Break complete for %s: %.1f%% (%d/%d)",
+                     hf_repo, break_result.pass_rate * 100,
+                     break_result.scenarios_passed, break_result.scenarios_run)
+
+            # Pass 2: Assurance (verification)
+            log.info("Starting Assurance pass for %s...", hf_repo)
+            from forge.assurance import AssuranceRunner
+            assure_runner = AssuranceRunner(
+                config_dir=FORGE_CONFIG_DIR,
+                machine_id="forge-batch-worker",
+                passport_id="batch-break",
+            )
+            assure_run = assure_runner.run(
+                llm=llm,
+                model=hf_repo,
+                fingerprint_scores=break_result.fingerprint_scores,
+                self_rate=False,
+                tier="power",
+                progress_callback=_progress,
+            )
+            assure_report = generate_report(assure_run, config_dir=FORGE_CONFIG_DIR)
+
+            log.info("Assurance complete for %s: %.1f%% (%d/%d)",
+                     hf_repo, assure_run.pass_rate * 100,
+                     sum(1 for r in assure_run.results if r.passed),
+                     len(assure_run.results))
+
+            # Cross-link paired reports (Parallax)
+            break_result.report["paired_run_id"] = assure_report["run_id"]
+            assure_report["paired_run_id"] = break_result.report["run_id"]
+
+            # Upload both reports to server
+            break_b64 = _b64.b64encode(json.dumps(break_result.report).encode()).decode()
+            assure_b64 = _b64.b64encode(json.dumps(assure_report).encode()).decode()
+            for rpt_b64 in [break_b64, assure_b64]:
+                try:
+                    upload_payload = json.dumps({
+                        "report_b64": rpt_b64,
+                        "source": "batch_break",
+                    }).encode()
+                    req = urllib.request.Request(
+                        f"{forge_server}/audit_orchestrator.php?action=upload_report",
+                        data=upload_payload,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    urllib.request.urlopen(req, timeout=30)
+                except Exception as upload_exc:
+                    log.warning("Report upload failed for %s: %s", hf_repo, upload_exc)
+
+            log.info("Reports uploaded for %s (break: %s, assure: %s)",
+                     hf_repo, break_result.run_id, assure_report["run_id"])
+
+            # Track completed models so we can skip on re-run
+            _completed_path = Path("/tmp/.forge/batch_completed.json")
+            completed = json.loads(_completed_path.read_text()) if _completed_path.exists() else []
+            completed.append(hf_repo)
+            _completed_path.write_text(json.dumps(completed))
+
+            results.append({
+                "model": hf_repo,
+                "status": "completed",
+                "run_id": break_result.run_id,
+                "run_id_paired": assure_report["run_id"],
+                "pass_rate": break_result.pass_rate,
+                "scenarios_run": break_result.scenarios_run,
+                "scenarios_passed": break_result.scenarios_passed,
+            })
+
+        except Exception as exc:
+            log.exception("Batch break failed for %s", hf_repo)
+            results.append({"model": hf_repo, "status": "failed", "error": str(exc)})
+
+        finally:
+            if vllm_proc and vllm_proc.poll() is None:
+                log.info("Shutting down vLLM for %s", hf_repo)
+                vllm_proc.terminate()
+                try:
+                    vllm_proc.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    vllm_proc.kill()
+
+    return {
+        "status": "completed",
+        "models_run": len(results),
+        "models_passed": sum(1 for r in results if r.get("status") == "completed"),
+        "results": results,
+    }
 
 
 # ── Pod mode: HTTP server for ultra tier ──
