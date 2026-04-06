@@ -114,7 +114,7 @@ jobs:
           SHA="${{ steps.sha.outputs.short }}"
           IMAGE="ghcr.io/forge-nc/forge-audit-weights:${SHA}"
           echo "Updating RunPod templates to ${IMAGE}"
-          TPLS='19t7r9l7df:forge-audit-weights i2alm4nqvb:forge-audit-weights-medium c3ii4yjwdk:forge-audit-weights-large dxy7hi9d76:forge-audit-weights-xl bwlv4zki0z:forge-audit-weights-xxl'
+          TPLS='19t7r9l7df:forge-audit-weights i2alm4nqvb:forge-audit-weights-medium c3ii4yjwdk:forge-audit-weights-large dxy7hi9d76:forge-audit-weights-xl vbj89ctqqs:forge-audit-weights-xml bwlv4zki0z:forge-audit-weights-xxl'
           for entry in $TPLS; do
             TPL_ID="${entry%%:*}"
             TPL_NAME="${entry##*:}"

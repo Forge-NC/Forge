@@ -20,6 +20,135 @@ from pathlib import Path
 import requests
 import runpod
 
+# ── Chat template resolution for models missing tokenizer chat_template ──
+
+_CHAT_TEMPLATES = {
+    "llama2": (
+        "{% if messages[0]['role'] == 'system' %}"
+        "{% set system_message = '<<SYS>>\\n' + messages[0]['content'] | trim + '\\n<</SYS>>\\n\\n' %}"
+        "{% set messages = messages[1:] %}"
+        "{% else %}{% set system_message = '' %}{% endif %}"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'user' %}"
+        "{{ bos_token + '[INST] ' + (system_message if loop.index0 == 0 else '') + message['content'] | trim + ' [/INST]' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ ' ' + message['content'] | trim + ' ' + eos_token }}"
+        "{% endif %}{% endfor %}"
+    ),
+    "mistral": (
+        "{% if messages[0]['role'] == 'system' %}"
+        "{% set system_message = messages[0]['content'] | trim + '\\n\\n' %}"
+        "{% set messages = messages[1:] %}"
+        "{% else %}{% set system_message = '' %}{% endif %}"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'user' %}"
+        "{{ bos_token + '[INST] ' + (system_message if loop.index0 == 0 else '') + message['content'] | trim + ' [/INST]' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ ' ' + message['content'] | trim + eos_token }}"
+        "{% endif %}{% endfor %}"
+    ),
+    "chatml": (
+        "{% for message in messages %}"
+        "{{'<|im_start|>' + message['role'] + '\\n' + message['content'] + '<|im_end|>' + '\\n'}}"
+        "{% endfor %}"
+        "{% if add_generation_prompt %}{{ '<|im_start|>assistant\\n' }}{% endif %}"
+    ),
+    "vicuna": (
+        "{% if messages[0]['role'] == 'system' %}"
+        "{{ bos_token + messages[0]['content'] | trim + '\\n\\n' }}"
+        "{% set messages = messages[1:] %}"
+        "{% else %}{{ bos_token }}{% endif %}"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'user' %}{{ 'USER: ' + message['content'] | trim + '\\n' }}"
+        "{% elif message['role'] == 'assistant' %}{{ 'ASSISTANT: ' + message['content'] | trim + eos_token + '\\n' }}"
+        "{% endif %}{% endfor %}"
+        "{% if add_generation_prompt %}{{ 'ASSISTANT:' }}{% endif %}"
+    ),
+    "alpaca": (
+        "{% if messages[0]['role'] == 'system' %}"
+        "{{ bos_token + messages[0]['content'] + '\\n\\n' }}{% set messages = messages[1:] %}"
+        "{% else %}{{ bos_token + 'Below is an instruction that describes a task. Write a response that appropriately completes the request.\\n\\n' }}"
+        "{% endif %}"
+        "{% for message in messages %}"
+        "{% if message['role'] == 'user' %}{{ '### Instruction:\\n' + message['content'] | trim + '\\n\\n' }}"
+        "{% elif message['role'] == 'assistant' %}{{ '### Response:\\n' + message['content'] | trim + eos_token + '\\n\\n' }}"
+        "{% endif %}{% endfor %}"
+        "{% if add_generation_prompt %}{{ '### Response:\\n' }}{% endif %}"
+    ),
+}
+
+# Model name patterns -> template family (checked when tokenizer has no chat_template)
+_MODEL_TEMPLATE_MAP = [
+    # Llama 2 family
+    (r"llama-2.*chat", "llama2"),
+    (r"codellama.*instruct", "llama2"),
+    (r"airoboros", "llama2"),
+    # Mistral (v0.1 only — v0.2+ has template)
+    (r"mistral.*instruct.*v0\.1", "mistral"),
+    # ChatML family
+    (r"openhermes", "chatml"),
+    (r"dolphin", "chatml"),
+    (r"nous-hermes", "chatml"),
+    # Vicuna family
+    (r"vicuna", "vicuna"),
+    (r"wizard-vicuna", "vicuna"),
+    (r"wizardlm.*uncensored", "vicuna"),
+    # Alpaca family
+    (r"wizardcoder", "alpaca"),
+    (r"phind-codellama", "alpaca"),
+    (r"synthia", "alpaca"),
+]
+
+# Base models that should NOT be chat-tested (no instruct tuning)
+_BASE_MODEL_SKIP = [
+    r"google/gemma-2b-AWQ",      # base gemma, not gemma-it
+    r"meditron-7B-AWQ",          # medical foundation model, not chat-tuned
+]
+
+import re as _re
+
+
+def _resolve_chat_template(model_path: str, hf_repo: str) -> str | None:
+    """Check if model needs a chat template and return path to .jinja file if so.
+
+    Returns None if the model already has a template or if it's a base model
+    that shouldn't be used for chat.
+    """
+    # Check if tokenizer already has a chat template
+    tok_cfg_path = Path(model_path) / "tokenizer_config.json"
+    if tok_cfg_path.exists():
+        try:
+            tok_data = json.loads(tok_cfg_path.read_text())
+            if tok_data.get("chat_template"):
+                return None  # already has one
+        except Exception:
+            pass
+
+    # Check if it's a base model we should skip
+    for pattern in _BASE_MODEL_SKIP:
+        if _re.search(pattern, hf_repo, _re.IGNORECASE):
+            log.warning("Skipping base model (not chat-tuned): %s", hf_repo)
+            return None
+
+    # Match model name against known template families
+    model_lower = hf_repo.lower()
+    for pattern, family in _MODEL_TEMPLATE_MAP:
+        if _re.search(pattern, model_lower):
+            template_str = _CHAT_TEMPLATES.get(family)
+            if template_str:
+                tpl_path = Path(f"/tmp/.forge/chat_template_{family}.jinja")
+                tpl_path.write_text(template_str)
+                log.info("Model %s matched template family '%s'", hf_repo, family)
+                return str(tpl_path)
+
+    # Unknown model without template — use ChatML as last resort
+    # ChatML is the most widely compatible format
+    log.warning("Model %s has no chat template and no known family match — using ChatML fallback", hf_repo)
+    tpl_path = Path("/tmp/.forge/chat_template_chatml_fallback.jinja")
+    tpl_path.write_text(_CHAT_TEMPLATES["chatml"])
+    return str(tpl_path)
+
+
 # Detect capabilities — slim image has no vLLM/torch
 try:
     import vllm  # noqa: F401
@@ -39,13 +168,18 @@ log = logging.getLogger("forge.audit.worker")
 FORGE_CONFIG_DIR = Path("/tmp/.forge")
 FORGE_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
+# Direct API endpoint (bypasses Cloudflare) for handler-to-server POSTs.
+# The main forge-nc.dev domain is Cloudflare-protected and blocks datacenter IPs.
+# api.forge-nc.dev is DNS-only (gray cloud), goes straight to origin.
+FORGE_API_SERVER = "http://api.forge-nc.dev"
+
 
 class RemoteLogHandler(logging.Handler):
     """Logging handler that buffers log lines and POSTs them to the orchestrator."""
 
     def __init__(self, forge_server: str, order_id: str, flush_every: int = 10):
         super().__init__()
-        self._url = f"{forge_server}/audit_orchestrator.php?action=log"
+        self._url = f"{FORGE_API_SERVER}/audit_orchestrator.php?action=log"
         self._order_id = order_id
         self._buffer = []
         self._flush_every = flush_every
@@ -75,7 +209,7 @@ def post_audit_progress(forge_server: str, order_id: str, webhook_secret: str,
     """POST a progress update to the orchestrator. Non-blocking, fire-and-forget."""
     try:
         requests.post(
-            f"{forge_server}/audit_orchestrator.php?action=progress",
+            f"{FORGE_API_SERVER}/audit_orchestrator.php?action=progress",
             json={"order_id": order_id, "webhook_secret": webhook_secret,
                   "stage": stage, "current": current, "total": total, "pass": pass_count},
             timeout=5,
@@ -450,6 +584,12 @@ def _run_model_weights_audit(
             vllm_cmd += extra
             log.info("Custom vLLM flags: %s", extra)
 
+        # Check if model has a chat template — older quants don't
+        _tpl = _resolve_chat_template(model_source, hf_repo)
+        if _tpl:
+            vllm_cmd += ["--chat-template", _tpl]
+            log.info("Using resolved chat template: %s", _tpl)
+
         log.info("vLLM command: %s", " ".join(vllm_cmd))
         vllm_proc = subprocess.Popen(
             vllm_cmd, env=vllm_env,
@@ -565,7 +705,7 @@ def _run_batch_break(
 
     # Also check server for models that already have reports
     try:
-        req = urllib.request.Request(f"{forge_server}/audit_orchestrator.php?action=report_models")
+        req = urllib.request.Request(f"{FORGE_API_SERVER}/audit_orchestrator.php?action=report_models")
         resp = urllib.request.urlopen(req, timeout=10)
         server_models = json.loads(resp.read()).get("models", [])
         already_done = list(set(already_done + server_models))
@@ -618,6 +758,12 @@ def _run_batch_break(
             ]
             if gpu_count > 1:
                 cmd += ["--tensor-parallel-size", str(gpu_count)]
+
+            # Check if model has a chat template — older quants don't
+            _tpl = _resolve_chat_template(local_path, hf_repo)
+            if _tpl:
+                cmd += ["--chat-template", _tpl]
+                log.info("Using resolved chat template: %s", _tpl)
 
             log.info("vLLM command: %s", " ".join(cmd))
             vllm_proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -733,7 +879,7 @@ def _run_batch_break(
                         "source": "batch_break",
                     }).encode()
                     req = urllib.request.Request(
-                        f"{forge_server}/audit_orchestrator.php?action=upload_report",
+                        f"{FORGE_API_SERVER}/audit_orchestrator.php?action=upload_report",
                         data=upload_payload,
                         headers={"Content-Type": "application/json"},
                     )
