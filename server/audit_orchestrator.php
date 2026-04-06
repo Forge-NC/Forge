@@ -1150,6 +1150,25 @@ if ($action === 'status' && $method === 'GET') {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// GET ?action=report_models — List model IDs that already have reports
+// Used by batch runner for dedup
+// ═══════════════════════════════════════════════════════════════════════════
+
+if ($action === 'report_models' && $method === 'GET') {
+    $reports_dir = __DIR__ . '/data/assurance/reports';
+    $models = [];
+    if (is_dir($reports_dir)) {
+        foreach (glob($reports_dir . '/*.json') as $f) {
+            $r = json_decode(file_get_contents($f), true);
+            if ($r && !empty($r['model'])) {
+                $models[] = $r['model'];
+            }
+        }
+    }
+    json_out(200, ['models' => array_values(array_unique($models))]);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // POST ?action=upload_report — Accept a report from batch break runner
 // ═══════════════════════════════════════════════════════════════════════════
 
