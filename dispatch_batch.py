@@ -1,5 +1,6 @@
 """Dispatch batch break jobs — one per model to avoid timeout issues."""
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -10,7 +11,7 @@ FORGE_SERVER = "https://forge-nc.dev"
 CTX = ssl.create_default_context()
 
 ENDPOINTS = {
-    "small": "saxvu76pwg997x",
+    "small": "crb1fmcwmv8r1j",
     "medium": "qpaycqqpg23i1z",
     "large": "fderlpmi2u2v3p",
     "xxl": "ihpp1qyzlwu5i9",
