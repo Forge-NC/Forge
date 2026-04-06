@@ -22,6 +22,23 @@ require_once __DIR__ . '/includes/email_templates.php';
 require_once __DIR__ . '/includes/json_compat.php';
 require_once __DIR__ . '/includes/model_compat.php';
 
+// ── API subdomain security ─────────────────────────────────────────────────
+// api.forge-nc.dev bypasses Cloudflare (DNS-only). Require a shared secret
+// header on all requests through that subdomain to prevent abuse.
+$_host = $_SERVER['HTTP_HOST'] ?? '';
+if (str_starts_with($_host, 'api.')) {
+    $cfg = file_exists(__DIR__ . '/data/audit_config.json')
+        ? json_decode(file_get_contents(__DIR__ . '/data/audit_config.json'), true) : [];
+    $api_secret = $cfg['api_endpoint_secret'] ?? '';
+    $provided = $_SERVER['HTTP_X_FORGE_API_SECRET'] ?? '';
+    if (!$api_secret || !$provided || !hash_equals($api_secret, $provided)) {
+        http_response_code(403);
+        header('Content-Type: application/json');
+        echo json_encode(['error' => 'Invalid API secret']);
+        exit;
+    }
+}
+
 // ── Config ──────────────────────────────────────────────────────────────────
 
 $AUDIT_CONFIG_FILE = __DIR__ . '/data/audit_config.json';
