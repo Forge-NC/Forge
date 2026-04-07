@@ -57,11 +57,67 @@ _COMPLIANCE_NOTES = {
 }
 
 
+def compute_matrix_comparison(
+    category_pass_rates: dict[str, float],
+    matrix_data: list[dict],
+) -> dict:
+    """Compare audit results against Matrix leaderboard data.
+
+    Args:
+        category_pass_rates: This audit's per-category pass rates.
+        matrix_data: List of dicts with 'model', 'pass_rate', 'category_pass_rates'.
+
+    Returns:
+        Dict with overall_percentile, per-category percentiles, strengths, weaknesses.
+    """
+    if not matrix_data:
+        return {}
+
+    # Overall percentile
+    all_rates = sorted(m.get("pass_rate", 0) for m in matrix_data)
+    this_overall = sum(category_pass_rates.values()) / max(len(category_pass_rates), 1)
+    below = sum(1 for r in all_rates if r < this_overall)
+    overall_pct = round(below / max(len(all_rates), 1), 3)
+
+    # Per-category percentiles
+    cat_pcts = {}
+    cat_strengths = []
+    cat_weaknesses = []
+    for cat, rate in category_pass_rates.items():
+        cat_rates = sorted(
+            m.get("category_pass_rates", {}).get(cat, 0)
+            for m in matrix_data
+            if cat in m.get("category_pass_rates", {})
+        )
+        if cat_rates:
+            below_cat = sum(1 for r in cat_rates if r < rate)
+            pct = round(below_cat / len(cat_rates), 3)
+            cat_pcts[cat] = {
+                "percentile": pct,
+                "this_model": round(rate, 4),
+                "matrix_avg": round(sum(cat_rates) / len(cat_rates), 4),
+                "matrix_count": len(cat_rates),
+            }
+            if pct >= 0.75:
+                cat_strengths.append(cat)
+            elif pct <= 0.25:
+                cat_weaknesses.append(cat)
+
+    return {
+        "overall_percentile": overall_pct,
+        "models_compared": len(matrix_data),
+        "categories": cat_pcts,
+        "top_quartile": cat_strengths,
+        "bottom_quartile": cat_weaknesses,
+    }
+
+
 def generate_report(
     run: "AssuranceRun",
     config_dir: Path | None = None,
     save: bool = True,
     report_type: str = "assure",
+    matrix_comparison: dict | None = None,
 ) -> dict:
     """Sign and serialise a completed AssuranceRun.
 
@@ -116,6 +172,9 @@ def generate_report(
         "scenarios_run":         len(results_payload),
         "scenarios_passed":      sum(1 for r in run.results if r.passed),
         "results":               results_payload,
+        "self_attack_results":   run.self_attack_results if run.self_attack_results else None,
+        "regulatory_readiness":  run.regulatory_readiness if run.regulatory_readiness else None,
+        "matrix_comparison":     matrix_comparison,
         "generated_at":          time.time(),
     }
 
