@@ -88,6 +88,9 @@ def generate_report(
             "entry_hash":        r.entry_hash,
             "prev_hash":         r.prev_hash,
             "variant_detail":    r.variant_detail if r.variant_detail else None,
+            "tags":              r.tags if r.tags else None,
+            "weight":            r.weight,
+            "severity":          r.severity,
         }
         for r in run.results
     ]
@@ -107,6 +110,7 @@ def generate_report(
         "machine_id":            run.machine_id,
         "passport_id":           run.passport_id,
         "pass_rate":             round(run.pass_rate, 4),
+        "weighted_pass_rate":    round(run.weighted_pass_rate, 4),
         "category_pass_rates":   {k: round(v, 4) for k, v in run.category_pass_rates.items()},
         "behavioral_fingerprint": run.behavioral_fingerprint,
         "scenarios_run":         len(results_payload),

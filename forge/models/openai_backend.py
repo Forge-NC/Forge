@@ -35,11 +35,13 @@ class OpenAIBackend:
     def __init__(self, model: str = "gpt-4o-mini",
                  api_key: str = "",
                  base_url: str = "https://api.openai.com/v1",
-                 timeout: float = 120.0):
+                 timeout: float = 120.0,
+                 stop_tokens: list[str] | None = None):
         self.model = model
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        self._stop_tokens = stop_tokens
         self._session = requests.Session()
         self.num_ctx = None  # Engine sets this; ignored for cloud backends
 
@@ -96,6 +98,13 @@ class OpenAIBackend:
             "max_tokens": 512,
             "stream": stream,
         }
+
+        # Stop tokens prevent models from generating past response boundaries
+        # (the "391assistant\nassistant\nassistant" repetition loop problem).
+        # Per-model tokens resolved from tokenizer_config.json are preferred;
+        # universal fallback covers all major model families.
+        if self._stop_tokens:
+            payload["stop"] = self._stop_tokens
 
         # Convert Ollama-style tools to OpenAI format
         if tools:

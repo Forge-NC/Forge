@@ -12,7 +12,7 @@ WORKDIR /app
 
 # Heavy deps first (cached by Docker layer cache after first build)
 RUN pip install --no-cache-dir \
-    vllm \
+    vllm==0.19.0 \
     huggingface_hub
 
 # Lightweight deps the audit chain needs
