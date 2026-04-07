@@ -177,6 +177,311 @@ FORGE_API_SERVER = "http://api.forge-nc.dev"
 FORGE_API_SECRET = os.environ.get("FORGE_API_SECRET", "")
 
 
+# ── vLLM Engine: shared startup with fallback chain, error capture, pre-flight ──
+
+# Known vLLM error patterns → (error_class, human message)
+_VLLM_ERROR_PATTERNS = [
+    ("torch.cuda.OutOfMemoryError",      "oom",            "Model requires more VRAM than available on this GPU tier"),
+    ("CUDA out of memory",               "oom",            "Model requires more VRAM than available on this GPU tier"),
+    ("Cannot convert to Marlin",         "marlin_compat",  "AWQ model uses old format incompatible with Marlin kernel — retrying with non-Marlin backend"),
+    ("marlin",                           "marlin_compat",  "AWQ Marlin kernel error — retrying with non-Marlin backend"),
+    ("not supported",                    "unsupported",    "Model architecture or quantization not supported by vLLM"),
+    ("KeyError: 'model_type'",           "unsupported",    "Model config missing 'model_type' — possibly corrupted or unsupported"),
+    ("Quantization method",              "quant_format",   "Quantization format not recognized by vLLM"),
+    ("RuntimeError: weight",             "weight_format",  "Model weight tensor shapes don't match expected architecture"),
+    ("NCCL error",                       "multi_gpu",      "Multi-GPU communication failed (NCCL) — transient, retrying"),
+    ("ProcessGroupNCCL",                 "multi_gpu",      "Multi-GPU communication failed (NCCL) — transient, retrying"),
+    ("FileNotFoundError",                "missing_file",   "Required model file not found after download"),
+    ("trust_remote_code",                "trust_code",     "Model requires custom code that failed to load"),
+]
+
+
+class VllmOutputCapture:
+    """Thread-safe ring buffer capturing the last N lines of vLLM output."""
+
+    def __init__(self, maxlines: int = 80):
+        import threading
+        self._lines: list[str] = []
+        self._maxlines = maxlines
+        self._lock = threading.Lock()
+
+    def add(self, line: str):
+        with self._lock:
+            self._lines.append(line)
+            if len(self._lines) > self._maxlines:
+                self._lines = self._lines[-self._maxlines:]
+
+    def get_lines(self, n: int = 30) -> list[str]:
+        with self._lock:
+            return list(self._lines[-n:])
+
+    def classify_error(self, exit_code: int = -1) -> dict:
+        """Classify the vLLM failure from captured output."""
+        lines = self.get_lines(50)
+        full_text = "\n".join(lines)
+        for pattern, error_class, message in _VLLM_ERROR_PATTERNS:
+            if pattern.lower() in full_text.lower():
+                return {"error_class": error_class, "error": message,
+                        "vllm_exit_code": exit_code, "vllm_last_lines": lines[-20:]}
+        return {"error_class": "unknown", "error": f"vLLM exited with code {exit_code}",
+                "vllm_exit_code": exit_code, "vllm_last_lines": lines[-20:]}
+
+
+def _resolve_stop_tokens(model_path: str, hf_repo: str = "") -> list[str]:
+    """Resolve the correct stop tokens for a model from its tokenizer config.
+
+    Reads tokenizer_config.json and extracts eos_token + special added tokens.
+    Falls back to a universal stop token list if config can't be parsed.
+    """
+    universal = [
+        "<|im_end|>",       # ChatML (Qwen, OpenHermes, Dolphin)
+        "<|eot_id|>",       # Llama 3.x
+        "</s>",             # Llama 2, Mistral, many others
+        "<|end|>",          # Phi-3/4
+        "<|endoftext|>",    # GPT-NeoX, Phi, Qwen
+        "<end_of_turn>",    # Gemma
+        "[|endofturn|]",    # EXAONE
+    ]
+    try:
+        import json as _json
+        cfg_path = Path(model_path) / "tokenizer_config.json"
+        if not cfg_path.exists():
+            log.info("No tokenizer_config.json at %s — using universal stop tokens", model_path)
+            return universal
+
+        cfg = _json.loads(cfg_path.read_text())
+        tokens = set()
+
+        # Extract eos_token
+        eos = cfg.get("eos_token")
+        if isinstance(eos, str) and eos.strip():
+            tokens.add(eos.strip())
+        elif isinstance(eos, dict):
+            tokens.add(eos.get("content", "").strip())
+
+        # Extract special added tokens (chat template boundaries)
+        for tid, tdata in cfg.get("added_tokens_decoder", {}).items():
+            if tdata.get("special") and tdata.get("content"):
+                content = tdata["content"].strip()
+                # Only include tokens that look like template markers, not BOS/padding
+                if any(marker in content.lower() for marker in
+                       ["end", "eot", "eos", "turn", "im_end", "stop"]):
+                    tokens.add(content)
+
+        if tokens:
+            result = sorted(tokens)
+            log.info("Resolved stop tokens for %s: %s", hf_repo or model_path, result)
+            return result
+
+    except Exception as exc:
+        log.warning("Failed to parse tokenizer config for stop tokens: %s", exc)
+
+    log.info("Using universal stop token fallback for %s", hf_repo or model_path)
+    return universal
+
+
+def _start_vllm_with_fallback(
+    model_path: str,
+    hf_repo: str,
+    gpu_count: int,
+    per_gpu_gb: float,
+    custom_env: dict | None = None,
+    custom_flags: str = "",
+    max_startup_minutes: int = 30,
+) -> tuple["subprocess.Popen | None", "VllmOutputCapture", str, list[str], str | None]:
+    """Start vLLM with a fallback chain. Returns (proc, capture, served_model, stop_tokens, error).
+
+    Fallback chain:
+      1. Default vLLM config
+      2. Explicit --quantization awq (if Marlin fails)
+      3. Reduced --max-model-len 2048 (if OOM)
+      4. --dtype float16 --enforce-eager (last resort)
+
+    If all attempts fail, returns (None, capture, "", [], error_string).
+    """
+    import subprocess
+    import threading
+    import urllib.request
+    import urllib.error
+
+    capture = VllmOutputCapture()
+    stop_tokens = _resolve_stop_tokens(model_path, hf_repo)
+
+    # Resolve chat template
+    tpl = _resolve_chat_template(model_path, hf_repo)
+
+    # Base environment
+    env = os.environ.copy()
+    env["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+    env["VLLM_MARLIN_USE_ATOMIC_ADD"] = "1"
+    env["VLLM_USE_DEEP_GEMM"] = "0"
+    env["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"] = "1"
+    if custom_env:
+        env.update(custom_env)
+
+    # Base command
+    base_cmd = [
+        "python", "-m", "vllm.entrypoints.openai.api_server",
+        "--model", model_path,
+        "--host", "0.0.0.0", "--port", "8199",
+        "--trust-remote-code",
+        "--gpu-memory-utilization", "0.95",
+        "--enforce-eager",
+    ]
+    if gpu_count > 1:
+        base_cmd += ["--tensor-parallel-size", str(gpu_count)]
+    if tpl:
+        base_cmd += ["--chat-template", tpl]
+    if custom_flags:
+        import shlex
+        base_cmd += shlex.split(custom_flags)
+
+    # Define fallback strategies: (label, extra_args)
+    strategies = [
+        ("default (max-model-len=4096)",
+         ["--max-model-len", "4096"]),
+        ("explicit AWQ quantization (non-Marlin)",
+         ["--max-model-len", "4096", "--quantization", "awq"]),
+        ("reduced context (max-model-len=2048)",
+         ["--max-model-len", "2048"]),
+        ("float16 + reduced context (last resort)",
+         ["--max-model-len", "2048", "--dtype", "float16"]),
+    ]
+
+    max_attempts_per_strategy = max_startup_minutes * 60 // 5  # 5s poll interval
+
+    for strategy_idx, (label, extra_args) in enumerate(strategies):
+        cmd = base_cmd + extra_args
+        log.info("vLLM attempt %d/%d: %s", strategy_idx + 1, len(strategies), label)
+        log.info("vLLM command: %s", " ".join(cmd))
+
+        # Clear capture for new attempt
+        capture = VllmOutputCapture()
+
+        proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+        def _stream(p, cap):
+            try:
+                for raw in iter(p.stdout.readline, b''):
+                    line = raw.decode(errors='replace').rstrip()
+                    if line:
+                        cap.add(line)
+                        log.info("[vLLM] %s", line)
+            except Exception:
+                pass
+
+        threading.Thread(target=_stream, args=(proc, capture), daemon=True).start()
+
+        # Wait for health
+        ready = False
+        for attempt in range(max_attempts_per_strategy):
+            time.sleep(5)
+            if proc.poll() is not None:
+                log.error("vLLM exited during startup (strategy: %s, code: %s)",
+                          label, proc.returncode)
+                break
+            try:
+                urllib.request.urlopen("http://localhost:8199/health", timeout=3)
+                ready = True
+                break
+            except (urllib.error.URLError, ConnectionError, OSError):
+                if attempt % 12 == 0:
+                    log.info("Waiting for vLLM... (%ds, strategy: %s)", attempt * 5, label)
+
+        if ready:
+            log.info("vLLM started successfully with strategy: %s", label)
+
+            # Detect served model name
+            try:
+                resp_raw = urllib.request.urlopen("http://localhost:8199/v1/models", timeout=5)
+                served_model = json.loads(resp_raw.read())["data"][0]["id"]
+            except Exception:
+                served_model = hf_repo or model_path
+
+            return proc, capture, served_model, stop_tokens, None
+
+        # Strategy failed — classify the error
+        error_info = capture.classify_error(proc.returncode if proc.poll() is not None else -1)
+        error_class = error_info["error_class"]
+        log.warning("Strategy '%s' failed: %s (%s)", label, error_info["error"], error_class)
+
+        # Kill the failed process
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except Exception:
+                proc.kill()
+
+        # Decide whether to try next strategy based on error class
+        if error_class == "marlin_compat" and strategy_idx == 0:
+            log.info("Marlin error detected — next strategy forces explicit AWQ")
+            continue
+        elif error_class == "oom" and strategy_idx <= 1:
+            log.info("OOM detected — next strategy reduces context length")
+            continue
+        elif error_class in ("multi_gpu",) and strategy_idx == 0:
+            log.info("NCCL error — retrying same strategy once")
+            continue
+        elif error_class in ("unsupported", "weight_format", "missing_file", "trust_code"):
+            # These won't be fixed by changing vLLM flags
+            log.error("Non-recoverable error: %s — stopping fallback chain", error_class)
+            return None, capture, "", stop_tokens, error_info["error"]
+        else:
+            # Try next strategy anyway
+            continue
+
+    # All strategies exhausted
+    final_error = capture.classify_error(-1)
+    log.error("All vLLM strategies exhausted for %s", hf_repo)
+    return None, capture, "", stop_tokens, final_error["error"]
+
+
+def _preflight_check(served_model: str, stop_tokens: list[str],
+                     base_url: str = "http://localhost:8199/v1") -> tuple[bool, str]:
+    """Run a single inference call to verify vLLM is producing valid output.
+
+    Returns (ok, error_detail). If ok is True, the model is ready for audit.
+    """
+    import urllib.request
+    import urllib.error
+
+    payload = json.dumps({
+        "model": served_model,
+        "messages": [{"role": "user", "content": "Say hello in one sentence."}],
+        "max_tokens": 60,
+        "temperature": 0.0,
+        "stop": stop_tokens,
+    }).encode()
+
+    try:
+        req = urllib.request.Request(
+            f"{base_url}/chat/completions",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        resp = urllib.request.urlopen(req, timeout=120)
+        data = json.loads(resp.read())
+
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        if not content or not content.strip():
+            return False, "Pre-flight failed: model returned empty response"
+
+        # Check for role token leakage
+        garbage_tokens = ["assistant\n", "\nassistant", "\nuser\n", "<|im_end|>", "<|eot_id|>"]
+        for g in garbage_tokens:
+            if g in content:
+                return False, f"Pre-flight failed: response contains leaked template token '{g.strip()}'"
+
+        log.info("Pre-flight passed: model responded with %d chars", len(content))
+        return True, ""
+
+    except urllib.error.HTTPError as e:
+        return False, f"Pre-flight failed: vLLM returned HTTP {e.code}"
+    except Exception as e:
+        return False, f"Pre-flight failed: {e}"
+
+
 class RemoteLogHandler(logging.Handler):
     """Logging handler that buffers log lines and POSTs them to the orchestrator."""
 
@@ -329,6 +634,7 @@ def _run_api_endpoint_audit(
     endpoint_url: str,
     api_key: str,
     webhook_secret: str,
+    stop_tokens: list[str] | None = None,
 ) -> dict:
     """Run dual-pass Forge Parallax audit against an OpenAI-compatible API endpoint."""
     from forge.break_runner import BreakRunner
@@ -341,6 +647,7 @@ def _run_api_endpoint_audit(
         model=model_id or model_name,
         api_key=api_key,
         base_url=endpoint_url.rstrip("/"),
+        stop_tokens=stop_tokens,
     )
 
     log.info("LLM backend created: %s @ %s", model_id or model_name, endpoint_url)
@@ -520,144 +827,59 @@ def _run_model_weights_audit(
         log.info("Starting vLLM for model: %s", model_source)
         post_audit_progress(_fs, order_id, webhook_secret, "loading")
 
-        # ── Start vLLM server ──
-        vllm_env = os.environ.copy()
-        vllm_env["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"  # required for tensor parallelism
-        vllm_env["VLLM_MARLIN_USE_ATOMIC_ADD"] = "1"  # required for AWQ quantization
-        vllm_env["VLLM_USE_DEEP_GEMM"] = "0"  # CRITICAL: causes hangs on Hopper (H100) GPUs
-        vllm_env["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"] = "1"  # recommended for Hopper
-        # MoE-specific vars (VLLM_USE_V1, FLASHINFER_MOE, etc.) are passed per-model
-        # via custom_vllm_env from model registry — not set globally here
-        if hf_token:
-            vllm_env["HF_TOKEN"] = hf_token
+        # ── Start vLLM with fallback chain ──
+        import torch
+        gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 1
+        per_gpu_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3) if torch.cuda.is_available() else 48
 
-        # Apply customer-provided env vars (from enterprise intake form)
-        custom_env = custom_vllm_env
-        if custom_env:
-            for pair in custom_env.split(","):
+        # Build custom env from customer inputs
+        extra_env = {}
+        if hf_token:
+            extra_env["HF_TOKEN"] = hf_token
+        if custom_vllm_env:
+            for pair in custom_vllm_env.split(","):
                 pair = pair.strip()
                 if "=" in pair:
                     k, v = pair.split("=", 1)
-                    vllm_env[k.strip()] = v.strip()
-                    log.info("Custom env: %s=%s", k.strip(), v.strip())
+                    extra_env[k.strip()] = v.strip()
 
-        # Detect multi-GPU (RunPod sets NVIDIA_VISIBLE_DEVICES)
-        import torch
-        gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 1
-
-        # Detect per-GPU VRAM to select appropriate vLLM settings
-        per_gpu_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3) if torch.cuda.is_available() else 48
-        total_vram_gb = per_gpu_gb * gpu_count
-
-        vllm_cmd = [
-            "python", "-m", "vllm.entrypoints.openai.api_server",
-            "--model", model_source,
-            "--host", "0.0.0.0",
-            "--port", "8199",
-            "--trust-remote-code",
-        ]
-
-        # Memory-constrained settings for 48GB GPUs (A6000/L40S)
-        if per_gpu_gb < 60:
-            vllm_cmd += [
-                "--max-model-len", "4096",
-                "--gpu-memory-utilization", "0.95",
-                "--max-num-seqs", "4",
-                "--enforce-eager",
-            ]
-            log.info("48GB GPU mode: max-model-len=4096, gpu-mem=0.95, eager")
-        else:
-            # 80GB+ GPUs (A100/H100/H200)
-            # Use 4096 context — audit prompts are short, saves KV cache alloc time
-            # Customers don't need 65K context for behavioral testing
-            vllm_cmd += [
-                "--max-model-len", "4096",
-                "--gpu-memory-utilization", "0.95",
-                "--enforce-eager",
-            ]
-            log.info("80GB+ GPU mode: max-model-len=4096, gpu-mem=0.95, eager")
-
-        if gpu_count > 1:
-            vllm_cmd += ["--tensor-parallel-size", str(gpu_count)]
-            log.info("Multi-GPU: %d x %.0fGB = %.0fGB total, TP=%d", gpu_count, per_gpu_gb, total_vram_gb, gpu_count)
-
-        # Apply customer-provided vLLM flags (from enterprise intake form)
-        custom_flags = vllm_flags
-        if custom_flags:
-            import shlex
-            extra = shlex.split(custom_flags)
-            vllm_cmd += extra
-            log.info("Custom vLLM flags: %s", extra)
-
-        # Check if model has a chat template — older quants don't
-        _tpl = _resolve_chat_template(model_source, hf_repo)
-        if _tpl:
-            vllm_cmd += ["--chat-template", _tpl]
-            log.info("Using resolved chat template: %s", _tpl)
-
-        log.info("vLLM command: %s", " ".join(vllm_cmd))
-        vllm_proc = subprocess.Popen(
-            vllm_cmd, env=vllm_env,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        vllm_proc, capture, served_model, stop_tokens, start_error = _start_vllm_with_fallback(
+            model_path=model_source,
+            hf_repo=hf_repo,
+            gpu_count=gpu_count,
+            per_gpu_gb=per_gpu_gb,
+            custom_env=extra_env,
+            custom_flags=vllm_flags,
+            max_startup_minutes=60,
         )
 
-        # Stream vLLM stdout to log in a background thread
-        import threading
-        def _stream_vllm_output(proc):
-            try:
-                for raw_line in iter(proc.stdout.readline, b''):
-                    line = raw_line.decode(errors='replace').rstrip()
-                    if line:
-                        log.info("[vLLM] %s", line)
-            except Exception:
-                pass
-        _vllm_thread = threading.Thread(target=_stream_vllm_output, args=(vllm_proc,), daemon=True)
-        _vllm_thread.start()
-
-        # ── Wait for vLLM to be ready (poll /health) ──
-        import urllib.request
-        import urllib.error
-        vllm_ready = False
-        for attempt in range(720):  # up to 60 minutes (671B+ models need extended load time)
-            time.sleep(5)
-            if vllm_proc.poll() is not None:
-                log.error("vLLM exited during startup with code %s. Check [vLLM] log lines above.", vllm_proc.returncode)
-                return {
-                    "order_id": order_id, "model_index": model_index,
-                    "webhook_secret": webhook_secret, "status": "failed",
-                    "error": f"vLLM exited during startup (code {vllm_proc.returncode}). Output streamed to logs.",
-                }
-            try:
-                urllib.request.urlopen("http://localhost:8199/health", timeout=3)
-                vllm_ready = True
-                break
-            except (urllib.error.URLError, ConnectionError, OSError):
-                if attempt % 12 == 0:
-                    log.info("Waiting for vLLM... (%ds)", attempt * 5)
-                continue
-
-        if not vllm_ready:
-            vllm_proc.terminate()
-            log.error("vLLM startup timeout after 60 minutes (%d GPUs). Check [vLLM] log lines above.", gpu_count)
+        if start_error:
+            error_info = capture.classify_error(vllm_proc.returncode if vllm_proc else -1)
             return {
                 "order_id": order_id, "model_index": model_index,
                 "webhook_secret": webhook_secret, "status": "failed",
-                "error": f"vLLM failed to start within 60 minutes ({gpu_count} GPU(s)). vLLM output was streamed to logs.",
+                "error": start_error,
+                "error_class": error_info.get("error_class", "unknown"),
+                "vllm_last_lines": error_info.get("vllm_last_lines", []),
             }
 
-        log.info("vLLM ready, starting audit")
+        # ── Pre-flight validation ──
+        log.info("Running pre-flight check...")
+        post_audit_progress(_fs, order_id, webhook_secret, "preflight")
+        pf_ok, pf_error = _preflight_check(served_model, stop_tokens)
+        if not pf_ok:
+            log.error("Pre-flight failed: %s", pf_error)
+            if vllm_proc and vllm_proc.poll() is None:
+                vllm_proc.terminate()
+            return {
+                "order_id": order_id, "model_index": model_index,
+                "webhook_secret": webhook_secret, "status": "preflight_failed",
+                "error": pf_error,
+            }
 
-        # ── Detect served model name from vLLM ──
-        try:
-            resp_raw = urllib.request.urlopen("http://localhost:8199/v1/models", timeout=5)
-            import json as _json
-            models_resp = _json.loads(resp_raw.read())
-            served_model = models_resp["data"][0]["id"]
-            log.info("vLLM serving model as: %s", served_model)
-        except Exception:
-            served_model = model_id or model_name
+        log.info("Pre-flight passed, starting audit on %s", served_model)
 
-        # ── Run audit against local vLLM ──
+        # ── Run audit against local vLLM (with resolved stop tokens) ──
         return _run_api_endpoint_audit(
             order_id=order_id,
             model_index=model_index,
@@ -666,6 +888,7 @@ def _run_model_weights_audit(
             endpoint_url="http://localhost:8199/v1",
             api_key="not-needed",
             webhook_secret=webhook_secret,
+            stop_tokens=stop_tokens,
         )
 
     finally:
@@ -742,90 +965,55 @@ def _run_batch_break(
             local_path = snapshot_download(hf_repo, cache_dir="/tmp/hf_models")
             log.info("Downloaded to: %s", local_path)
 
-            # Start vLLM
+            # Start vLLM with fallback chain
             import torch
             gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 1
             per_gpu_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3) if torch.cuda.is_available() else 48
 
-            env = os.environ.copy()
-            env["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-            env["VLLM_MARLIN_USE_ATOMIC_ADD"] = "1"
-            env["VLLM_USE_DEEP_GEMM"] = "0"
-            env["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"] = "1"
+            extra_env = {}
             if vllm_env:
                 for pair in vllm_env.split(","):
                     pair = pair.strip()
                     if "=" in pair:
                         k, v = pair.split("=", 1)
-                        env[k.strip()] = v.strip()
+                        extra_env[k.strip()] = v.strip()
 
-            cmd = [
-                "python", "-m", "vllm.entrypoints.openai.api_server",
-                "--model", local_path,
-                "--host", "0.0.0.0", "--port", "8199",
-                "--trust-remote-code",
-                "--max-model-len", "4096",
-                "--gpu-memory-utilization", "0.95",
-                "--enforce-eager",
-            ]
-            if gpu_count > 1:
-                cmd += ["--tensor-parallel-size", str(gpu_count)]
+            vllm_proc, capture, served_model, stop_tokens, start_error = _start_vllm_with_fallback(
+                model_path=local_path,
+                hf_repo=hf_repo,
+                gpu_count=gpu_count,
+                per_gpu_gb=per_gpu_gb,
+                custom_env=extra_env,
+                max_startup_minutes=30,
+            )
 
-            # Check if model has a chat template — older quants don't
-            _tpl = _resolve_chat_template(local_path, hf_repo)
-            if _tpl:
-                cmd += ["--chat-template", _tpl]
-                log.info("Using resolved chat template: %s", _tpl)
-
-            log.info("vLLM command: %s", " ".join(cmd))
-            vllm_proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-
-            import threading
-            def _stream(proc):
-                try:
-                    for raw in iter(proc.stdout.readline, b''):
-                        line = raw.decode(errors='replace').rstrip()
-                        if line:
-                            log.info("[vLLM] %s", line)
-                except Exception:
-                    pass
-            threading.Thread(target=_stream, args=(vllm_proc,), daemon=True).start()
-
-            # Wait for ready
-            ready = False
-            for attempt in range(360):  # 30 min max
-                time.sleep(5)
-                if vllm_proc.poll() is not None:
-                    log.error("vLLM exited during startup for %s", hf_repo)
-                    break
-                try:
-                    urllib.request.urlopen("http://localhost:8199/health", timeout=3)
-                    ready = True
-                    break
-                except (urllib.error.URLError, ConnectionError, OSError):
-                    if attempt % 12 == 0:
-                        log.info("Waiting for vLLM... (%ds)", attempt * 5)
-
-            if not ready:
-                log.error("vLLM startup failed for %s", hf_repo)
-                results.append({"model": hf_repo, "status": "failed", "error": "vLLM startup failed"})
+            if start_error:
+                error_info = capture.classify_error(vllm_proc.returncode if vllm_proc else -1)
+                log.error("All vLLM strategies failed for %s: %s", hf_repo, start_error)
+                results.append({
+                    "model": hf_repo, "status": "failed",
+                    "error": start_error,
+                    "error_class": error_info.get("error_class", "unknown"),
+                    "vllm_last_lines": error_info.get("vllm_last_lines", [])[-10:],
+                })
                 continue
 
-            # Detect served model name
-            try:
-                resp_raw = urllib.request.urlopen("http://localhost:8199/v1/models", timeout=5)
-                import json as _json
-                served_model = _json.loads(resp_raw.read())["data"][0]["id"]
-            except Exception:
-                served_model = hf_repo
+            # Pre-flight validation
+            pf_ok, pf_error = _preflight_check(served_model, stop_tokens)
+            if not pf_ok:
+                log.error("Pre-flight failed for %s: %s", hf_repo, pf_error)
+                results.append({"model": hf_repo, "status": "failed", "error": pf_error})
+                if vllm_proc and vllm_proc.poll() is None:
+                    vllm_proc.terminate()
+                continue
 
-            log.info("vLLM ready, running break on %s", served_model)
+            log.info("vLLM ready + pre-flight passed, running break on %s", served_model)
 
-            # Run /break --full (break + assurance dual pass, uncertified)
             llm = OpenAIBackend(
                 model=served_model,
                 api_key="not-needed",
                 base_url="http://localhost:8199/v1",
+                stop_tokens=stop_tokens,
             )
 
             def _progress(current, total, scenario_id, passed, latency_ms):
