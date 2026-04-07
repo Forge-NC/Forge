@@ -482,6 +482,32 @@ def _preflight_check(served_model: str, stop_tokens: list[str],
         return False, f"Pre-flight failed: {e}"
 
 
+def _fetch_matrix_comparison(category_pass_rates: dict) -> dict | None:
+    """Fetch Matrix leaderboard data and compute comparative percentiles."""
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            f"{FORGE_API_SERVER}/audit_orchestrator.php?action=matrix_data",
+            headers={"X-Forge-Api-Secret": FORGE_API_SECRET},
+        )
+        resp = urllib.request.urlopen(req, timeout=15)
+        data = json.loads(resp.read())
+        matrix_models = data.get("models", [])
+        if not matrix_models:
+            log.info("Matrix comparison: no models in database yet")
+            return None
+
+        from forge.assurance_report import compute_matrix_comparison
+        comparison = compute_matrix_comparison(category_pass_rates, matrix_models)
+        log.info("Matrix comparison: percentile %.0f%% across %d models",
+                 comparison.get("overall_percentile", 0) * 100,
+                 comparison.get("models_compared", 0))
+        return comparison
+    except Exception as exc:
+        log.warning("Matrix comparison unavailable: %s", exc)
+        return None
+
+
 class RemoteLogHandler(logging.Handler):
     """Logging handler that buffers log lines and POSTs them to the orchestrator."""
 
@@ -724,7 +750,9 @@ def _run_api_endpoint_audit(
         progress_callback=_progress_assure,
     )
     _post("signing", 0, 0)
-    assure_report = generate_report(assure_run, config_dir=FORGE_CONFIG_DIR)
+    matrix_comp = _fetch_matrix_comparison(assure_run.category_pass_rates)
+    assure_report = generate_report(assure_run, config_dir=FORGE_CONFIG_DIR,
+                                    matrix_comparison=matrix_comp)
 
     log.info(
         "Assurance pass complete: %.1f%% (%d/%d)",
@@ -1058,7 +1086,9 @@ def _run_batch_break(
                 tier="power",
                 progress_callback=_progress,
             )
-            assure_report = generate_report(assure_run, config_dir=FORGE_CONFIG_DIR)
+            matrix_comp = _fetch_matrix_comparison(assure_run.category_pass_rates)
+            assure_report = generate_report(assure_run, config_dir=FORGE_CONFIG_DIR,
+                                            matrix_comparison=matrix_comp)
 
             log.info("Assurance complete for %s: %.1f%% (%d/%d)",
                      hf_repo, assure_run.pass_rate * 100,
