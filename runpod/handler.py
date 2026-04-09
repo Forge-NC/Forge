@@ -1018,19 +1018,39 @@ def _run_batch_break(
             if start_error:
                 error_info = capture.classify_error(vllm_proc.returncode if vllm_proc else -1)
                 log.error("All vLLM strategies failed for %s: %s", hf_repo, start_error)
-                results.append({
+                _fail = {
                     "model": hf_repo, "status": "failed",
                     "error": start_error,
                     "error_class": error_info.get("error_class", "unknown"),
                     "vllm_last_lines": error_info.get("vllm_last_lines", [])[-10:],
-                })
+                }
+                results.append(_fail)
+                try:
+                    urllib.request.urlopen(urllib.request.Request(
+                        f"{FORGE_API_SERVER}/audit_orchestrator.php?action=batch_result",
+                        data=json.dumps(_fail).encode(),
+                        headers={"Content-Type": "application/json",
+                                 "X-Forge-Api-Secret": FORGE_API_SECRET},
+                    ), timeout=10)
+                except Exception:
+                    pass
                 continue
 
             # Pre-flight validation
             pf_ok, pf_error = _preflight_check(served_model, stop_tokens)
             if not pf_ok:
                 log.error("Pre-flight failed for %s: %s", hf_repo, pf_error)
-                results.append({"model": hf_repo, "status": "failed", "error": pf_error})
+                _fail = {"model": hf_repo, "status": "failed", "error": pf_error}
+                results.append(_fail)
+                try:
+                    urllib.request.urlopen(urllib.request.Request(
+                        f"{FORGE_API_SERVER}/audit_orchestrator.php?action=batch_result",
+                        data=json.dumps(_fail).encode(),
+                        headers={"Content-Type": "application/json",
+                                 "X-Forge-Api-Secret": FORGE_API_SECRET},
+                    ), timeout=10)
+                except Exception:
+                    pass
                 if vllm_proc and vllm_proc.poll() is None:
                     vllm_proc.terminate()
                 continue
@@ -1129,19 +1149,44 @@ def _run_batch_break(
             completed.append(hf_repo)
             _completed_path.write_text(json.dumps(completed))
 
-            results.append({
+            _result = {
                 "model": hf_repo,
                 "status": "completed",
                 "run_id": break_result.run_id,
                 "run_id_paired": assure_report["run_id"],
                 "pass_rate": break_result.pass_rate,
+                "weighted_pass_rate": assure_run.weighted_pass_rate,
                 "scenarios_run": break_result.scenarios_run,
                 "scenarios_passed": break_result.scenarios_passed,
-            })
+            }
+            results.append(_result)
+
+            # Log result permanently to server
+            try:
+                urllib.request.urlopen(urllib.request.Request(
+                    f"{FORGE_API_SERVER}/audit_orchestrator.php?action=batch_result",
+                    data=json.dumps(_result).encode(),
+                    headers={"Content-Type": "application/json",
+                             "X-Forge-Api-Secret": FORGE_API_SECRET},
+                ), timeout=10)
+            except Exception:
+                log.warning("Failed to log batch result for %s", hf_repo)
 
         except Exception as exc:
             log.exception("Batch break failed for %s", hf_repo)
-            results.append({"model": hf_repo, "status": "failed", "error": str(exc)})
+            _fail = {"model": hf_repo, "status": "failed", "error": str(exc)}
+            results.append(_fail)
+
+            # Log failure permanently to server
+            try:
+                urllib.request.urlopen(urllib.request.Request(
+                    f"{FORGE_API_SERVER}/audit_orchestrator.php?action=batch_result",
+                    data=json.dumps(_fail).encode(),
+                    headers={"Content-Type": "application/json",
+                             "X-Forge-Api-Secret": FORGE_API_SECRET},
+                ), timeout=10)
+            except Exception:
+                pass
 
         finally:
             if vllm_proc and vllm_proc.poll() is None:
