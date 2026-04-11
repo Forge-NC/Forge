@@ -212,6 +212,9 @@ _VLLM_ERROR_PATTERNS = [
     ("ProcessGroupNCCL",                 "multi_gpu",      "Multi-GPU communication failed (NCCL) — transient, retrying"),
     ("FileNotFoundError",                "missing_file",   "Required model file not found after download"),
     ("trust_remote_code",                "trust_code",     "Model requires custom code that failed to load"),
+    ("max_model_len",                    "max_model_len",  "Requested context length exceeds model's maximum"),
+    ("max_position_embeddings",          "max_model_len",  "Requested context length exceeds model's maximum"),
+    ("does not recognize this architecture", "unsupported", "Model architecture not recognized by installed transformers version"),
 ]
 
 
@@ -499,13 +502,13 @@ def _start_vllm_with_fallback(
         if error_class == "marlin_compat" and strategy_idx == 0:
             log.info("Marlin error detected — next strategy forces explicit AWQ")
             continue
-        elif error_class == "oom" and strategy_idx <= 1:
-            log.info("OOM detected — next strategy reduces context length")
+        elif error_class in ("oom", "max_model_len") and strategy_idx <= 1:
+            log.info("%s detected — next strategy reduces context length", error_class)
             continue
         elif error_class in ("multi_gpu",) and strategy_idx == 0:
             log.info("NCCL error — retrying same strategy once")
             continue
-        elif error_class in ("unsupported", "weight_format", "missing_file", "trust_code"):
+        elif error_class in ("unsupported", "weight_format", "missing_file"):
             # These won't be fixed by changing vLLM flags
             log.error("Non-recoverable error: %s — stopping fallback chain", error_class)
             return None, capture, "", stop_tokens, error_info["error"]
