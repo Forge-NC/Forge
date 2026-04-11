@@ -110,6 +110,7 @@ jobs:
         if: success()
         env:
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          FORGE_API_SECRET: ${{ secrets.FORGE_API_SECRET }}
         run: |
           SHA="${{ steps.sha.outputs.short }}"
           IMAGE="ghcr.io/forge-nc/forge-audit-weights:${SHA}"
