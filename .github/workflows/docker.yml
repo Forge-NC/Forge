@@ -120,7 +120,7 @@ jobs:
             TPL_NAME="${entry##*:}"
             curl -s -H "Content-Type: application/json" -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
               "https://api.runpod.io/graphql" \
-              -d "{\"query\": \"mutation { saveTemplate(input: { id: \\\"${TPL_ID}\\\", name: \\\"${TPL_NAME}\\\", imageName: \\\"${IMAGE}\\\", dockerArgs: \\\"\\\", env: [], isServerless: true, containerDiskInGb: 500, volumeInGb: 0, startJupyter: false, startSsh: false }) { id imageName } }\"}" \
+              -d "{\"query\": \"mutation { saveTemplate(input: { id: \\\"${TPL_ID}\\\", name: \\\"${TPL_NAME}\\\", imageName: \\\"${IMAGE}\\\", dockerArgs: \\\"\\\", env: [{ key: \\\"FORGE_API_SECRET\\\", value: \\\"${FORGE_API_SECRET}\\\" }], isServerless: true, containerDiskInGb: 500, volumeInGb: 0, startJupyter: false, startSsh: false }) { id imageName } }\"}" \
               | jq -r '.data.saveTemplate.imageName // .errors[0].message'
           done
           echo "All templates updated to :${SHA}"
