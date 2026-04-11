@@ -514,10 +514,14 @@ def _start_vllm_with_fallback(
         elif error_class in ("multi_gpu",) and strategy_idx == 0:
             log.info("NCCL error — retrying same strategy once")
             continue
-        elif error_class in ("unsupported", "weight_format", "missing_file"):
-            # These won't be fixed by changing vLLM flags
+        elif error_class in ("weight_format", "missing_file"):
+            # These won't be fixed by changing vLLM flags OR transformers fallback
             log.error("Non-recoverable error: %s — stopping fallback chain", error_class)
             return None, capture, "", stop_tokens, error_info["error"]
+        elif error_class in ("unsupported", "trust_code"):
+            # vLLM can't handle this arch — skip remaining vLLM strategies, go straight to transformers fallback
+            log.warning("Architecture/code issue: %s — skipping to transformers fallback", error_class)
+            break
         else:
             # Try next strategy anyway
             continue
