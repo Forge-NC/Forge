@@ -353,10 +353,16 @@ def _strip_auto_map_if_native(model_path: str) -> bool:
         log.info("Model %s has auto_map with non-native arch %s — keeping custom code", model_path, arch)
         return False
 
+    # Back up original config (transformers fallback may need auto_map restored)
+    config_bak = Path(model_path) / "config.json.vllm_bak"
+    if not config_bak.exists():
+        import shutil
+        shutil.copy2(str(config_path), str(config_bak))
+
     # Strip auto_map so vLLM uses its native implementation
     del config["auto_map"]
     config_path.write_text(json.dumps(config, indent=2))
-    log.info("Stripped auto_map from %s — vLLM has native %s support", model_path, arch)
+    log.info("Stripped auto_map from %s — vLLM has native %s support (backup at config.json.vllm_bak)", model_path, arch)
     return True
 
 
@@ -516,10 +522,181 @@ def _start_vllm_with_fallback(
             # Try next strategy anyway
             continue
 
-    # All strategies exhausted
+    # All vLLM strategies exhausted — try transformers-direct fallback
+    log.warning("All vLLM strategies exhausted for %s — trying transformers-direct fallback", hf_repo)
+
+    try:
+        proc, served, fallback_error = _start_transformers_fallback(model_path, hf_repo, stop_tokens)
+        if proc and not fallback_error:
+            log.info("Transformers-direct fallback succeeded for %s", hf_repo)
+            return proc, capture, served, stop_tokens, None
+        if fallback_error:
+            log.error("Transformers-direct fallback also failed for %s: %s", hf_repo, fallback_error)
+    except Exception as fb_exc:
+        log.error("Transformers-direct fallback exception for %s: %s", hf_repo, fb_exc)
+
     final_error = capture.classify_error(-1)
-    log.error("All vLLM strategies exhausted for %s", hf_repo)
+    log.error("All strategies exhausted (including transformers fallback) for %s", hf_repo)
     return None, capture, "", stop_tokens, final_error["error"]
+
+
+def _start_transformers_fallback(
+    model_path: str, hf_repo: str, stop_tokens: list[str],
+) -> tuple["subprocess.Popen | None", str, str | None]:
+    """Last-resort fallback: serve the model via raw transformers + FastAPI.
+
+    Used when vLLM can't load the model (unsupported architecture in vLLM's
+    bundled transformers version). Loads via AutoModelForCausalLM with
+    trust_remote_code=True and serves an OpenAI-compatible chat completions endpoint.
+
+    Returns (proc, served_model_name, error_or_none).
+    """
+    import subprocess
+    import threading
+    import urllib.request
+    import urllib.error
+
+    # Restore auto_map if we stripped it — transformers needs it for custom architectures
+    config_path = Path(model_path) / "config.json"
+    config_bak = Path(model_path) / "config.json.vllm_bak"
+    if config_bak.exists():
+        # We backed up the original config before stripping auto_map
+        import shutil
+        shutil.copy2(str(config_bak), str(config_path))
+        log.info("Restored original config.json with auto_map for transformers fallback")
+
+    # Write a small FastAPI server that loads the model via transformers
+    server_script = Path("/tmp/.forge/transformers_server.py")
+    server_script.write_text(f'''
+import torch, json, sys, os
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+import uvicorn
+
+app = FastAPI()
+MODEL_PATH = "{model_path}"
+
+print("Loading model via transformers with trust_remote_code=True...", flush=True)
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_PATH, trust_remote_code=True,
+    torch_dtype=torch.float16, device_map="auto",
+    low_cpu_mem_usage=True,
+)
+model.eval()
+MODEL_NAME = "{hf_repo or model_path}"
+print(f"Model loaded: {{MODEL_NAME}}", flush=True)
+
+@app.get("/health")
+async def health():
+    return {{"status": "ok"}}
+
+@app.get("/v1/models")
+async def models():
+    return {{"data": [{{"id": MODEL_NAME}}]}}
+
+@app.post("/v1/chat/completions")
+async def chat(request: Request):
+    body = await request.json()
+    messages = body.get("messages", [])
+    max_tokens = body.get("max_tokens", 1024)
+    temperature = body.get("temperature", 0.0)
+    stop = body.get("stop", [])
+
+    # Apply chat template if available
+    if hasattr(tokenizer, "apply_chat_template"):
+        input_ids = tokenizer.apply_chat_template(messages, return_tensors="pt", add_generation_prompt=True)
+    else:
+        # Manual formatting
+        text = ""
+        for m in messages:
+            text += f"{{m['role']}}: {{m['content']}}\\n"
+        text += "assistant: "
+        input_ids = tokenizer(text, return_tensors="pt").input_ids
+
+    input_ids = input_ids.to(model.device)
+
+    with torch.no_grad():
+        gen_kwargs = dict(
+            max_new_tokens=max_tokens,
+            do_sample=temperature > 0,
+            temperature=max(temperature, 0.01),
+            pad_token_id=tokenizer.eos_token_id,
+        )
+        # Add stop token IDs
+        stop_ids = []
+        for s in stop:
+            ids = tokenizer.encode(s, add_special_tokens=False)
+            if ids:
+                stop_ids.extend(ids)
+        if tokenizer.eos_token_id:
+            stop_ids.append(tokenizer.eos_token_id)
+        if stop_ids:
+            gen_kwargs["eos_token_id"] = list(set(stop_ids))
+
+        output = model.generate(input_ids, **gen_kwargs)
+
+    new_tokens = output[0][input_ids.shape[1]:]
+    text = tokenizer.decode(new_tokens, skip_special_tokens=True)
+
+    return {{
+        "choices": [{{
+            "index": 0,
+            "message": {{"role": "assistant", "content": text}},
+            "finish_reason": "stop",
+        }}],
+        "model": MODEL_NAME,
+    }}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8199, log_level="info")
+''')
+
+    log.info("Starting transformers-direct fallback server for %s", hf_repo)
+    proc = subprocess.Popen(
+        ["python", str(server_script)],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    )
+
+    def _stream(p):
+        try:
+            for raw in iter(p.stdout.readline, b''):
+                line = raw.decode(errors='replace').rstrip()
+                if line:
+                    log.info("[TF-fallback] %s", line)
+        except Exception:
+            pass
+    threading.Thread(target=_stream, args=(proc,), daemon=True).start()
+
+    # Wait for health — transformers loading is slower than vLLM
+    ready = False
+    for attempt in range(360):  # 30 min
+        time.sleep(5)
+        if proc.poll() is not None:
+            return None, "", f"Transformers fallback server exited with code {proc.returncode}"
+        try:
+            urllib.request.urlopen("http://localhost:8199/health", timeout=3)
+            ready = True
+            break
+        except (urllib.error.URLError, ConnectionError, OSError):
+            if attempt % 12 == 0:
+                log.info("Waiting for transformers fallback server... (%ds)", attempt * 5)
+
+    if not ready:
+        if proc.poll() is None:
+            proc.terminate()
+        return None, "", "Transformers fallback server failed to start within 30 minutes"
+
+    # Detect served model name
+    try:
+        resp = urllib.request.urlopen("http://localhost:8199/v1/models", timeout=5)
+        served = json.loads(resp.read())["data"][0]["id"]
+    except Exception:
+        served = hf_repo or model_path
+
+    return proc, served, None
 
 
 def _preflight_check(served_model: str, stop_tokens: list[str],
