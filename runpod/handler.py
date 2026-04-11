@@ -35,6 +35,23 @@ _CHAT_TEMPLATES = {
         "{{ ' ' + message['content'] | trim + ' ' + eos_token }}"
         "{% endif %}{% endfor %}"
     ),
+    "mistral_v7": (
+        "{{ bos_token }}"
+        "{% if messages[0]['role'] == 'system' %}"
+        "{{ '[SYSTEM_PROMPT]' + messages[0]['content'] + '[/SYSTEM_PROMPT]' }}"
+        "{% set loop_messages = messages[1:] %}"
+        "{% else %}"
+        "{{ '[SYSTEM_PROMPT]You are a helpful assistant.[/SYSTEM_PROMPT]' }}"
+        "{% set loop_messages = messages %}"
+        "{% endif %}"
+        "{% for message in loop_messages %}"
+        "{% if message['role'] == 'user' %}"
+        "{{ '[INST]' + message['content'] + '[/INST]' }}"
+        "{% elif message['role'] == 'assistant' %}"
+        "{{ message['content'] + eos_token }}"
+        "{% endif %}"
+        "{% endfor %}"
+    ),
     "mistral": (
         "{% if messages[0]['role'] == 'system' %}"
         "{% set system_message = messages[0]['content'] | trim + '\\n\\n' %}"
@@ -83,8 +100,10 @@ _MODEL_TEMPLATE_MAP = [
     (r"llama-2.*chat", "llama2"),
     (r"codellama.*instruct", "llama2"),
     (r"airoboros", "llama2"),
-    # Mistral (v0.1 only — v0.2+ has template)
+    # Mistral family
     (r"mistral.*instruct.*v0\.1", "mistral"),
+    (r"mistral.*small.*instruct", "mistral_v7"),
+    (r"mistral.*instruct.*2501", "mistral_v7"),
     # ChatML family
     (r"openhermes", "chatml"),
     (r"dolphin", "chatml"),
@@ -263,9 +282,10 @@ def _resolve_stop_tokens(model_path: str, hf_repo: str = "") -> list[str]:
         for tid, tdata in cfg.get("added_tokens_decoder", {}).items():
             if tdata.get("special") and tdata.get("content"):
                 content = tdata["content"].strip()
-                # Only include tokens that look like template markers, not BOS/padding
+                # Include end-of-turn markers and role boundary tokens
                 if any(marker in content.lower() for marker in
-                       ["end", "eot", "eos", "turn", "im_end", "stop"]):
+                       ["end", "eot", "eos", "turn", "im_end", "stop",
+                        "inst", "assistant", "user", "system"]):
                     tokens.add(content)
 
         if tokens:
@@ -278,6 +298,63 @@ def _resolve_stop_tokens(model_path: str, hf_repo: str = "") -> list[str]:
 
     log.info("Using universal stop token fallback for %s", hf_repo or model_path)
     return universal
+
+
+# Architectures that vLLM supports natively — no custom code needed.
+# If a model has auto_map pointing to custom code for one of these,
+# strip it so vLLM uses its own optimized implementation instead of
+# potentially broken custom code from the HuggingFace repo.
+_VLLM_NATIVE_ARCHITECTURES = {
+    "LlamaForCausalLM", "MistralForCausalLM", "Qwen2ForCausalLM",
+    "Qwen3ForCausalLM", "Phi3ForCausalLM", "Gemma2ForCausalLM",
+    "ExaoneForCausalLM", "DeepseekV2ForCausalLM", "DeepseekV3ForCausalLM",
+    "FalconForCausalLM", "GPTNeoXForCausalLM", "MptForCausalLM",
+    "StableLmForCausalLM", "StarcoderForCausalLM", "ChatGLMForCausalLM",
+    "InternLMForCausalLM", "InternLM2ForCausalLM", "BaichuanForCausalLM",
+    "MixtralForCausalLM", "OlmoForCausalLM", "Phi3SmallForCausalLM",
+    "CohereForCausalLM", "DbrxForCausalLM", "JambaForCausalLM",
+    "ArcticForCausalLM", "GraniteForCausalLM",
+}
+
+
+def _strip_auto_map_if_native(model_path: str) -> bool:
+    """Strip auto_map from config.json if vLLM has native support for the architecture.
+
+    Many HuggingFace model repos include custom modeling code via auto_map
+    that was written for a specific transformers version. When the Docker image
+    has a different transformers version, this custom code crashes on import —
+    even though vLLM has its own native implementation that works fine.
+
+    Returns True if auto_map was stripped.
+    """
+    config_path = Path(model_path) / "config.json"
+    if not config_path.exists():
+        return False
+
+    try:
+        config = json.loads(config_path.read_text())
+    except Exception:
+        return False
+
+    auto_map = config.get("auto_map", {})
+    if not auto_map:
+        return False
+
+    # Check if the architecture is natively supported
+    architectures = config.get("architectures", [])
+    if not architectures:
+        return False
+
+    arch = architectures[0]
+    if arch not in _VLLM_NATIVE_ARCHITECTURES:
+        log.info("Model %s has auto_map with non-native arch %s — keeping custom code", model_path, arch)
+        return False
+
+    # Strip auto_map so vLLM uses its native implementation
+    del config["auto_map"]
+    config_path.write_text(json.dumps(config, indent=2))
+    log.info("Stripped auto_map from %s — vLLM has native %s support", model_path, arch)
+    return True
 
 
 def _start_vllm_with_fallback(
@@ -305,6 +382,11 @@ def _start_vllm_with_fallback(
     import urllib.error
 
     capture = VllmOutputCapture()
+
+    # Strip auto_map from config.json if vLLM has native support for the architecture.
+    # Prevents crashes from broken custom code in HuggingFace repos.
+    _strip_auto_map_if_native(model_path)
+
     stop_tokens = _resolve_stop_tokens(model_path, hf_repo)
 
     # Resolve chat template
