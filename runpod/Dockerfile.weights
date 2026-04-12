@@ -22,19 +22,21 @@ RUN pip install --no-cache-dir \
     cryptography>=41.0 \
     tiktoken>=0.7
 
-# Transformers fallback — isolated venv so it doesn't break vLLM's bundled transformers.
-# vLLM 0.19 bundles an older transformers that can't load some architectures (exaone,
-# glm4_moe_lite). The fallback serves these models via raw transformers + FastAPI.
-# transformers 5.x is required for GLM support. We use autoawq (not gptqmodel) for AWQ
-# since gptqmodel requires nvidia-smi at build time which isn't available in CI.
-# --system-site-packages shares torch/cuda from the base image (no 2GB torch reinstall).
-RUN python -m venv --system-site-packages /opt/forge-fallback && \
+# Transformers fallback — fully isolated venv so it doesn't inherit vLLM's old transformers.
+# vLLM 0.19 bundles transformers 4.x which can't load exaone or glm4_moe_lite architectures.
+# The fallback serves these models via transformers 5.x + FastAPI in a separate process.
+# Must NOT use --system-site-packages (system transformers shadows venv's 5.x install).
+# Torch is symlinked from system to avoid a 2GB reinstall while keeping import isolation.
+RUN python -m venv /opt/forge-fallback && \
+    ln -s /usr/local/lib/python3.12/dist-packages/torch /opt/forge-fallback/lib/python3.12/site-packages/torch && \
+    ln -s /usr/local/lib/python3.12/dist-packages/torch-*.dist-info /opt/forge-fallback/lib/python3.12/site-packages/ 2>/dev/null; \
     /opt/forge-fallback/bin/pip install --no-cache-dir \
     "transformers>=5.0" \
     accelerate \
     autoawq \
     fastapi \
-    uvicorn
+    uvicorn && \
+    /opt/forge-fallback/bin/python -c "import transformers; v=transformers.__version__; print(f'Fallback transformers: {v}'); assert int(v.split(\".\")[0])>=5, f'Expected 5.x, got {v}'"
 
 # Copy Forge package (changes frequently — keep last for cache efficiency)
 COPY forge/ /app/forge/
