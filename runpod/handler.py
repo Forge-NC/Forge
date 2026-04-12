@@ -585,7 +585,7 @@ try:
     import subprocess
     print("Upgrading transformers + huggingface_hub for model compatibility...", flush=True)
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
-        "--force-reinstall", "--no-deps",
+        "--force-reinstall",
         "git+https://github.com/huggingface/transformers.git"], timeout=300)
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
         "--upgrade", "huggingface_hub", "accelerate"], timeout=120)
@@ -695,22 +695,29 @@ except Exception as exc:
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
     )
 
+    fb_lines = []  # capture fallback output for diagnostics
+
     def _stream(p):
         try:
             for raw in iter(p.stdout.readline, b''):
                 line = raw.decode(errors='replace').rstrip()
                 if line:
                     log.info("[TF-fallback] %s", line)
+                    fb_lines.append(line)
         except Exception:
             pass
-    threading.Thread(target=_stream, args=(proc,), daemon=True).start()
+    stream_thread = threading.Thread(target=_stream, args=(proc,), daemon=True)
+    stream_thread.start()
 
     # Wait for health — transformers loading is slower than vLLM
     ready = False
     for attempt in range(360):  # 30 min
         time.sleep(5)
         if proc.poll() is not None:
-            return None, "", f"Transformers fallback server exited with code {proc.returncode}"
+            # Process died — wait for stream to finish reading remaining output
+            stream_thread.join(timeout=3)
+            fb_tail = "; ".join(fb_lines[-5:]) if fb_lines else "no output captured"
+            return None, "", f"Transformers fallback server exited with code {proc.returncode}: {fb_tail}"
         try:
             urllib.request.urlopen("http://localhost:8199/health", timeout=3)
             ready = True
@@ -788,8 +795,16 @@ def _preflight_check(served_model: str, stop_tokens: list[str],
                 data=payload2,
                 headers={"Content-Type": "application/json"},
             )
-            resp2 = urllib.request.urlopen(req2, timeout=120)
-            data2 = json.loads(resp2.read())
+            try:
+                resp2 = urllib.request.urlopen(req2, timeout=120)
+                data2 = json.loads(resp2.read())
+            except urllib.error.HTTPError as e2:
+                body = ""
+                try:
+                    body = e2.read().decode(errors="replace")[:500]
+                except Exception:
+                    pass
+                return False, f"Pre-flight retry failed: vLLM HTTP {e2.code}: {body}"
             content2 = data2.get("choices", [{}])[0].get("message", {}).get("content", "")
             still_leaked = [g.strip() for g in garbage_tokens if g in content2]
             if still_leaked:
@@ -801,7 +816,12 @@ def _preflight_check(served_model: str, stop_tokens: list[str],
         return True, ""
 
     except urllib.error.HTTPError as e:
-        return False, f"Pre-flight failed: vLLM returned HTTP {e.code}"
+        body = ""
+        try:
+            body = e.read().decode(errors="replace")[:500]
+        except Exception:
+            pass
+        return False, f"Pre-flight failed: vLLM HTTP {e.code}: {body}"
     except Exception as e:
         return False, f"Pre-flight failed: {e}"
 
