@@ -28,7 +28,7 @@ RUN pip install --no-cache-dir \
 # though a system version exists, and --no-deps avoids pulling conflicting transitive deps.
 RUN python -m venv --system-site-packages /opt/forge-fallback && \
     /opt/forge-fallback/bin/pip install --no-cache-dir \
-    --force-reinstall --no-deps "transformers>=5.0" && \
+    --force-reinstall --no-deps "transformers>=5.0" "huggingface_hub>=0.30" && \
     /opt/forge-fallback/bin/pip install --no-cache-dir \
     accelerate fastapi uvicorn && \
     /opt/forge-fallback/bin/python -c "import transformers,sys; v=transformers.__version__; f=transformers.__file__; print(f'Fallback transformers {v} from {f}'); assert int(v.split('.')[0])>=5, f'Expected 5.x got {v}'; assert 'forge-fallback' in f, f'Wrong path: {f}'"
