@@ -618,6 +618,17 @@ def _start_transformers_fallback(
     server_script.write_text(f'''
 import sys, traceback
 try:
+    # gptqmodel requires nvidia-smi at build time so it can't be baked into the Docker
+    # image (CI has no GPU). Install it here on the RunPod worker where nvidia-smi exists.
+    # Only runs once — subsequent loads use the cached install.
+    try:
+        import gptqmodel
+    except ImportError:
+        import subprocess
+        print("Installing gptqmodel (requires GPU, can't be pre-built in CI)...", flush=True)
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "gptqmodel"], timeout=300)
+        print("gptqmodel installed.", flush=True)
+
     import transformers
     print(f"Transformers version: {{transformers.__version__}}", flush=True)
 
