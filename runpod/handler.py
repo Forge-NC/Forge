@@ -604,14 +604,38 @@ def _start_transformers_fallback(
     import urllib.request
     import urllib.error
 
-    # Restore auto_map if we stripped it — transformers needs it for custom architectures
+    # Only restore auto_map if the baked-in transformers does NOT natively support
+    # this architecture. Models like EXAONE ship custom code written for transformers
+    # 5.x (imports RopeParameters etc.) which crashes on our 4.x fallback. Since
+    # transformers 4.57.6 has native ExaoneForCausalLM, we don't need the custom code.
     config_path = Path(model_path) / "config.json"
     config_bak = Path(model_path) / "config.json.vllm_bak"
     if config_bak.exists():
-        # We backed up the original config before stripping auto_map
-        import shutil
-        shutil.copy2(str(config_bak), str(config_path))
-        log.info("Restored original config.json with auto_map for transformers fallback")
+        try:
+            cfg = json.loads(config_path.read_text())
+            archs = cfg.get("architectures", [])
+            # Check if our baked-in transformers supports this architecture natively
+            from transformers import AutoConfig
+            native = False
+            for a in archs:
+                try:
+                    # If AutoConfig can resolve the model_type without custom code, it's native
+                    AutoConfig.for_model(cfg.get("model_type", ""))
+                    native = True
+                    break
+                except Exception:
+                    pass
+            if native:
+                log.info("Transformers natively supports %s — keeping stripped config (no auto_map)", archs)
+            else:
+                import shutil
+                shutil.copy2(str(config_bak), str(config_path))
+                log.info("Restored original config.json with auto_map for transformers fallback")
+        except Exception as exc:
+            # If we can't determine, restore to be safe
+            import shutil
+            shutil.copy2(str(config_bak), str(config_path))
+            log.warning("Could not check native support, restoring auto_map: %s", exc)
 
     # Write a small FastAPI server that loads the model via transformers
     server_script = Path("/tmp/.forge/transformers_server.py")
