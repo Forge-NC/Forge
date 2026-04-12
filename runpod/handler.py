@@ -317,7 +317,39 @@ _VLLM_NATIVE_ARCHITECTURES = {
     "MixtralForCausalLM", "OlmoForCausalLM", "Phi3SmallForCausalLM",
     "CohereForCausalLM", "DbrxForCausalLM", "JambaForCausalLM",
     "ArcticForCausalLM", "GraniteForCausalLM",
+    # GLM family (vLLM 0.19+)
+    "Glm4MoeLiteForCausalLM", "Glm4MoeForCausalLM", "ChatGLMModel",
 }
+
+
+def _is_vllm_known_arch(model_path: str) -> bool:
+    """Check if vLLM recognizes this model's architecture natively.
+
+    Reads architectures from config.json and checks against vLLM's model
+    registry. If vLLM knows the architecture, it can handle chat templates,
+    stop tokens, and other model-specific configuration itself.
+    """
+    try:
+        cfg = json.loads((Path(model_path) / "config.json").read_text())
+        archs = cfg.get("architectures", [])
+        if not archs:
+            return False
+        # Check if ANY of the model's architectures are in our known set
+        # OR if vLLM's model registry can resolve it
+        if any(a in _VLLM_NATIVE_ARCHITECTURES for a in archs):
+            return True
+        # Also try vLLM's own registry
+        if HAS_VLLM:
+            try:
+                from vllm.model_executor.models import ModelRegistry
+                for a in archs:
+                    if ModelRegistry.is_text_generation_model(a):
+                        return True
+            except Exception:
+                pass
+        return False
+    except Exception:
+        return False
 
 
 def _strip_auto_map_if_native(model_path: str) -> bool:
@@ -421,7 +453,11 @@ def _start_vllm_with_fallback(
     ]
     if gpu_count > 1:
         base_cmd += ["--tensor-parallel-size", str(gpu_count)]
-    if tpl:
+    # Only force a chat template if the model doesn't have one natively.
+    # vLLM handles templates for models it recognizes — overriding with a
+    # generic fallback template (e.g. ChatML) breaks models like GLM that
+    # have their own formatting. Only use our template for truly unknown models.
+    if tpl and not _is_vllm_known_arch(model_path):
         base_cmd += ["--chat-template", tpl]
     if custom_flags:
         import shlex
