@@ -1418,23 +1418,59 @@ def _run_batch_break(
             # Pre-flight validation
             pf_ok, pf_error = _preflight_check(served_model, stop_tokens)
             if not pf_ok:
-                log.error("Pre-flight failed for %s: %s", hf_repo, pf_error)
-                _fail = {"model": hf_repo, "status": "failed", "error": pf_error}
-                results.append(_fail)
-                try:
-                    urllib.request.urlopen(urllib.request.Request(
-                        f"{FORGE_API_SERVER}/audit_orchestrator.php?action=batch_result",
-                        data=json.dumps(_fail).encode(),
-                        headers={"Content-Type": "application/json",
-                                 "X-Forge-Api-Secret": FORGE_API_SECRET},
-                    ), timeout=10)
-                except Exception:
-                    pass
+                log.warning("Pre-flight failed for %s on vLLM: %s — trying transformers fallback", hf_repo, pf_error)
+                # Shut down vLLM before trying fallback
                 if vllm_proc and vllm_proc.poll() is None:
+                    log.info("Shutting down vLLM for %s", hf_repo)
                     vllm_proc.terminate()
-                continue
+                    try:
+                        vllm_proc.wait(timeout=10)
+                    except Exception:
+                        vllm_proc.kill()
 
-            log.info("vLLM ready + pre-flight passed, running break on %s", served_model)
+                # Try transformers fallback — vLLM loaded but can't serve this model correctly
+                fb_proc, fb_served, fb_error = _start_transformers_fallback(model_path, hf_repo, stop_tokens)
+                if fb_proc and not fb_error:
+                    # Re-run preflight on fallback
+                    pf_ok2, pf_error2 = _preflight_check(fb_served, stop_tokens, base_url="http://localhost:8199/v1")
+                    if pf_ok2:
+                        log.info("Transformers fallback pre-flight passed for %s", hf_repo)
+                        served_model = fb_served
+                        vllm_proc = fb_proc  # track for cleanup
+                    else:
+                        log.error("Transformers fallback also failed pre-flight for %s: %s", hf_repo, pf_error2)
+                        if fb_proc.poll() is None:
+                            fb_proc.terminate()
+                        _fail = {"model": hf_repo, "status": "failed",
+                                 "error": f"vLLM preflight: {pf_error}; fallback preflight: {pf_error2}"}
+                        results.append(_fail)
+                        try:
+                            urllib.request.urlopen(urllib.request.Request(
+                                f"{FORGE_API_SERVER}/audit_orchestrator.php?action=batch_result",
+                                data=json.dumps(_fail).encode(),
+                                headers={"Content-Type": "application/json",
+                                         "X-Forge-Api-Secret": FORGE_API_SECRET},
+                            ), timeout=10)
+                        except Exception:
+                            pass
+                        continue
+                else:
+                    log.error("Transformers fallback failed to start for %s: %s", hf_repo, fb_error)
+                    _fail = {"model": hf_repo, "status": "failed",
+                             "error": f"vLLM preflight: {pf_error}; fallback: {fb_error}"}
+                    results.append(_fail)
+                    try:
+                        urllib.request.urlopen(urllib.request.Request(
+                            f"{FORGE_API_SERVER}/audit_orchestrator.php?action=batch_result",
+                            data=json.dumps(_fail).encode(),
+                            headers={"Content-Type": "application/json",
+                                     "X-Forge-Api-Secret": FORGE_API_SECRET},
+                        ), timeout=10)
+                    except Exception:
+                        pass
+                    continue
+
+            log.info("Pre-flight passed, running break on %s (model: %s)", hf_repo, served_model)
 
             llm = OpenAIBackend(
                 model=served_model,
