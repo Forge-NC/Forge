@@ -580,96 +580,113 @@ def _start_transformers_fallback(
     # Write a small FastAPI server that loads the model via transformers
     server_script = Path("/tmp/.forge/transformers_server.py")
     server_script.write_text(f'''
-import subprocess, sys
-print("Upgrading transformers + huggingface_hub for model compatibility...", flush=True)
-subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
-    "git+https://github.com/huggingface/transformers.git", "huggingface_hub", "--upgrade"])
-print("Transformers upgraded.", flush=True)
+import sys, traceback
+try:
+    import subprocess
+    print("Upgrading transformers + huggingface_hub for model compatibility...", flush=True)
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
+        "--force-reinstall", "--no-deps",
+        "git+https://github.com/huggingface/transformers.git"], timeout=300)
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
+        "--upgrade", "huggingface_hub", "accelerate"], timeout=120)
+    print("Transformers upgraded.", flush=True)
 
-import torch, json, os
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-import uvicorn
+    import transformers
+    print(f"Transformers version: {{transformers.__version__}}", flush=True)
 
-app = FastAPI()
-MODEL_PATH = "{model_path}"
+    import torch, json, os
+    from fastapi import FastAPI, Request
+    from fastapi.responses import JSONResponse
+    import uvicorn
 
-print("Loading model via transformers with trust_remote_code=True...", flush=True)
-from transformers import AutoModelForCausalLM, AutoTokenizer
+    app = FastAPI()
+    MODEL_PATH = "{model_path}"
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_PATH, trust_remote_code=True,
-    torch_dtype=torch.float16, device_map="auto",
-    low_cpu_mem_usage=True,
-)
-model.eval()
-MODEL_NAME = "{hf_repo or model_path}"
-print(f"Model loaded: {{MODEL_NAME}}", flush=True)
+    print(f"Loading model from {{MODEL_PATH}} via transformers with trust_remote_code=True...", flush=True)
+    from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 
-@app.get("/health")
-async def health():
-    return {{"status": "ok"}}
+    # Check config first to diagnose architecture issues
+    config = AutoConfig.from_pretrained(MODEL_PATH, trust_remote_code=True)
+    print(f"Model config loaded: model_type={{config.model_type}}, arch={{getattr(config, 'architectures', ['unknown'])}}", flush=True)
 
-@app.get("/v1/models")
-async def models():
-    return {{"data": [{{"id": MODEL_NAME}}]}}
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_PATH, trust_remote_code=True,
+        torch_dtype=torch.float16, device_map="auto",
+        low_cpu_mem_usage=True,
+    )
+    model.eval()
+    MODEL_NAME = "{hf_repo or model_path}"
+    print(f"Model loaded: {{MODEL_NAME}}", flush=True)
 
-@app.post("/v1/chat/completions")
-async def chat(request: Request):
-    body = await request.json()
-    messages = body.get("messages", [])
-    max_tokens = body.get("max_tokens", 1024)
-    temperature = body.get("temperature", 0.0)
-    stop = body.get("stop", [])
+    @app.get("/health")
+    async def health():
+        return {{"status": "ok"}}
 
-    # Apply chat template if available
-    if hasattr(tokenizer, "apply_chat_template"):
-        input_ids = tokenizer.apply_chat_template(messages, return_tensors="pt", add_generation_prompt=True)
-    else:
-        # Manual formatting
-        text = ""
-        for m in messages:
-            text += f"{{m['role']}}: {{m['content']}}\\n"
-        text += "assistant: "
-        input_ids = tokenizer(text, return_tensors="pt").input_ids
+    @app.get("/v1/models")
+    async def models():
+        return {{"data": [{{"id": MODEL_NAME}}]}}
 
-    input_ids = input_ids.to(model.device)
+    @app.post("/v1/chat/completions")
+    async def chat(request: Request):
+        body = await request.json()
+        messages = body.get("messages", [])
+        max_tokens = body.get("max_tokens", 1024)
+        temperature = body.get("temperature", 0.0)
+        stop = body.get("stop", [])
 
-    with torch.no_grad():
-        gen_kwargs = dict(
-            max_new_tokens=max_tokens,
-            do_sample=temperature > 0,
-            temperature=max(temperature, 0.01),
-            pad_token_id=tokenizer.eos_token_id,
-        )
-        # Add stop token IDs
-        stop_ids = []
-        for s in stop:
-            ids = tokenizer.encode(s, add_special_tokens=False)
-            if ids:
-                stop_ids.extend(ids)
-        if tokenizer.eos_token_id:
-            stop_ids.append(tokenizer.eos_token_id)
-        if stop_ids:
-            gen_kwargs["eos_token_id"] = list(set(stop_ids))
+        # Apply chat template if available
+        if hasattr(tokenizer, "apply_chat_template"):
+            input_ids = tokenizer.apply_chat_template(messages, return_tensors="pt", add_generation_prompt=True)
+        else:
+            # Manual formatting
+            text = ""
+            for m in messages:
+                text += f"{{m['role']}}: {{m['content']}}\\n"
+            text += "assistant: "
+            input_ids = tokenizer(text, return_tensors="pt").input_ids
 
-        output = model.generate(input_ids, **gen_kwargs)
+        input_ids = input_ids.to(model.device)
 
-    new_tokens = output[0][input_ids.shape[1]:]
-    text = tokenizer.decode(new_tokens, skip_special_tokens=True)
+        with torch.no_grad():
+            gen_kwargs = dict(
+                max_new_tokens=max_tokens,
+                do_sample=temperature > 0,
+                temperature=max(temperature, 0.01),
+                pad_token_id=tokenizer.eos_token_id,
+            )
+            # Add stop token IDs
+            stop_ids = []
+            for s in stop:
+                ids = tokenizer.encode(s, add_special_tokens=False)
+                if ids:
+                    stop_ids.extend(ids)
+            if tokenizer.eos_token_id:
+                stop_ids.append(tokenizer.eos_token_id)
+            if stop_ids:
+                gen_kwargs["eos_token_id"] = list(set(stop_ids))
 
-    return {{
-        "choices": [{{
-            "index": 0,
-            "message": {{"role": "assistant", "content": text}},
-            "finish_reason": "stop",
-        }}],
-        "model": MODEL_NAME,
-    }}
+            output = model.generate(input_ids, **gen_kwargs)
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8199, log_level="info")
+        new_tokens = output[0][input_ids.shape[1]:]
+        text = tokenizer.decode(new_tokens, skip_special_tokens=True)
+
+        return {{
+            "choices": [{{
+                "index": 0,
+                "message": {{"role": "assistant", "content": text}},
+                "finish_reason": "stop",
+            }}],
+            "model": MODEL_NAME,
+        }}
+
+    if __name__ == "__main__":
+        uvicorn.run(app, host="0.0.0.0", port=8199, log_level="info")
+
+except Exception as exc:
+    print(f"FATAL: Transformers fallback server crashed: {{exc}}", flush=True)
+    traceback.print_exc()
+    sys.exit(1)
 ''')
 
     log.info("Starting transformers-direct fallback server for %s", hf_repo)
@@ -747,11 +764,38 @@ def _preflight_check(served_model: str, stop_tokens: list[str],
         if not content or not content.strip():
             return False, "Pre-flight failed: model returned empty response"
 
-        # Check for role token leakage
-        garbage_tokens = ["assistant\n", "\nassistant", "\nuser\n", "<|im_end|>", "<|eot_id|>"]
-        for g in garbage_tokens:
-            if g in content:
-                return False, f"Pre-flight failed: response contains leaked template token '{g.strip()}'"
+        # Check for role token leakage — auto-fix by adding to stop tokens
+        garbage_tokens = ["assistant\n", "\nassistant", "\nuser\n", "<|im_end|>", "<|eot_id|>",
+                          "</s>", "<|end|>", "<|endoftext|>", "<end_of_turn>", "[|endofturn|]"]
+        leaked = [g.strip() for g in garbage_tokens if g in content]
+        if leaked:
+            # Add leaked tokens to stop list and retry once
+            for tok in leaked:
+                if tok not in stop_tokens:
+                    stop_tokens.append(tok)
+                    log.warning("Pre-flight: auto-adding leaked token '%s' to stop list", tok)
+
+            # Retry with updated stop tokens
+            payload2 = json.dumps({
+                "model": served_model,
+                "messages": [{"role": "user", "content": "Say hello in one sentence."}],
+                "max_tokens": 60,
+                "temperature": 0.0,
+                "stop": stop_tokens,
+            }).encode()
+            req2 = urllib.request.Request(
+                f"{base_url}/chat/completions",
+                data=payload2,
+                headers={"Content-Type": "application/json"},
+            )
+            resp2 = urllib.request.urlopen(req2, timeout=120)
+            data2 = json.loads(resp2.read())
+            content2 = data2.get("choices", [{}])[0].get("message", {}).get("content", "")
+            still_leaked = [g.strip() for g in garbage_tokens if g in content2]
+            if still_leaked:
+                return False, f"Pre-flight failed: response still contains leaked tokens after auto-fix: {still_leaked}"
+            log.info("Pre-flight passed after auto-fixing stop tokens: added %s", leaked)
+            return True, ""
 
         log.info("Pre-flight passed: model responded with %d chars", len(content))
         return True, ""

@@ -4,7 +4,7 @@
 
   "small": {
     "_tier": "1x A6000 48GB, $0.76/hr",
-    "_endpoint": "saxvu76pwg997x",
+    "_endpoint": "s2wbjddsuvzgno",
     "_max_awq_params": "~30B (realistic with KV cache headroom)",
     "_estimated_time": "~5 hours for all models",
     "_estimated_cost": "~$4",
