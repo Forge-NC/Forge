@@ -650,7 +650,8 @@ try:
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_PATH, trust_remote_code=True,
-        torch_dtype=torch.float16, device_map="auto",
+        torch_dtype=torch.float16,
+        device_map="cuda:0" if torch.cuda.device_count()==1 else "auto",
         low_cpu_mem_usage=True,
     )
     model.eval()
@@ -1440,7 +1441,7 @@ def _run_batch_break(
                         vllm_proc.kill()
 
                 # Try transformers fallback — vLLM loaded but can't serve this model correctly
-                fb_proc, fb_served, fb_error = _start_transformers_fallback(model_path, hf_repo, stop_tokens)
+                fb_proc, fb_served, fb_error = _start_transformers_fallback(local_path, hf_repo, stop_tokens)
                 if fb_proc and not fb_error:
                     # Re-run preflight on fallback
                     pf_ok2, pf_error2 = _preflight_check(fb_served, stop_tokens, base_url="http://localhost:8199/v1")
