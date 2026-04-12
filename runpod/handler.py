@@ -572,7 +572,13 @@ def _start_transformers_fallback(
     # Write a small FastAPI server that loads the model via transformers
     server_script = Path("/tmp/.forge/transformers_server.py")
     server_script.write_text(f'''
-import torch, json, sys, os
+import subprocess, sys
+print("Upgrading transformers for model compatibility...", flush=True)
+subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "--no-deps",
+    "git+https://github.com/huggingface/transformers.git"])
+print("Transformers upgraded.", flush=True)
+
+import torch, json, os
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import uvicorn
