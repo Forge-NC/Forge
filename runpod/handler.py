@@ -573,9 +573,9 @@ def _start_transformers_fallback(
     server_script = Path("/tmp/.forge/transformers_server.py")
     server_script.write_text(f'''
 import subprocess, sys
-print("Upgrading transformers for model compatibility...", flush=True)
-subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "--no-deps",
-    "git+https://github.com/huggingface/transformers.git"])
+print("Upgrading transformers + huggingface_hub for model compatibility...", flush=True)
+subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
+    "git+https://github.com/huggingface/transformers.git", "huggingface_hub", "--upgrade"])
 print("Transformers upgraded.", flush=True)
 
 import torch, json, os
