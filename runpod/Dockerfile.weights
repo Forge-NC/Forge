@@ -25,14 +25,14 @@ RUN pip install --no-cache-dir \
 # Transformers fallback — isolated venv so it doesn't break vLLM's bundled transformers.
 # vLLM 0.19 bundles an older transformers that can't load some architectures (exaone,
 # glm4_moe_lite). The fallback serves these models via raw transformers + FastAPI.
-# transformers 5.x is required for GLM support, and uses gptqmodel (not autoawq) for AWQ.
-# Isolated in /opt/forge-fallback so vLLM's Python environment is untouched.
-RUN python -m venv /opt/forge-fallback && \
+# transformers 5.x is required for GLM support. We use autoawq (not gptqmodel) for AWQ
+# since gptqmodel requires nvidia-smi at build time which isn't available in CI.
+# --system-site-packages shares torch/cuda from the base image (no 2GB torch reinstall).
+RUN python -m venv --system-site-packages /opt/forge-fallback && \
     /opt/forge-fallback/bin/pip install --no-cache-dir \
     "transformers>=5.0" \
     accelerate \
-    gptqmodel \
-    torch \
+    autoawq \
     fastapi \
     uvicorn
 
