@@ -11,7 +11,7 @@ FORGE_SERVER = "https://forge-nc.dev"
 CTX = ssl.create_default_context()
 
 ENDPOINTS = {
-    "small": "crb1fmcwmv8r1j",
+    "small": "s2wbjddsuvzgno",
     "medium": "qpaycqqpg23i1z",
     "large": "fderlpmi2u2v3p",
     "xxl": "ihpp1qyzlwu5i9",
