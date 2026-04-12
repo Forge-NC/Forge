@@ -30,11 +30,9 @@ RUN pip install --no-cache-dir \
 RUN python -m venv /opt/forge-fallback && \
     ln -s /usr/local/lib/python3.12/dist-packages/torch /opt/forge-fallback/lib/python3.12/site-packages/torch && \
     ln -s /usr/local/lib/python3.12/dist-packages/torch-*.dist-info /opt/forge-fallback/lib/python3.12/site-packages/ 2>/dev/null; \
-    TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;8.9;9.0;12.0" \
     /opt/forge-fallback/bin/pip install --no-cache-dir \
     "transformers>=5.0" \
     accelerate \
-    gptqmodel \
     fastapi \
     uvicorn && \
     /opt/forge-fallback/bin/python -c "import transformers; v=transformers.__version__; print(f'Fallback transformers: {v}'); assert int(v.split(\".\")[0])>=5, f'Expected 5.x, got {v}'"
