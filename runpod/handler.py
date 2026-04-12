@@ -527,21 +527,29 @@ def _start_vllm_with_fallback(
             continue
 
     # All vLLM strategies exhausted — try transformers-direct fallback
-    log.warning("All vLLM strategies exhausted for %s — trying transformers-direct fallback", hf_repo)
+    log.warning("FALLBACK: All vLLM strategies exhausted for %s — trying transformers-direct", hf_repo)
+    capture.add("=== TRANSFORMERS FALLBACK STARTING ===")
 
     try:
         proc, served, fallback_error = _start_transformers_fallback(model_path, hf_repo, stop_tokens)
         if proc and not fallback_error:
-            log.info("Transformers-direct fallback succeeded for %s", hf_repo)
+            log.info("FALLBACK: Transformers-direct succeeded for %s", hf_repo)
+            capture.add("=== TRANSFORMERS FALLBACK SUCCEEDED ===")
             return proc, capture, served, stop_tokens, None
         if fallback_error:
-            log.error("Transformers-direct fallback also failed for %s: %s", hf_repo, fallback_error)
+            log.error("FALLBACK: Transformers-direct failed for %s: %s", hf_repo, fallback_error)
+            capture.add(f"=== TRANSFORMERS FALLBACK FAILED: {fallback_error} ===")
     except Exception as fb_exc:
-        log.error("Transformers-direct fallback exception for %s: %s", hf_repo, fb_exc)
+        log.error("FALLBACK: Exception for %s: %s", hf_repo, fb_exc)
+        capture.add(f"=== TRANSFORMERS FALLBACK EXCEPTION: {fb_exc} ===")
 
     final_error = capture.classify_error(-1)
-    log.error("All strategies exhausted (including transformers fallback) for %s", hf_repo)
-    return None, capture, "", stop_tokens, final_error["error"]
+    # Override error message to include fallback status
+    final_msg = final_error.get("error", "unknown")
+    if fallback_error:
+        final_msg = f"vLLM failed + transformers fallback failed: {fallback_error}"
+    log.error("All strategies exhausted (including transformers fallback) for %s: %s", hf_repo, final_msg)
+    return None, capture, "", stop_tokens, final_msg
 
 
 def _start_transformers_fallback(
