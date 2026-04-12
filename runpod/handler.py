@@ -651,7 +651,7 @@ try:
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_PATH, trust_remote_code=True,
         torch_dtype=torch.float16,
-        device_map="cuda:0" if torch.cuda.device_count()==1 else "auto",
+        device_map={{"": 0}},
         low_cpu_mem_usage=True,
     )
     model.eval()
@@ -1431,14 +1431,18 @@ def _run_batch_break(
             pf_ok, pf_error = _preflight_check(served_model, stop_tokens)
             if not pf_ok:
                 log.warning("Pre-flight failed for %s on vLLM: %s — trying transformers fallback", hf_repo, pf_error)
-                # Shut down vLLM before trying fallback
+                # Force-kill vLLM and all child processes to fully release GPU memory
                 if vllm_proc and vllm_proc.poll() is None:
-                    log.info("Shutting down vLLM for %s", hf_repo)
-                    vllm_proc.terminate()
+                    log.info("Force-killing vLLM for %s to free GPU memory", hf_repo)
+                    vllm_proc.kill()  # SIGKILL, not SIGTERM — vLLM spawns child workers
                     try:
-                        vllm_proc.wait(timeout=10)
+                        vllm_proc.wait(timeout=15)
                     except Exception:
-                        vllm_proc.kill()
+                        pass
+                    # Kill any orphaned vLLM workers
+                    import subprocess as _sp
+                    _sp.run(["pkill", "-9", "-f", "vllm.entrypoints"], capture_output=True, timeout=5)
+                    time.sleep(3)  # let GPU memory fully release
 
                 # Try transformers fallback — vLLM loaded but can't serve this model correctly
                 fb_proc, fb_served, fb_error = _start_transformers_fallback(local_path, hf_repo, stop_tokens)
