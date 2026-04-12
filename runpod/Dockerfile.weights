@@ -24,10 +24,12 @@ RUN pip install --no-cache-dir \
 
 # Transformers fallback deps — baked in so the fallback never pip-installs at runtime.
 # vLLM 0.19 bundles an older transformers that doesn't support some architectures
-# (exaone, glm4_moe_lite, etc.). The fallback server uses these to serve models
-# vLLM can't load. autoawq is required for AWQ model loading via transformers.
+# (e.g. exaone). The fallback server uses these to serve models vLLM can't load.
+# Pin to 4.x: transformers 5.x replaced autoawq with gptqmodel for AWQ loading,
+# breaking compatibility with the autoawq package bundled in the vLLM base image.
+# 4.57.6 is the last 4.x release; EXAONE support was added in 4.43.
 RUN pip install --no-cache-dir \
-    "transformers>=4.49" \
+    "transformers>=4.49,<5.0" \
     accelerate \
     autoawq \
     fastapi \
