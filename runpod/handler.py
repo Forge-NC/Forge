@@ -585,10 +585,7 @@ try:
     import subprocess
     print("Upgrading transformers + huggingface_hub for model compatibility...", flush=True)
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
-        "--force-reinstall",
-        "git+https://github.com/huggingface/transformers.git"], timeout=300)
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
-        "--upgrade", "huggingface_hub", "accelerate"], timeout=120)
+        "--upgrade", "transformers>=4.49", "huggingface_hub", "accelerate"], timeout=300)
     print("Transformers upgraded.", flush=True)
 
     import transformers
