@@ -582,12 +582,6 @@ def _start_transformers_fallback(
     server_script.write_text(f'''
 import sys, traceback
 try:
-    import subprocess
-    print("Upgrading transformers + huggingface_hub for model compatibility...", flush=True)
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
-        "--upgrade", "transformers>=4.49", "huggingface_hub", "accelerate"], timeout=300)
-    print("Transformers upgraded.", flush=True)
-
     import transformers
     print(f"Transformers version: {{transformers.__version__}}", flush=True)
 

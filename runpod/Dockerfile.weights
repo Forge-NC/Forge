@@ -22,6 +22,17 @@ RUN pip install --no-cache-dir \
     cryptography>=41.0 \
     tiktoken>=0.7
 
+# Transformers fallback deps — baked in so the fallback never pip-installs at runtime.
+# vLLM 0.19 bundles an older transformers that doesn't support some architectures
+# (exaone, glm4_moe_lite, etc.). The fallback server uses these to serve models
+# vLLM can't load. autoawq is required for AWQ model loading via transformers.
+RUN pip install --no-cache-dir \
+    "transformers>=4.49" \
+    accelerate \
+    autoawq \
+    fastapi \
+    uvicorn
+
 # Copy Forge package (changes frequently — keep last for cache efficiency)
 COPY forge/ /app/forge/
 COPY pyproject.toml /app/
