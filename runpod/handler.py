@@ -604,6 +604,19 @@ def _start_transformers_fallback(
     import urllib.request
     import urllib.error
 
+    # Check if model uses compressed-tensors format (e.g. cyankiwi GLM-4.7).
+    # Only vLLM/SGLang can load compressed-tensors — the transformers fallback cannot.
+    try:
+        cfg = json.loads((Path(model_path) / "config.json").read_text())
+        quant_cfg = cfg.get("quantization_config", {})
+        if quant_cfg.get("quant_method") == "compressed-tensors":
+            return None, "", (
+                "Model uses compressed-tensors format (not AWQ/GPTQ). "
+                "Only vLLM can load this format. The transformers fallback is not applicable."
+            )
+    except Exception:
+        pass
+
     # Restore auto_map if we stripped it — the fallback venv has transformers 5.x
     # which supports all custom code (RopeParameters, etc.)
     config_path = Path(model_path) / "config.json"
@@ -648,12 +661,25 @@ try:
     print(f"Model config loaded: model_type={{config.model_type}}, arch={{getattr(config, 'architectures', ['unknown'])}}", flush=True)
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_PATH, trust_remote_code=True,
-        torch_dtype=torch.float16,
-        device_map={{"": 0}},
-        low_cpu_mem_usage=True,
-    )
+
+    # transformers 5.x initializes all models on meta device during from_pretrained().
+    # This crashes if model code calls .item() during construction. Load without
+    # device_map to avoid meta device, then move to GPU explicitly.
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_PATH, trust_remote_code=True,
+            torch_dtype=torch.float16,
+            device_map=None,
+            low_cpu_mem_usage=False,
+        )
+        model = model.to("cuda:0")
+    except RuntimeError as e:
+        if "meta tensors" in str(e):
+            print(f"Standard load hit meta tensor error, trying GPTQModel.load(): {{e}}", flush=True)
+            from gptqmodel import GPTQModel
+            model = GPTQModel.load(MODEL_PATH, device="cuda:0")
+        else:
+            raise
     model.eval()
     MODEL_NAME = "{hf_repo or model_path}"
     print(f"Model loaded: {{MODEL_NAME}}", flush=True)
@@ -1430,7 +1456,11 @@ def _run_batch_break(
             # Pre-flight validation
             pf_ok, pf_error = _preflight_check(served_model, stop_tokens)
             if not pf_ok:
-                log.warning("Pre-flight failed for %s on vLLM: %s — trying transformers fallback", hf_repo, pf_error)
+                # Capture vLLM's recent stdout — may contain the inference crash traceback
+                vllm_recent = capture.get_lines(20) if capture else []
+                log.warning("Pre-flight failed for %s on vLLM: %s", hf_repo, pf_error)
+                if vllm_recent:
+                    log.warning("vLLM recent output: %s", "; ".join(vllm_recent[-5:]))
                 # Force-kill vLLM and all child processes to fully release GPU memory
                 if vllm_proc and vllm_proc.poll() is None:
                     log.info("Force-killing vLLM for %s to free GPU memory", hf_repo)
@@ -1458,7 +1488,8 @@ def _run_batch_break(
                         if fb_proc.poll() is None:
                             fb_proc.terminate()
                         _fail = {"model": hf_repo, "status": "failed",
-                                 "error": f"vLLM preflight: {pf_error}; fallback preflight: {pf_error2}"}
+                                 "error": f"vLLM preflight: {pf_error}; fallback preflight: {pf_error2}",
+                                 "vllm_last_lines": vllm_recent}
                         results.append(_fail)
                         try:
                             urllib.request.urlopen(urllib.request.Request(
@@ -1473,7 +1504,8 @@ def _run_batch_break(
                 else:
                     log.error("Transformers fallback failed to start for %s: %s", hf_repo, fb_error)
                     _fail = {"model": hf_repo, "status": "failed",
-                             "error": f"vLLM preflight: {pf_error}; fallback: {fb_error}"}
+                             "error": f"vLLM preflight: {pf_error}; fallback: {fb_error}",
+                             "vllm_last_lines": vllm_recent}
                     results.append(_fail)
                     try:
                         urllib.request.urlopen(urllib.request.Request(
