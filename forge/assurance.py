@@ -59,7 +59,7 @@ PROTOCOL_CHANGELOG: dict[int, dict] = {
             "Invariant matching: exact substring (>5 chars) or word-boundary regex (<=5 chars)",
             "Anti-invariant matching: response must NOT contain a specific injection marker",
             "Full model response stored in report artifact with per-variant breakdown",
-            "Forge Parallax: /break --full dual attestation — Break (stress) then Assurance (verify) — paired_run_id for cross-run drift analysis",
+            "Forge Parallax: /break dual attestation — Break (stress) then Assurance (verify) — paired_run_id for cross-run drift analysis",
             "Protocol version embedded in signed report payload",
         ],
     },
