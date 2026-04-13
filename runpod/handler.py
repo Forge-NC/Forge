@@ -398,6 +398,57 @@ def _strip_auto_map_if_native(model_path: str) -> bool:
     return True
 
 
+def _fetch_model_registry() -> dict:
+    """Fetch the model registry from the Forge server.
+
+    The registry contains verified per-model vLLM configs (env vars, flags,
+    max_model_len, etc.) that override auto-detection. Cached for the lifetime
+    of the worker process.
+    """
+    if hasattr(_fetch_model_registry, "_cache"):
+        return _fetch_model_registry._cache
+
+    registry = {}
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            f"{FORGE_API_SERVER}/audit_orchestrator.php?action=model_registry",
+            headers={"X-Forge-Api-Secret": FORGE_API_SECRET},
+        )
+        resp = urllib.request.urlopen(req, timeout=15)
+        data = json.loads(resp.read())
+        registry = data.get("models", data) if isinstance(data, dict) else {}
+        log.info("Loaded model registry: %d models", len(registry))
+    except Exception as exc:
+        log.warning("Could not fetch model registry: %s — using auto-detection", exc)
+
+    _fetch_model_registry._cache = registry
+    return registry
+
+
+def _get_registry_config(hf_repo: str) -> dict | None:
+    """Look up a model's verified config from the registry.
+
+    Returns the config dict if found, None if the model isn't registered.
+    The config contains: vllm_env, vllm_flags, max_model_len, enforce_eager,
+    recommended_tp, quant_method, notes, etc.
+    """
+    registry = _fetch_model_registry()
+    if hf_repo in registry:
+        log.info("Registry hit for %s", hf_repo)
+        return registry[hf_repo]
+
+    # Try without org prefix (e.g. "Qwen2.5-72B-Instruct-AWQ" matches "Qwen/Qwen2.5-72B-Instruct-AWQ")
+    model_name = hf_repo.split("/")[-1] if "/" in hf_repo else hf_repo
+    for key, cfg in registry.items():
+        if key.endswith("/" + model_name):
+            log.info("Registry hit for %s (matched via %s)", hf_repo, key)
+            return cfg
+
+    log.info("No registry entry for %s — using auto-detection", hf_repo)
+    return None
+
+
 def _start_vllm_with_fallback(
     model_path: str,
     hf_repo: str,
@@ -629,7 +680,11 @@ def _start_transformers_fallback(
     # Write a small FastAPI server that loads the model via transformers
     server_script = Path("/tmp/.forge/transformers_server.py")
     server_script.write_text(f'''
-import sys, traceback
+import sys, os, traceback
+
+# transformers 5.x requires explicit trust for local repos with custom code
+os.environ["HF_HUB_TRUST_REMOTE_CODE"] = "1"
+
 try:
     # gptqmodel requires nvidia-smi at build time so it can't be baked into the Docker
     # image (CI has no GPU). Install it here on the RunPod worker where nvidia-smi exists.
@@ -754,15 +809,10 @@ except Exception as exc:
     sys.exit(1)
 ''')
 
-    # Use the isolated fallback venv (transformers 5.x + gptqmodel) to avoid
-    # breaking vLLM's bundled transformers. Falls back to system Python if venv
-    # doesn't exist (e.g. local testing).
-    fallback_python = "/opt/forge-fallback/bin/python"
-    if not Path(fallback_python).exists():
-        fallback_python = "python"
-        log.warning("Fallback venv not found at /opt/forge-fallback — using system Python")
-
-    log.info("Starting transformers-direct fallback server for %s (python: %s)", hf_repo, fallback_python)
+    # System Python has transformers 5.x (upgraded in Dockerfile after vLLM install).
+    # No separate venv needed — both vLLM and the fallback use the same transformers.
+    fallback_python = "python"
+    log.info("Starting transformers-direct fallback server for %s", hf_repo)
     proc = subprocess.Popen(
         [fallback_python, str(server_script)],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -1410,12 +1460,18 @@ def _run_batch_break(
             local_path = snapshot_download(hf_repo, cache_dir="/tmp/hf_models")
             log.info("Downloaded to: %s", local_path)
 
-            # Start vLLM with fallback chain
+            # Check model registry for verified vLLM config
             import torch
             gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 1
             per_gpu_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3) if torch.cuda.is_available() else 48
 
+            reg_cfg = _get_registry_config(hf_repo)
+
+            # Build env: registry config → job-level overrides → defaults
             extra_env = {}
+            if reg_cfg and reg_cfg.get("vllm_env"):
+                extra_env.update(reg_cfg["vllm_env"])
+                log.info("Registry vllm_env for %s: %s", hf_repo, reg_cfg["vllm_env"])
             if vllm_env:
                 for pair in vllm_env.split(","):
                     pair = pair.strip()
@@ -1423,12 +1479,25 @@ def _run_batch_break(
                         k, v = pair.split("=", 1)
                         extra_env[k.strip()] = v.strip()
 
+            # Build flags: registry flags + job-level flags
+            custom_flags = ""
+            if reg_cfg:
+                reg_flags = reg_cfg.get("vllm_flags", [])
+                if reg_flags:
+                    custom_flags = " ".join(reg_flags)
+                    log.info("Registry vllm_flags for %s: %s", hf_repo, reg_flags)
+                # Override max_model_len from registry if specified
+                reg_max_len = reg_cfg.get("max_model_len")
+                if reg_max_len and f"--max-model-len" not in custom_flags:
+                    custom_flags += f" --max-model-len {reg_max_len}"
+
             vllm_proc, capture, served_model, stop_tokens, start_error = _start_vllm_with_fallback(
                 model_path=local_path,
                 hf_repo=hf_repo,
                 gpu_count=gpu_count,
                 per_gpu_gb=per_gpu_gb,
                 custom_env=extra_env,
+                custom_flags=custom_flags,
                 max_startup_minutes=30,
             )
 
