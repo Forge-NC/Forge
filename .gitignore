@@ -56,3 +56,5 @@ batch_reports/
 
 # Wallpaper/marketing assets
 forge_neural_cortex_wallpaper*
+scripts/bundle_extras/
+scripts/export_audit_bundle.py
