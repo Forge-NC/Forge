@@ -24,40 +24,28 @@ RUN pip install --no-cache-dir \
     cryptography>=41.0 \
     tiktoken>=0.7
 
-# Transformers fallback venv — serves models vLLM can't load (exaone, glm4_moe_lite).
+# Upgrade system transformers to 5.x so vLLM can load modern architectures
+# (exaone, glm4_moe_lite, etc.) that aren't in transformers 4.x.
 #
-# Architecture:
-#   --system-site-packages inherits torch 2.10.0 + CUDA from system (no reinstall).
-#   pip installs transformers 5.x + huggingface_hub 1.x into the VENV's site-packages
-#   because the system versions (4.57.6 / 0.36.2) don't satisfy the version constraints.
-#   Python's sys.path puts venv before system, so 5.x shadows 4.x automatically.
-#   vLLM's Python environment is completely untouched.
+# vLLM 0.19 pins transformers<5 but community confirms it works with 5.x.
+# The compressed-tensors package also pins <5, so we force both upgrades.
+# Both vLLM's inference engine and the transformers fallback use this.
 #
-# gptqmodel (required by transformers 5.x for AWQ) has no pre-built wheels and requires
-# nvidia-smi at build time. It MUST be installed at runtime on the GPU worker — this is
-# the one unavoidable runtime install. See handler.py _start_transformers_fallback().
+# gptqmodel (required by transformers 5.x for AWQ loading) has no pre-built
+# wheels and requires nvidia-smi at build time — installed at runtime on the
+# GPU worker. See handler.py _start_transformers_fallback().
 #
-# Verified dependency chain (2026-04-12):
-#   transformers 5.5.3 requires huggingface_hub>=1.5.0,<2.0
-#   huggingface_hub 1.2.1+ has is_offline_mode (imported by transformers 5.x)
-#   gptqmodel 6.0.3 requires transformers>=5.4.0 (source-only, needs GPU to build)
-RUN python -m venv --system-site-packages /opt/forge-fallback && \
-    /opt/forge-fallback/bin/pip install --no-cache-dir \
+# Verified: vLLM 0.19 + transformers 5.x works per community (GitHub #34098).
+RUN pip install --no-cache-dir --force-reinstall --no-deps \
     "transformers>=5.0,<6.0" \
-    "huggingface_hub>=1.5.0,<2.0" \
-    accelerate \
-    fastapi \
-    uvicorn && \
-    /opt/forge-fallback/bin/python -c "\
+    "huggingface_hub>=1.5.0,<2.0" && \
+    pip install --no-cache-dir accelerate fastapi uvicorn && \
+    python -c "\
 import transformers, huggingface_hub; \
-tv=transformers.__version__; tf=transformers.__file__; \
-hv=huggingface_hub.__version__; hf=huggingface_hub.__file__; \
-print(f'transformers {tv} from {tf}'); \
-print(f'huggingface_hub {hv} from {hf}'); \
-assert int(tv.split('.')[0])>=5, f'transformers: expected 5.x, got {tv}'; \
-assert 'forge-fallback' in tf, f'transformers loaded from system, not venv: {tf}'; \
-assert int(hv.split('.')[0])>=1, f'huggingface_hub: expected 1.x, got {hv}'; \
-assert 'forge-fallback' in hf, f'huggingface_hub loaded from system, not venv: {hf}'; \
+tv=transformers.__version__; hv=huggingface_hub.__version__; \
+print(f'System transformers: {tv}'); print(f'System huggingface_hub: {hv}'); \
+assert int(tv.split('.')[0])>=5, f'Expected transformers 5.x, got {tv}'; \
+assert int(hv.split('.')[0])>=1, f'Expected huggingface_hub 1.x, got {hv}'; \
 print('All assertions passed')"
 
 # Copy Forge package (changes frequently — keep last for cache efficiency)

@@ -1167,6 +1167,20 @@ if ($action === 'status' && $method === 'GET') {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// GET ?action=model_registry — Return verified model configurations
+// Used by handler to get per-model vLLM env vars, flags, and settings
+// ═══════════════════════════════════════════════════════════════════════════
+
+if ($action === 'model_registry' && $method === 'GET') {
+    $reg_path = __DIR__ . '/data/model_registry.json';
+    if (file_exists($reg_path)) {
+        $reg = json_decode(file_get_contents($reg_path), true);
+        json_out(200, $reg['models'] ?? $reg);
+    } else {
+        json_out(200, []);
+    }
+}
+
 // GET ?action=report_models — List model IDs that already have reports
 // Used by batch runner for dedup
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1183,6 +1197,78 @@ if ($action === 'report_models' && $method === 'GET') {
         }
     }
     json_out(200, ['models' => array_values(array_unique($models))]);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GET ?action=matrix_data — Return all model results for comparative analysis
+// Used by handler to compute percentile rankings in audit reports.
+// ═══════════════════════════════════════════════════════════════════════════
+
+if ($action === 'matrix_data' && $method === 'GET') {
+    $reports_dir = __DIR__ . '/data/assurance/reports';
+    $models_out = [];
+    if (is_dir($reports_dir)) {
+        foreach (glob($reports_dir . '/*.json') as $f) {
+            $r = json_decode(file_get_contents($f), true);
+            if (!$r || empty($r['model']) || empty($r['pass_rate'])) continue;
+            // Skip test data
+            if (str_starts_with($r['model'] ?? '', 'test/')) continue;
+            $models_out[] = [
+                'model' => $r['model'],
+                'pass_rate' => $r['pass_rate'],
+                'weighted_pass_rate' => $r['weighted_pass_rate'] ?? null,
+                'category_pass_rates' => $r['category_pass_rates'] ?? [],
+                'protocol_version' => $r['protocol_version'] ?? null,
+                'scenarios_run' => $r['scenarios_run'] ?? 0,
+            ];
+        }
+    }
+    json_out(200, ['models' => $models_out]);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// POST ?action=batch_result — Log a batch model result permanently
+// Used by handler to record pass/fail/error for every model in a batch run.
+// ═══════════════════════════════════════════════════════════════════════════
+
+if ($action === 'batch_result' && $method === 'POST') {
+    $raw = file_get_contents('php://input');
+    $data = json_decode($raw, true);
+    if (!$data || empty($data['model'])) json_out(400, ['error' => 'Missing model']);
+
+    $log_path = __DIR__ . '/data/batch_results.jsonl';
+    $entry = [
+        'model' => $data['model'],
+        'status' => $data['status'] ?? 'unknown',
+        'error' => $data['error'] ?? '',
+        'error_class' => $data['error_class'] ?? '',
+        'pass_rate' => $data['pass_rate'] ?? null,
+        'weighted_pass_rate' => $data['weighted_pass_rate'] ?? null,
+        'scenarios_run' => $data['scenarios_run'] ?? null,
+        'scenarios_passed' => $data['scenarios_passed'] ?? null,
+        'run_id' => $data['run_id'] ?? '',
+        'run_id_paired' => $data['run_id_paired'] ?? '',
+        'vllm_last_lines' => $data['vllm_last_lines'] ?? [],
+        'timestamp' => date('c'),
+    ];
+    file_put_contents($log_path, json_encode($entry) . "\n", FILE_APPEND | LOCK_EX);
+    json_out(200, ['ok' => true]);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GET ?action=batch_results — Read the permanent batch result log
+// ═══════════════════════════════════════════════════════════════════════════
+
+if ($action === 'batch_results' && $method === 'GET') {
+    $log_path = __DIR__ . '/data/batch_results.jsonl';
+    $entries = [];
+    if (file_exists($log_path)) {
+        foreach (file($log_path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+            $e = json_decode($line, true);
+            if ($e) $entries[] = $e;
+        }
+    }
+    json_out(200, ['results' => $entries]);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1452,6 +1538,14 @@ function _save_report_locally(string $report_json): void {
         'run_id' => $run_id,
         'model' => $report['model'] ?? '',
         'pass_rate' => $report['pass_rate'] ?? 0,
+        'weighted_pass_rate' => $report['weighted_pass_rate'] ?? null,
+        'protocol_version' => $report['protocol_version'] ?? null,
+        'scenarios_run' => $report['scenarios_run'] ?? 0,
+        'scenarios_passed' => $report['scenarios_passed'] ?? 0,
+        'category_pass_rates' => $report['category_pass_rates'] ?? [],
+        'machine_id' => $report['machine_id'] ?? '',
+        'paired_run_id' => $report['paired_run_id'] ?? null,
+        'generated_at' => $report['generated_at'] ?? time(),
         'sig_status' => $sig_status,
         'saved_at' => time(),
     ];
