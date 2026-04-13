@@ -45,3 +45,14 @@ vscode-forge/*.vsix
 report.md
 report_section_*.txt
 runpodctl.exe
+
+# RunPod batch infrastructure (dev tooling, not product)
+dispatch_batch.py
+pull_batch_results.py
+batch_dispatch_lists.json
+batch_jobs_*.json
+batch_results_log.jsonl
+batch_reports/
+
+# Wallpaper/marketing assets
+forge_neural_cortex_wallpaper*

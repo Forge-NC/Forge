@@ -2421,28 +2421,28 @@ class CommandHandler:
         """Run the Forge Reliability Suite against the current model.
 
         Usage:
-          /break              — full suite (31+ scenarios + fingerprint)
-          /break --autopsy    — full suite + detailed failure-mode breakdown
-          /break --self-rate  — model grades its own responses (calibration score)
-          /break --assure     — full break + full assurance in one pass
-          /break --share      — run and upload signed report(s) to the Matrix
-          /break --json       — output JSON instead of formatted text
-          /break --full       — alias for --autopsy --self-rate --assure --share --json
+          /break              — full suite: autopsy + self-rate + assure + share + json
+          /break --minimal    — scenarios + fingerprint only (no autopsy/assure/share)
+          /break --no-assure  — skip the assurance verification pass
+          /break --no-share   — skip uploading to the Matrix
 
-        Flags are combinable: /break --autopsy --assure --self-rate --share
+        /break always runs the complete suite by default. Use /stress for a
+        quick 3-category CI gate (<30 seconds).
 
         If telemetry_enabled is true in config, results are automatically
         contributed to the Forge Matrix (decentralized model leaderboard).
         """
         e = self.engine
-        # --full expands to all flags
-        if "--full" in arg:
-            arg += " --autopsy --self-rate --assure --share --json"
-        share = "--share" in arg
-        as_json = "--json" in arg
-        autopsy = "--autopsy" in arg
-        self_rate = "--self-rate" in arg
-        run_assure = "--assure" in arg
+        # /break defaults to full — opt OUT of specific features, not in
+        minimal = "--minimal" in arg
+        if minimal or "--full" in arg:
+            # --minimal = old bare /break behavior; --full kept for back-compat
+            pass
+        share = "--no-share" not in arg and not minimal
+        as_json = not minimal
+        autopsy = not minimal
+        self_rate = not minimal
+        run_assure = "--no-assure" not in arg and not minimal
         mode = "full"
 
         # Show active flags
