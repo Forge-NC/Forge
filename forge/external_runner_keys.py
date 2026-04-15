@@ -105,7 +105,7 @@ def _canonical_json(obj) -> bytes:
       - ensure_ascii=False so UTF-8 strings stay compact
 
     This matches the PHP implementation in
-    server/includes/forge_crypto_v2.php forge_canonical_json().
+    server/includes/external_runner_crypto.php forge_canonical_json().
     """
     return json.dumps(
         obj,

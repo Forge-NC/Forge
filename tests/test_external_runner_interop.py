@@ -2,10 +2,10 @@
 
 Ensures Python HKDF-SHA512 derivation, child keypair generation, envelope
 construction, and signature verification match byte-for-byte with the PHP
-implementation in server/includes/forge_crypto_v2.php.
+implementation in server/includes/external_runner_crypto.php.
 
 The fixtures in tests/fixtures/external_runner_vectors.json are the source
-of truth. The PHP test suite (server/tests/test_forge_crypto_v2.php)
+of truth. The PHP test suite (server/tests/test_external_runner_crypto.php)
 consumes the same fixture file and must produce identical bytes.
 
 If these tests pass and the PHP tests pass, Python and PHP agree on every
