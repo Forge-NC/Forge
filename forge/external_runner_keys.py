@@ -389,10 +389,85 @@ def compute_target_hash(endpoint_url: str, model_id: str) -> str:
     return h.hexdigest()
 
 
+# ── Sealed bundle (runner-side: open only; sealing is server-only) ────────
+#
+# Format (binary, see docs/forge-protocol-v1.md §8):
+#   magic     : 12 bytes  "FORGEBUNDLE\x01"
+#   version   :  1 byte   0x01
+#   runner_pk : 32 bytes  X25519 public key the customer provided at enroll
+#   sealed_ct : N bytes   libsodium crypto_box_seal(canonical_json(plaintext), runner_pk)
+#
+# The runner holds the corresponding X25519 private key. Only that key can
+# open the bundle. Bundles are single-use by design; upload ingests a
+# `single_use_nonce` and rejects replays.
+
+BUNDLE_MAGIC = b"FORGEBUNDLE\x01"
+BUNDLE_VERSION = 0x01
+
+
+def generate_runner_keypair() -> Tuple[bytes, bytes]:
+    """Generate a one-time X25519 keypair for a runner.
+
+    Returns (private_key, public_key) as raw 32-byte values. The public key
+    is base64-encoded and sent to the enrollment endpoint. The private key
+    stays on the runner and is used to open the downloaded bundle.
+
+    Requires the pynacl package (installed on the runner image; not a
+    dependency of the Forge CLI itself).
+    """
+    try:
+        from nacl.public import PrivateKey
+    except Exception as exc:
+        raise RuntimeError(
+            "pynacl required for runner X25519 keypair generation. "
+            "pip install pynacl"
+        ) from exc
+
+    priv = PrivateKey.generate()
+    return bytes(priv), bytes(priv.public_key)
+
+
+def open_bundle(bundle_bytes: bytes, runner_priv_x25519: bytes) -> dict:
+    """Open a sealed bundle. Runner-side only.
+
+    Args:
+        bundle_bytes:         Full sealed-bundle file contents.
+        runner_priv_x25519:   Raw 32-byte X25519 private key for the runner.
+
+    Returns:
+        The decoded plaintext dict (envelope + child_priv_seed_b64 + upload_url
+        + upload_secret_b64 + etc.).
+    """
+    try:
+        from nacl.public import PrivateKey, PublicKey, SealedBox
+    except Exception as exc:
+        raise RuntimeError("pynacl required to open bundles") from exc
+
+    if len(bundle_bytes) < 45:
+        raise ValueError("bundle too short")
+    if bundle_bytes[:12] != BUNDLE_MAGIC:
+        raise ValueError("bundle magic mismatch")
+    version = bundle_bytes[12]
+    if version != BUNDLE_VERSION:
+        raise ValueError(f"unsupported bundle version: {version}")
+
+    # runner_pk stored in bundle is informational; the private key must match it
+    sealed = bundle_bytes[45:]
+
+    priv = PrivateKey(runner_priv_x25519)
+    plain = SealedBox(priv).decrypt(sealed)
+    obj = json.loads(plain.decode("utf-8"))
+    if not isinstance(obj, dict):
+        raise ValueError("bundle plaintext is not a JSON object")
+    return obj
+
+
 __all__ = [
     "VALIDITY_SECONDS",
     "SCHEME",
     "KDF_SALT",
+    "BUNDLE_MAGIC",
+    "BUNDLE_VERSION",
     "RUNNER_KIND_SELF_HOSTED_FCA",
     "RUNNER_KIND_DEPLOYMENT_VPC",
     "derive_external_keypair",
@@ -401,4 +476,6 @@ __all__ = [
     "load_revocation_list",
     "revoke_external_job",
     "compute_target_hash",
+    "generate_runner_keypair",
+    "open_bundle",
 ]
