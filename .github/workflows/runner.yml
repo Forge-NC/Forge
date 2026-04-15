@@ -1,0 +1,79 @@
+name: Build & Publish External Runner Image
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'runner/**'
+      - 'forge/**'
+      - '.github/workflows/runner.yml'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag (e.g. v1.0.0)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write   # required for Sigstore keyless signing
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags
+        id: tags
+        run: |
+          SHA="${GITHUB_SHA::12}"
+          INPUT_TAG="${{ github.event.inputs.tag }}"
+          IMAGE="ghcr.io/${{ github.repository_owner }}/forge-external-runner"
+          TAGS="${IMAGE}:${SHA}"
+          if [ "${GITHUB_REF}" = "refs/heads/master" ]; then
+            TAGS="${TAGS},${IMAGE}:latest,${IMAGE}:v1"
+          fi
+          if [ -n "$INPUT_TAG" ]; then
+            TAGS="${TAGS},${IMAGE}:${INPUT_TAG}"
+          fi
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: runner/Dockerfile.runner
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Sign image with Sigstore (keyless, OIDC)
+        env:
+          COSIGN_EXPERIMENTAL: 1
+          DIGEST: ${{ steps.push.outputs.digest }}
+          IMAGE: ${{ steps.tags.outputs.image }}
+        run: |
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Emit digest for .well-known update
+        run: |
+          echo "Image digest: ${{ steps.push.outputs.digest }}"
+          echo "Update /.well-known/forge-origin.json runner_image_digest field to this value."

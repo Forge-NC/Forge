@@ -2841,6 +2841,64 @@ class CommandHandler:
 
     # ── Command dispatch table ──
 
+    @staticmethod
+    def _cmd_certify_audit(engine, args):
+        """Run a self-hosted Forge Certified Audit against the current model.
+
+        Usage: /certify-audit <order_id>
+
+        Requires a paid order with dispatch_mode=external_runner on your
+        Forge NC account. Generates a one-time keypair, enrolls the order,
+        downloads a sealed bundle, runs the full 74-scenario Crucible
+        Assurance Protocol, signs the report with the bundled child key,
+        and uploads. On success, prints the certified report URL and
+        transparency log leaf index.
+        """
+        from forge.certify_runner import certify_audit, CertifyError
+        from forge.ui.terminal import BOLD, DIM, GREEN, RED, RESET, YELLOW
+
+        parts = (args or "").strip().split()
+        if not parts:
+            print(f"{YELLOW}Usage:{RESET} /certify-audit <order_id>")
+            print(f"{DIM}  Requires a paid order with dispatch_mode=external_runner.{RESET}")
+            return
+
+        order_id = parts[0]
+        if not order_id.startswith("aud_"):
+            print(f"{RED}order_id must start with 'aud_'{RESET}")
+            return
+
+        cfg = getattr(engine, "config", {}) or {}
+        auth_token = cfg.get("forge_token") or os.environ.get("FORGE_TOKEN", "")
+        if not auth_token:
+            print(f"{RED}No Forge auth token. Run /login or set FORGE_TOKEN.{RESET}")
+            return
+
+        target_url = cfg.get("target_endpoint_url")
+        target_key = cfg.get("target_api_key") or os.environ.get("FORGE_TARGET_API_KEY", "")
+
+        print(f"{BOLD}Starting self-hosted Forge Certified Audit for {order_id}{RESET}")
+        print(f"{DIM}Enrolling runner … (may take ~30s){RESET}")
+        try:
+            resp = certify_audit(
+                order_id=order_id,
+                auth_token=auth_token,
+                target_endpoint_url=target_url,
+                target_api_key=target_key,
+                runner_kind="self-hosted-fca",
+            )
+        except CertifyError as exc:
+            print(f"{RED}Certification failed:{RESET} {exc}")
+            return
+        except Exception as exc:
+            print(f"{RED}Unexpected error:{RESET} {exc}")
+            return
+
+        print(f"{GREEN}Certified.{RESET}")
+        print(f"  Report:     {BOLD}{resp.get('report_url', '')}{RESET}")
+        print(f"  Leaf:       #{resp.get('transparency_leaf_index', '?')} in the Forge transparency log")
+        print(f"  Origin-sig: {DIM}{resp.get('origin_pub_key_b64', '')[:24]}…{RESET}")
+
     _COMMANDS = {
         "/quit": _cmd_quit,
         "/exit": _cmd_quit,
@@ -2902,4 +2960,5 @@ class CommandHandler:
         "/autopsy": _cmd_autopsy,
         "/stress": _cmd_stress,
         "/profile": _cmd_profile,
+        "/certify-audit": _cmd_certify_audit,
     }
