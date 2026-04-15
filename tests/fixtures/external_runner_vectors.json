@@ -1,0 +1,54 @@
+{
+  "scheme": "forge-external-runner-v1",
+  "kdf_salt": "forge-external-runner-salt-v1",
+  "origin_seed_b64": "ERERERERERERERERERERERERERERERERERERERERERE=",
+  "origin_pub_b64": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+  "hkdf_cases": [
+    {
+      "job_id": "aud_test_001",
+      "issued_at": 1713100000,
+      "child_seed_b64": "+yy5VFX1HDgW9rN0/LXLumdEDmULSY5ULZWICK6pbaY=",
+      "child_pub_b64": "UoQeFjMwjuymHbryejFA2pcuA437LcMirMQaQTWRPGY="
+    },
+    {
+      "job_id": "ext_7f3a9b2c",
+      "issued_at": 1713110000,
+      "child_seed_b64": "RYrY+6/vME4d9fDI9Nd7F95N3h/VViIOvVQwWGEKaAw=",
+      "child_pub_b64": "G/8aN2FJOqAebCBFfPTWUdBcYxLMm32UqNju1vegeyI="
+    },
+    {
+      "job_id": "dep_42",
+      "issued_at": 1713120000,
+      "child_seed_b64": "wBkuPL8D85uG2rovOK9q2fAeN+xcO3y9sdzc7I6+9lY=",
+      "child_pub_b64": "7DNr+8l1r47ZXc0+R9nQvVxM0nHgGVF5qx/i+n20dpw="
+    }
+  ],
+  "canonical_json_cases": [
+    {
+      "input": {
+        "b": 2,
+        "a": 1
+      },
+      "canonical_bytes_b64": "eyJhIjoxLCJiIjoyfQ=="
+    },
+    {
+      "input": {
+        "x": {
+          "z": 9,
+          "a": 1
+        },
+        "name": "forge"
+      },
+      "canonical_bytes_b64": "eyJuYW1lIjoiZm9yZ2UiLCJ4Ijp7ImEiOjEsInoiOjl9fQ=="
+    },
+    {
+      "input": {
+        "scheme": "forge-external-runner-v1",
+        "job_id": "aud_test_001",
+        "issued_at": 1713100000
+      },
+      "canonical_bytes_b64": "eyJpc3N1ZWRfYXQiOjE3MTMxMDAwMDAsImpvYl9pZCI6ImF1ZF90ZXN0XzAwMSIsInNjaGVtZSI6ImZvcmdlLWV4dGVybmFsLXJ1bm5lci12MSJ9"
+    }
+  ],
+  "notes": "Deterministic test vectors. origin_seed is 32 bytes of 0x11. DO NOT USE as a real key."
+}
