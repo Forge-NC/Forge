@@ -1,0 +1,54 @@
+# Forge External Runner — Slim Python image
+#
+# Runs a single external-runner audit and exits. Intended to be run once
+# per bundle issued by forge-nc.dev. Container is stateless.
+#
+# Usage:
+#   docker run --rm \
+#     -e FORGE_TARGET_API_KEY="sk-..." \
+#     -v /secure/bundle.enc:/bundle/bundle.enc:ro \
+#     -v /secure/runner.key:/keys/runner.key:ro \
+#     ghcr.io/forge-nc/forge-external-runner:v1 \
+#     --bundle /bundle/bundle.enc --runner-priv /keys/runner.key
+#
+# Or with env:
+#   docker run --rm \
+#     -e FORGE_BUNDLE=/bundle/bundle.enc \
+#     -e FORGE_RUNNER_PRIV=/keys/runner.key \
+#     -e FORGE_TARGET_API_KEY="sk-..." \
+#     -v /secure/bundle.enc:/bundle/bundle.enc:ro \
+#     -v /secure/runner.key:/keys/runner.key:ro \
+#     ghcr.io/forge-nc/forge-external-runner:v1
+
+FROM python:3.11-slim
+
+# Non-root user for runtime
+RUN groupadd --system forge && useradd --system --gid forge --no-create-home forge
+
+WORKDIR /app
+
+# System deps for cryptography + pynacl wheels
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        gcc \
+        libffi-dev \
+        libsodium23 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Runner Python deps (lean — no vLLM, no GUI, no audio)
+COPY runner/requirements.runner.txt /tmp/requirements.runner.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.runner.txt && \
+    rm /tmp/requirements.runner.txt
+
+# Copy the Forge package (only the modules the runner needs are imported)
+COPY forge/ /app/forge/
+COPY runner/forge_external_runner.py /app/runner/forge_external_runner.py
+
+# Write permissions only where the runner needs them
+RUN chown -R forge:forge /app
+
+USER forge
+
+# Entry: invoke the runner directly. Args after `--` passed through.
+ENTRYPOINT ["python", "-u", "/app/runner/forge_external_runner.py"]

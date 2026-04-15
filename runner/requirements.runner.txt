@@ -1,0 +1,11 @@
+# Forge External Runner — pinned dependencies
+#
+# Keep this list minimal. Every additional dependency is another line in
+# a customer's security review. If something new is truly required,
+# document why in a comment next to it.
+
+requests>=2.28,<3        # HTTPS client for uploading reports
+cryptography>=41.0,<46   # Ed25519 signing of reports with child key
+pynacl>=1.5,<2           # X25519 sealed-box opening of bundles
+numpy>=1.24,<3           # behavioral fingerprint numerics
+tiktoken>=0.7,<1         # token counting for scenario execution
