@@ -595,15 +595,21 @@ class BehavioralFingerprint:
         llm: Any,
         model: str,
         extra_probes: list[dict] | None = None,
+        system_prompt: str | None = None,
     ) -> dict[str, float]:
         """Run all probes against *llm* and return a dimension→score dict.
 
         Args:
-            llm:         Any LLM backend that implements ``LLMBackend`` (has ``chat()``).
-            model:       The model ID being probed (for logging only).
-            extra_probes: Optional additional probes in the same format as _PROBES.
-                         Used to inject session-context-aware (e.g. language-specific)
-                         probes from AdaptivePressure without modifying the base suite.
+            llm:           Any LLM backend that implements ``LLMBackend`` (has ``chat()``).
+            model:         The model ID being probed (for logging only).
+            extra_probes:  Optional additional probes in the same format as _PROBES.
+                           Used to inject session-context-aware (e.g. language-specific)
+                           probes from AdaptivePressure without modifying the base suite.
+            system_prompt: Optional system prompt injected before every probe. Used
+                           for Deployment Assessments — the fingerprint of a model
+                           deployed WITH a system prompt can differ materially from
+                           the base model's fingerprint, so we fingerprint the
+                           deployment AS CONFIGURED.
 
         Returns:
             dict mapping each probe id (dimension) to a float 0.0–1.0.
@@ -615,11 +621,18 @@ class BehavioralFingerprint:
         if extra_probes:
             probes = probes + list(extra_probes)
 
+        _sys_msg = None
+        if system_prompt:
+            _sys_msg = {"role": "system", "content": system_prompt}
+
         scores: dict[str, float] = {}
         for probe in probes:
             pid = probe["id"]
             try:
-                messages = [{"role": "user", "content": probe["prompt"]}]
+                messages = []
+                if _sys_msg:
+                    messages.append(_sys_msg)
+                messages.append({"role": "user", "content": probe["prompt"]})
                 result   = collect_response(llm, messages, temperature=0.0)
                 response = result.get("text", "").strip()
 

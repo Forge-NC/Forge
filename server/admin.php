@@ -949,7 +949,7 @@ $site_events = array();
 $site_range = isset($_GET['range']) ? $_GET['range'] : '7d';
 
 $active_view = isset($_GET['view']) ? $_GET['view'] : 'overview';
-$valid_views = array('overview', 'users', 'masters', 'tokens', 'revenue', 'webhooks', 'system', 'site', 'telemetry', 'audit', 'billing', 'expenses', 'registry', 'settings');
+$valid_views = array('overview', 'users', 'masters', 'tokens', 'revenue', 'webhooks', 'system', 'site', 'telemetry', 'audit', 'billing', 'expenses', 'deployments', 'registry', 'settings');
 if (!in_array($active_view, $valid_views)) $active_view = 'overview';
 
 if ($active_view === 'site') {
@@ -1306,7 +1306,7 @@ require_once __DIR__ . '/includes/header.php';
 .admin-nav a .nav-icon { font-size:1.1em; width:20px; text-align:center; }
 .admin-nav .nav-divider { height:1px; background:var(--border); margin:12px 20px; }
 
-.admin-main { flex:1; padding:32px 40px; }
+.admin-main { flex:1; padding:32px 40px; min-width:0; overflow-x:hidden; }
 .admin-main h2 {
     font-size:1.5rem; font-weight:700; margin-bottom:8px;
     background:var(--gradient-text); -webkit-background-clip:text;
@@ -1413,6 +1413,7 @@ require_once __DIR__ . '/includes/header.php';
         <a href="/admin/audit"<?php echo $active_view === 'audit' ? ' class="active"' : ''; ?>><span class="nav-icon">&#128209;</span> Audit Log</a>
         <a href="/admin/billing"<?php echo $active_view === 'billing' ? ' class="active"' : ''; ?>><span class="nav-icon">&#128179;</span> Billing &amp; Costs</a>
         <a href="/admin/expenses"<?php echo $active_view === 'expenses' ? ' class="active"' : ''; ?>><span class="nav-icon">&#128206;</span> Expenses</a>
+        <a href="/admin/deployments"<?php echo $active_view === 'deployments' ? ' class="active"' : ''; ?>><span class="nav-icon">&#128640;</span> Deployments</a>
         <a href="/admin/registry"<?php echo $active_view === 'registry' ? ' class="active"' : ''; ?>><span class="nav-icon">&#128218;</span> Model Registry</a>
         <a href="/admin/settings"<?php echo $active_view === 'settings' ? ' class="active"' : ''; ?>><span class="nav-icon">&#9881;</span> Settings</a>
         <div class="nav-divider"></div>
@@ -2962,11 +2963,11 @@ require_once __DIR__ . '/includes/header.php';
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
             <div class="card" style="padding:20px">
                 <h3 style="margin-bottom:16px">Model Performance</h3>
-                <canvas id="intel-model-chart" height="150"></canvas>
+                <div style="height:250px;position:relative"><canvas id="intel-model-chart"></canvas></div>
             </div>
             <div class="card" style="padding:20px">
                 <h3 style="margin-bottom:16px">Reports Over Time</h3>
-                <canvas id="intel-trend-chart" height="150"></canvas>
+                <div style="height:250px;position:relative"><canvas id="intel-trend-chart"></canvas></div>
             </div>
         </div>
 
@@ -3551,7 +3552,7 @@ require_once __DIR__ . '/includes/header.php';
                 </div>
             </div>
             <div style="overflow-x:auto">
-                <table id="intel-reports-table" style="min-width:1200px">
+                <table id="intel-reports-table" style="width:100%;table-layout:auto;font-size:0.85em">
                     <thead><tr><th></th><th>Date</th><th>Type</th><th>Model</th><th>Score</th><th>Scenarios</th><th>Machine</th><th>Sig</th><th>Chain</th><th>Duration</th><th>Actions</th></tr></thead>
                     <tbody>
                     <?php
@@ -3714,7 +3715,7 @@ require_once __DIR__ . '/includes/header.php';
             new Chart(document.getElementById('intel-model-chart'), {
                 type: 'bar',
                 data: {labels: modelLabels, datasets: [{label: 'Avg Pass Rate %', data: modelData, backgroundColor: modelColors, borderRadius: 4}]},
-                options: {responsive: true, plugins: {legend: {display: false}}, scales: {y: {beginAtZero: true, max: 100, grid: {color: gridColor}}, x: {grid: {display: false}}}}
+                options: {responsive: true, maintainAspectRatio: false, plugins: {legend: {display: false}}, scales: {y: {beginAtZero: true, max: 100, grid: {color: gridColor}}, x: {grid: {display: false}}}}
             });
 
             // Reports trend line chart
@@ -3723,7 +3724,7 @@ require_once __DIR__ . '/includes/header.php';
             new Chart(document.getElementById('intel-trend-chart'), {
                 type: 'line',
                 data: {labels: weekLabels, datasets: [{label: 'Reports/Week', data: weekData, borderColor: accent, backgroundColor: accent + '20', fill: true, tension: 0.3, pointRadius: 4}]},
-                options: {responsive: true, plugins: {legend: {display: false}}, scales: {y: {beginAtZero: true, grid: {color: gridColor}}, x: {grid: {display: false}}}}
+                options: {responsive: true, maintainAspectRatio: false, plugins: {legend: {display: false}}, scales: {y: {beginAtZero: true, grid: {color: gridColor}}, x: {grid: {display: false}}}}
             });
         })();
 
@@ -5163,6 +5164,215 @@ function editExpense(id, field, value) {
 }
 </script>
 <?php } // end origin-only expenses ?>
+
+<?php elseif ($active_view === 'deployments'): ?>
+<!-- ══════════════ DEPLOYMENT ASSESSMENTS ══════════════ -->
+<?php if (!$is_origin) { echo '<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">Origin access required.</div>'; } else {
+    $dep_path = __DIR__ . '/data/deployment_assessments.json';
+    $dep_data = file_exists($dep_path) ? json_decode(file_get_contents($dep_path), true) : [];
+    if (!is_array($dep_data)) $dep_data = [];
+
+    // Handle form actions
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'save_deployment') {
+        $dep_id = $_POST['dep_id'] ?? ('dep_' . bin2hex(random_bytes(8)));
+        $dep_entry = [
+            'id' => $dep_id,
+            'status' => $_POST['dep_status'] ?? 'pending',
+            'client_name' => trim($_POST['dep_client_name'] ?? ''),
+            'client_email' => trim($_POST['dep_client_email'] ?? ''),
+            'client_org' => trim($_POST['dep_client_org'] ?? ''),
+            'model_name' => trim($_POST['dep_model_name'] ?? ''),
+            'endpoint_url' => trim($_POST['dep_endpoint_url'] ?? ''),
+            'system_prompt' => trim($_POST['dep_system_prompt'] ?? ''),
+            'use_case' => trim($_POST['dep_use_case'] ?? ''),
+            'notes' => trim($_POST['dep_notes'] ?? ''),
+            'break_run_id' => trim($_POST['dep_break_run_id'] ?? ''),
+            'assure_run_id' => trim($_POST['dep_assure_run_id'] ?? ''),
+            'certification_tier' => $_POST['dep_cert_tier'] ?? '',
+            'price_cents' => (int)($_POST['dep_price_cents'] ?? 300000),
+            'paid' => !empty($_POST['dep_paid']),
+            'created_at' => $dep_data[$dep_id]['created_at'] ?? date('c'),
+            'updated_at' => date('c'),
+        ];
+        $dep_data[$dep_id] = $dep_entry;
+        file_put_contents($dep_path, json_encode($dep_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        try { db_audit_log($auth['email'] ?? '', $auth_role, 'deployment.' . ($_POST['dep_id'] ? 'update' : 'create'), 'deployment', $dep_id, ['client' => $dep_entry['client_org'], 'model' => $dep_entry['model_name']]); } catch (Exception $e) {}
+    }
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'delete_deployment') {
+        $del_id = $_POST['dep_delete_id'] ?? '';
+        if ($del_id && isset($dep_data[$del_id])) {
+            unset($dep_data[$del_id]);
+            file_put_contents($dep_path, json_encode($dep_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        }
+    }
+
+    $status_colors = ['pending' => '#e6db74', 'in_progress' => '#66d9ef', 'complete' => '#a6e22e', 'delivered' => '#a6e22e', 'cancelled' => '#f92672'];
+    $status_labels = ['pending' => 'Pending', 'in_progress' => 'In Progress', 'complete' => 'Complete', 'delivered' => 'Delivered', 'cancelled' => 'Cancelled'];
+?>
+<h2 style="margin-bottom:24px">Deployment Assessments <span class="badge" style="font-size:0.65em;margin-left:8px"><?php echo count($dep_data); ?> total</span></h2>
+
+<div class="card" style="padding:20px;margin-bottom:20px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h3>Active Assessments</h3>
+        <button onclick="document.getElementById('dep-editor').style.display='block'" class="btn" style="padding:8px 16px;background:var(--accent);color:#111;font-weight:600;font-size:0.85em">+ New Assessment</button>
+    </div>
+    <?php if (empty($dep_data)): ?>
+        <p class="text-dim" style="text-align:center;padding:24px">No deployment assessments yet. Create one from an enterprise inquiry or add manually.</p>
+    <?php else: ?>
+    <div style="overflow-x:auto">
+        <table style="width:100%;font-size:0.85em">
+            <thead><tr><th>Client</th><th>Model</th><th>Use Case</th><th>Status</th><th>Tier</th><th>Paid</th><th>Created</th><th></th></tr></thead>
+            <tbody>
+            <?php foreach (array_reverse($dep_data, true) as $did => $d): ?>
+                <tr>
+                    <td>
+                        <div style="font-weight:600"><?php echo htmlspecialchars($d['client_org'] ?? ''); ?></div>
+                        <div style="font-size:0.82em;color:var(--text-dim)"><?php echo htmlspecialchars($d['client_name'] ?? ''); ?></div>
+                    </td>
+                    <td style="font-weight:500"><?php echo htmlspecialchars($d['model_name'] ?? ''); ?></td>
+                    <td style="font-size:0.82em;color:var(--text-dim)"><?php echo htmlspecialchars(substr($d['use_case'] ?? '', 0, 60)); ?><?php echo strlen($d['use_case'] ?? '') > 60 ? '...' : ''; ?></td>
+                    <td><span class="badge" style="background:<?php echo $status_colors[$d['status'] ?? 'pending'] ?? 'var(--text-dim)'; ?>;color:#111;font-size:0.7em"><?php echo $status_labels[$d['status'] ?? 'pending'] ?? 'Unknown'; ?></span></td>
+                    <td>
+                        <?php if ($d['certification_tier'] ?? ''): ?>
+                            <?php
+                            $tier_c = ['full' => '#a6e22e', 'conditional' => '#e6db74', 'restricted' => '#fd971f', 'high_risk' => '#f92672'];
+                            $tier_l = ['full' => 'Full', 'conditional' => 'Conditional', 'restricted' => 'Restricted', 'high_risk' => 'High Risk'];
+                            ?>
+                            <span style="color:<?php echo $tier_c[$d['certification_tier']] ?? 'var(--text-dim)'; ?>;font-weight:600;font-size:0.82em"><?php echo $tier_l[$d['certification_tier']] ?? '—'; ?></span>
+                        <?php else: ?>
+                            <span class="text-dim" style="font-size:0.82em">—</span>
+                        <?php endif; ?>
+                    </td>
+                    <td><?php echo !empty($d['paid']) ? '<span class="text-green">Yes</span>' : '<span class="text-dim">No</span>'; ?></td>
+                    <td style="font-size:0.78em;color:var(--text-dim)"><?php echo $d['created_at'] ? date('M j', strtotime($d['created_at'])) : '—'; ?></td>
+                    <td style="white-space:nowrap">
+                        <button class="btn btn-sm" style="padding:2px 8px;font-size:0.65em" onclick='editDeployment(<?php echo json_encode($did); ?>, <?php echo json_encode($d, JSON_HEX_APOS | JSON_HEX_QUOT); ?>)'>Edit</button>
+                        <?php if ($d['break_run_id'] ?? ''): ?>
+                            <a href="/report/<?php echo htmlspecialchars($d['break_run_id']); ?>" class="btn btn-sm" style="padding:2px 8px;font-size:0.65em" target="_blank">Report</a>
+                        <?php endif; ?>
+                        <?php if ($d['break_run_id'] ?? ''): ?>
+                            <a href="/debrief/<?php echo htmlspecialchars($d['break_run_id']); ?>" class="btn btn-sm" style="padding:2px 8px;font-size:0.65em;background:rgba(102,217,239,0.1);color:var(--accent);border:1px solid rgba(102,217,239,0.3)" target="_blank">Debrief</a>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php endif; ?>
+</div>
+
+<!-- Deployment editor form -->
+<div id="dep-editor" class="card" style="padding:24px;display:none;margin-bottom:20px">
+    <h3 id="dep-editor-title" style="margin-bottom:16px">New Deployment Assessment</h3>
+    <form method="POST" action="/admin/deployments?action=save_deployment">
+        <input type="hidden" name="dep_id" id="dep-id" value="">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <div>
+                <label style="font-size:0.78em;color:var(--text-dim);display:block;margin-bottom:4px">Client Organization</label>
+                <input type="text" name="dep_client_org" id="dep-client-org" required class="form-input" style="width:100%">
+            </div>
+            <div>
+                <label style="font-size:0.78em;color:var(--text-dim);display:block;margin-bottom:4px">Contact Name</label>
+                <input type="text" name="dep_client_name" id="dep-client-name" class="form-input" style="width:100%">
+            </div>
+            <div>
+                <label style="font-size:0.78em;color:var(--text-dim);display:block;margin-bottom:4px">Contact Email</label>
+                <input type="email" name="dep_client_email" id="dep-client-email" class="form-input" style="width:100%">
+            </div>
+            <div>
+                <label style="font-size:0.78em;color:var(--text-dim);display:block;margin-bottom:4px">Model Being Used</label>
+                <input type="text" name="dep_model_name" id="dep-model-name" required class="form-input" style="width:100%" placeholder="e.g., GPT-4o via OpenAI API">
+            </div>
+            <div>
+                <label style="font-size:0.78em;color:var(--text-dim);display:block;margin-bottom:4px">Endpoint URL</label>
+                <input type="text" name="dep_endpoint_url" id="dep-endpoint-url" class="form-input" style="width:100%" placeholder="https://api.openai.com/v1">
+            </div>
+            <div>
+                <label style="font-size:0.78em;color:var(--text-dim);display:block;margin-bottom:4px">Use Case</label>
+                <input type="text" name="dep_use_case" id="dep-use-case" class="form-input" style="width:100%" placeholder="Customer service chatbot, medical assistant, etc.">
+            </div>
+        </div>
+        <div style="margin-bottom:12px">
+            <label style="font-size:0.78em;color:var(--text-dim);display:block;margin-bottom:4px">System Prompt (the client's configuration)</label>
+            <textarea name="dep_system_prompt" id="dep-system-prompt" class="form-input" style="width:100%;min-height:80px;font-family:var(--font-mono);font-size:0.82em" placeholder="The system-level instructions they use with the model..."></textarea>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+            <div>
+                <label style="font-size:0.78em;color:var(--text-dim);display:block;margin-bottom:4px">Status</label>
+                <select name="dep_status" id="dep-status" class="form-input" style="width:100%">
+                    <option value="pending">Pending</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="complete">Complete</option>
+                    <option value="delivered">Delivered</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+            </div>
+            <div>
+                <label style="font-size:0.78em;color:var(--text-dim);display:block;margin-bottom:4px">Certification Tier</label>
+                <select name="dep_cert_tier" id="dep-cert-tier" class="form-input" style="width:100%">
+                    <option value="">Not assessed yet</option>
+                    <option value="full">Full Compliance</option>
+                    <option value="conditional">Conditional</option>
+                    <option value="restricted">Restricted Use</option>
+                    <option value="high_risk">High Risk</option>
+                </select>
+            </div>
+            <div>
+                <label style="font-size:0.78em;color:var(--text-dim);display:block;margin-bottom:4px">Price (cents)</label>
+                <input type="number" name="dep_price_cents" id="dep-price-cents" value="300000" class="form-input" style="width:100%">
+            </div>
+            <div>
+                <label style="font-size:0.78em;color:var(--text-dim);display:block;margin-bottom:4px">&nbsp;</label>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.85em">
+                    <input type="checkbox" name="dep_paid" id="dep-paid" value="1"> Paid
+                </label>
+            </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <div>
+                <label style="font-size:0.78em;color:var(--text-dim);display:block;margin-bottom:4px">Break Run ID (link to report)</label>
+                <input type="text" name="dep_break_run_id" id="dep-break-run-id" class="form-input" style="width:100%;font-family:var(--font-mono);font-size:0.82em" placeholder="e.g., cfe3c53239962cd7">
+            </div>
+            <div>
+                <label style="font-size:0.78em;color:var(--text-dim);display:block;margin-bottom:4px">Assure Run ID</label>
+                <input type="text" name="dep_assure_run_id" id="dep-assure-run-id" class="form-input" style="width:100%;font-family:var(--font-mono);font-size:0.82em" placeholder="e.g., 91e159e048b353c4">
+            </div>
+        </div>
+        <div style="margin-bottom:16px">
+            <label style="font-size:0.78em;color:var(--text-dim);display:block;margin-bottom:4px">Internal Notes</label>
+            <textarea name="dep_notes" id="dep-notes" class="form-input" style="width:100%;min-height:60px" placeholder="Internal notes about this assessment..."></textarea>
+        </div>
+        <div style="display:flex;gap:8px">
+            <button type="submit" class="btn" style="padding:10px 24px;background:var(--accent);color:#111;font-weight:600">Save Assessment</button>
+            <button type="button" onclick="document.getElementById('dep-editor').style.display='none'" class="btn" style="padding:10px 24px;background:var(--bg-surface);color:var(--text);border:1px solid var(--border)">Cancel</button>
+        </div>
+    </form>
+</div>
+
+<script>
+function editDeployment(id, data) {
+    document.getElementById('dep-editor').style.display = 'block';
+    document.getElementById('dep-editor-title').textContent = 'Edit: ' + (data.client_org || id);
+    document.getElementById('dep-id').value = id;
+    document.getElementById('dep-client-org').value = data.client_org || '';
+    document.getElementById('dep-client-name').value = data.client_name || '';
+    document.getElementById('dep-client-email').value = data.client_email || '';
+    document.getElementById('dep-model-name').value = data.model_name || '';
+    document.getElementById('dep-endpoint-url').value = data.endpoint_url || '';
+    document.getElementById('dep-system-prompt').value = data.system_prompt || '';
+    document.getElementById('dep-use-case').value = data.use_case || '';
+    document.getElementById('dep-status').value = data.status || 'pending';
+    document.getElementById('dep-cert-tier').value = data.certification_tier || '';
+    document.getElementById('dep-price-cents').value = data.price_cents || 300000;
+    document.getElementById('dep-paid').checked = !!data.paid;
+    document.getElementById('dep-break-run-id').value = data.break_run_id || '';
+    document.getElementById('dep-assure-run-id').value = data.assure_run_id || '';
+    document.getElementById('dep-notes').value = data.notes || '';
+    document.getElementById('dep-editor').scrollIntoView({behavior: 'smooth'});
+}
+</script>
+<?php } // end origin-only deployments ?>
 
 <?php elseif ($active_view === 'registry'): ?>
 <!-- ══════════════ MODEL REGISTRY ══════════════ -->

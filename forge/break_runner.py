@@ -125,6 +125,9 @@ class BreakRunner:
         self_rate: bool = False,
         tier: str = "community",
         progress_callback: Any = None,
+        system_prompt: str | None = None,
+        assessment_context: dict | None = None,
+        report_type: str = "break",
     ) -> BreakResult:
         """Execute a break/stress run and return a BreakResult.
 
@@ -137,6 +140,13 @@ class BreakRunner:
                                  language-specific probes are appended to the
                                  fingerprint suite based on the active session.
             self_rate:           Ask the model to grade its own responses.
+            system_prompt:       Optional system prompt injected into every
+                                 scenario. Used for Deployment Assessments.
+                                 Hashed (SHA-512) and stored in assessment_context;
+                                 never stored in cleartext in the signed report.
+            assessment_context:  Optional metadata for Deployment Assessments.
+            report_type:         "break" (model certification) or "deployment"
+                                 (deployment assessment). Tags the signed report.
         Returns:
             BreakResult with all scores, failure modes, and signed report.
         """
@@ -151,7 +161,10 @@ class BreakRunner:
             passport_id=self._passport_id,
         )
 
-        # Optionally run fingerprint probes to feed stability profile
+        # Optionally run fingerprint probes to feed stability profile.
+        # For Deployment Assessments, the fingerprint MUST be run with the
+        # system prompt injected — otherwise we'd be fingerprinting the base
+        # model, not the deployed configuration.
         fp_scores: dict[str, float] = {}
         if include_fingerprint and mode == "full":
             try:
@@ -166,7 +179,11 @@ class BreakRunner:
                     except Exception as exc:
                         log.debug("Language probes unavailable: %s", exc)
                 fp = BehavioralFingerprint(config_dir=self._config_dir)
-                fp_scores = fp.run_probes(llm, model, extra_probes=extra_probes or None)
+                fp_scores = fp.run_probes(
+                    llm, model,
+                    extra_probes=extra_probes or None,
+                    system_prompt=system_prompt,
+                )
             except Exception as exc:
                 log.debug("Fingerprint probes skipped: %s", exc)
 
@@ -177,8 +194,14 @@ class BreakRunner:
             self_rate=self_rate,
             tier=tier,
             progress_callback=progress_callback,
+            system_prompt=system_prompt,
+            assessment_context=assessment_context,
         )
-        report = generate_report(assurance_run, config_dir=self._config_dir, report_type="break")
+        report = generate_report(
+            assurance_run,
+            config_dir=self._config_dir,
+            report_type=report_type,
+        )
 
         failure_modes = self._extract_failure_modes(assurance_run.results)
         stability = self._compute_stability(

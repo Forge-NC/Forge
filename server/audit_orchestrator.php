@@ -264,6 +264,8 @@ function runpod_dispatch_job(array $job_input, string $webhook_url, array $confi
             error_log("GPU routing: {$params_b}B → {$tier['tier']} ({$tier['gpu']})");
         }
     } else {
+        // api_endpoint AND deployment_assessment both use the lightweight API worker
+        // (no GPU provisioning — just makes HTTP calls to the customer's endpoint)
         $endpoint_id = $config['runpod_endpoint_id_api'] ?? '';
     }
 
@@ -618,6 +620,34 @@ if ($action === 'dispatch' && $method === 'POST') {
             'vllm_flags'    => $model['vllm_flags'] ?? '',
             'vllm_env'      => $model['vllm_env'] ?? $model['vllm_env_auto'] ?? '',
         ];
+
+        // Deployment Assessment: attach customer's deployment configuration.
+        // The system_prompt is stored encrypted at rest in the order record
+        // (via audit_encrypt_api_key, which uses libsodium secretbox with a
+        // key derived from Origin). Decrypt here only at the moment of
+        // dispatch and pass over HTTPS to the worker. The handler never
+        // writes it to disk; it's only held in worker memory during the run.
+        if ($access === 'deployment_assessment') {
+            require_once __DIR__ . '/includes/audit_crypto.php';
+            // Pull encrypted field from the model record (set by webhook at payment)
+            $sp_enc = $model['system_prompt_encrypted'] ?? '';
+            $sp = '';
+            if ($sp_enc) {
+                $decrypted = audit_decrypt_api_key($sp_enc);
+                if ($decrypted !== null) $sp = $decrypted;
+            }
+            // Fallback: also accept plaintext if present (admin-entered records)
+            if (!$sp && !empty($model['system_prompt'])) {
+                $sp = $model['system_prompt'];
+            }
+            $job_input['system_prompt']     = $sp;
+            $job_input['custom_headers']    = $model['custom_headers'] ?? [];
+            $job_input['use_case']          = $model['use_case'] ?? '';
+            $job_input['tool_bindings']     = $model['tool_bindings'] ?? [];
+            $job_input['request_format']    = $model['request_format'] ?? 'openai_compat';
+            $job_input['deployment_id']     = $model['deployment_id'] ?? $order['deployment_id'] ?? '';
+            $job_input['compliance_target'] = $model['compliance_target'] ?? '';
+        }
 
         // Dry run: validate everything but don't actually dispatch
         $dry_run = !empty($input['dry_run']) || !empty($_GET['dry_run']);
