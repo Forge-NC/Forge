@@ -4,9 +4,9 @@
 > **Canonical URL:** https://forge-nc.dev/protocol (once shipped)
 > **Reference implementations:**
 > - Python: `forge/external_runner_keys.py`
-> - PHP: `server/includes/forge_crypto_v2.php`
+> - PHP: `server/includes/external_runner_crypto.php`
 > **Interop fixtures:** `tests/fixtures/external_runner_vectors.json`
-> **Test suites:** `tests/test_external_runner_interop.py`, `server/tests/test_forge_crypto_v2.php`
+> **Test suites:** `tests/test_external_runner_interop.py`, `server/tests/test_external_runner_crypto.php`
 
 ## 1. Purpose
 
@@ -57,7 +57,7 @@ A deterministic JSON serialization used everywhere a signature or hash must be c
 
 **Reference implementations:**
 - Python: `forge.external_runner_keys._canonical_json` (uses `json.dumps(obj, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')`)
-- PHP: `Forge\Crypto\forge_canonical_json` in `server/includes/forge_crypto_v2.php`
+- PHP: `Forge\Crypto\forge_canonical_json` in `server/includes/external_runner_crypto.php`
 
 Golden vectors for canonical JSON are in `tests/fixtures/external_runner_vectors.json` under `canonical_json_cases`.
 
@@ -255,8 +255,8 @@ Test vector origin seed is 32 bytes of `0x11`. **This is a deterministic test va
 | Path | Purpose |
 |---|---|
 | `forge/external_runner_keys.py` | Python reference implementation |
-| `server/includes/forge_crypto_v2.php` | PHP reference implementation |
+| `server/includes/external_runner_crypto.php` | PHP reference implementation |
 | `tests/fixtures/external_runner_vectors.json` | Shared golden vectors |
 | `tests/test_external_runner_interop.py` | Python parity test suite |
-| `server/tests/test_forge_crypto_v2.php` | PHP parity test suite |
+| `server/tests/test_external_runner_crypto.php` | PHP parity test suite |
 | `docs/forge-protocol-v1.md` | This document |
