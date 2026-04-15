@@ -43,7 +43,7 @@ jobs:
         run: |
           SHA="${GITHUB_SHA::12}"
           INPUT_TAG="${{ github.event.inputs.tag }}"
-          IMAGE="ghcr.io/${{ github.repository_owner }}/forge-external-runner"
+          IMAGE="ghcr.io/forge-nc/forge-external-runner"
           TAGS="${IMAGE}:${SHA}"
           if [ "${GITHUB_REF}" = "refs/heads/master" ]; then
             TAGS="${TAGS},${IMAGE}:latest,${IMAGE}:v1"
