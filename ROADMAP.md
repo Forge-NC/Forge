@@ -3,27 +3,116 @@
 
 > Written: 2026-03-24
 > Updated: 2026-03-25 — LAUNCHED (repo public, PyPI live)
-> Status: v0.9.0 PUBLIC — Phase 1 nearly complete
-> Previous roadmap (Phases 1-5 engineering) fully implemented and archived
+> Updated: 2026-04-14 — External Runner Protocol planning, scenario expansion, perpetuity plan
+> Status: v0.9.0+ PUBLIC — Phase 1 shipped, Phase 2–3 in motion
 > This document is Forge-readable. Internal AI, read this to understand the plan.
 
 ---
 
-## Where We Are (2026-03-25)
+## Where We Are (2026-04-14)
 
-Forge v0.9.0 is live and publicly available:
-- **GitHub:** https://github.com/Forge-NC/Forge (public, 2026-03-25)
-- **PyPI:** `pip install forge-nc` (published 2026-03-25)
-- **Website:** https://forge-nc.dev (live with docs, dashboard, admin, Matrix)
+Forge is live and publicly available:
+- **GitHub:** https://github.com/Forge-NC/Forge (public since 2026-03-25)
+- **PyPI:** `pip install forge-nc`
+- **Website:** https://forge-nc.dev (docs, dashboard, admin, Matrix, enterprise pricing)
 - **VS Code extension:** Built and packaged, marketplace publishing pending
 
-80,000+ lines of Python, 18,000+ lines of PHP server, a VS Code extension,
-1,318 passing tests, 60 slash commands, 28 AI tools, 38 assurance scenarios,
-30-probe behavioral fingerprinting, Ed25519-signed reports, 14 themes,
-XP/achievement system, fleet management, and the Forge Matrix™ 3D visualization.
+### Current Stats
+- ~56,448 lines Python (forge/) + ~18,890 lines tests + ~18,407 lines server PHP
+- **74 assurance scenarios across 8 categories** (was 38 at launch; 74 as of 2026-04-13)
+- Compliance maps: EU AI Act / NIST AI RMF / ISO 42001 / SOC2 / HIPAA — **adding NIST 800-53 / CMMC 2.0 / FedRAMP** to open federal/DoD market
+- `/break` consolidated (all flags collapsed into one command; no more `--full`)
+- 1,318 passing tests (pytest-verified), 59 slash commands, 28 AI tools, 14 themes
+- Forge Crucible: 9-layer security pipeline (pattern scanner → semantic anomaly → behavioral tripwire → canary trap → threat intelligence → command guard → path sandbox → plan verifier → forensic auditor)
+- Ed25519-signed reports + hash-chained scenarios + Origin countersignature pipeline
+- Forge Matrix live, public /report views live, /verify tool live
 
-**Patent clock started 2026-03-25. Filing deadline: 2027-03-25.**
-Three provisional patent applications in preparation (semantic anomaly, behavioral tripwire, continuity grading).
+### Patent Status
+**Patent clock started 2026-03-25. Filing deadline: 2027-03-25 (US 1-year grace).**
+Three provisional patent applications in preparation. Patent funding not yet available — filing as resources allow. **Rule: no new methodology disclosure in docs / blogs / arXiv until provisionals are filed.**
+
+### The Three Paid SKUs (authoritative names, locked 2026-04-14)
+1. **Deployment Assessment** — for developers/companies integrating LLMs into products. Audits the deployment, not the model itself.
+2. **Startup Audit** — a Forge Certified Audit; single model; for LLM creators/startups.
+3. **Enterprise Audit** — a Forge Certified Audit; up to 5 models; for larger LLM creators.
+
+Pricing being revised upward from initial $3K / $7.5K / $30K to align with market ($8K–$150K+ per engagement per 2026 market research). Under-pricing Enterprise by 8–25× at the $30K level.
+
+---
+
+## Active: External Runner Protocol (planning complete, implementation pending)
+
+One protocol, two delivery modes:
+- **Self-hosted FCA** — LLM creator installs Forge locally, runs /break against their own model, gets Origin-certified remotely without uploading weights.
+- **In-VPC Deployment Assessment** — Customer runs a Docker runner inside their VPC to audit internal endpoints forge-nc.dev can't reach.
+
+**Crypto stack:**
+- HKDF-SHA512 child Ed25519 keys derived per job from Origin seed (orphaned module `forge/external_runner_keys.py` already exists, needs plumbing)
+- DSSE envelope + in-toto Statement wrapping (ecosystem-compat with Sigstore/SCITT/SLSA)
+- Sealed bundles (libsodium sealed box to runner's X25519 pubkey, single-use, 10-day validity)
+- Merkle transparency log with on-demand signed tree heads
+- Well-known Origin discovery at `/.well-known/forge-origin.json`
+- Public verifier SDK (Python pure-lib, JS via npm)
+
+**Milestones (ordered, no dates):**
+- M0: Protocol spec + Python/PHP HKDF byte-vector interop tests
+- M1: Server crypto core + well-known endpoints
+- M2: Enrollment endpoint + bundle generator
+- M3: Runner container on GHCR + Sigstore keyless signing
+- M4: Ingest + verify + transparency log + Origin countersignature
+- M5: Orchestrator fork + checkout toggle
+- M6: Forge CLI self-hosted audit entry
+- M7: Revocation (two-person approval) + admin ops
+- M7.5 (parallel with M7): Public-facing marketing + trust surface
+- M8: Verifier SDK + docs + launch
+
+Full plan: `memory/forge_external_runner_plan.md`.
+
+---
+
+## Active: Perpetuity Plan (strategic marketing asset)
+
+**Goal:** Forge Certified Audit artifacts remain verifiable in perpetuity, even if Forge NC ceases to operate or Origin (user) is incapacitated. This directly neutralizes the "bus factor" objection from enterprise procurement.
+
+**v1 implementation (phased as funds allow):**
+- **Arweave permaweb pinning** of public artifacts: Origin pubkey (`/.well-known/forge-origin.json`), transparency log archive, STH history, verifier SDK source, published methodology writeups. Estimated total cost for launch: well under $1 one-time for first 5MB; ongoing ~cents per STH append. Funded from FCA sale revenue once that starts.
+- **Legal succession document** specifying trustee for Origin key backup, admin accounts, and domain/hosting. Deferred until attorney funds are available.
+- **Prepaid hosting + domain reserves** funded from FCA revenue.
+
+Marketing line (approved concept): *"Forge Certified Audit artifacts are verifiable in perpetuity. Our infrastructure is funded and legally succession-planned so that your certified report remains verifiable forever — even if Forge NC itself ceases to operate."*
+
+Full plan: `memory/forge_perpetuity_plan.md`.
+
+---
+
+## Active: Public Marketing + Trust Surface (rolls up into M7.5)
+
+Enterprise-grade, non-obnoxious marketing stack:
+
+**Tier 1 — near-free, high-leverage (priority):**
+- [ ] `/.well-known/security.txt` (RFC 9116 responsible disclosure contact)
+- [ ] Published CAIQ questionnaire response (Cloud Security Alliance) — pre-empts enterprise procurement security reviews
+- [ ] Sample Forge Certified Audit of a public open-source model (Llama/Mistral/Qwen), full-deliverable (certified report page + PDF + sanitized debrief) published as `/sample-audit`
+- [ ] Per-card "How it works" modals on enterprise.php
+- [ ] New `/how-FCA-works` deep-dive page linked from docs, /technology, card modals
+- [ ] `/technology` page restructure: two divisions (Forge-for-coders / Forge Certified Audits)
+- [ ] Trust badges on `report_view.php` with hover explanations
+- [ ] `/verify` page with live in-browser JS verifier
+- [ ] Newsroom / changelog page with RSS feed + Discord bot integration
+
+**Tier 2 — costs time/modest funds (when available):**
+- [ ] arXiv preprint of Forge Crucible methodology (free to post, but ONLY after provisional patents filed — public disclosure starts patent clocks)
+- [ ] "Forge Certified" embed badge program for customer websites (viral trust signal)
+- [ ] Conference submissions: DEF CON AI Village, Black Hat, RSAC (user preference: defer until comfortable with public speaking)
+- [ ] ISO 42001 self-certification for Forge NC (the auditor audited — killer credibility)
+- [ ] Advisory board recruitment (2–3 AI safety/security names)
+
+**Tier 3 — enterprise table stakes at certain deal sizes:**
+- [ ] SOC 2 Type I self-assessment → Type II certification
+- [ ] E&O + cyber liability insurance
+- [ ] Formal MSA + NDA templates
+
+---
 
 ---
 

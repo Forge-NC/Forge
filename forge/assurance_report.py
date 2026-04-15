@@ -175,6 +175,11 @@ def generate_report(
         "self_attack_results":   run.self_attack_results if run.self_attack_results else None,
         "regulatory_readiness":  run.regulatory_readiness if run.regulatory_readiness else None,
         "matrix_comparison":     matrix_comparison,
+        # assessment_context is populated for Deployment Assessments
+        # (report_type == "deployment"). Contains endpoint_host,
+        # system_prompt_sha512, system_prompt_length, use_case, etc.
+        # Empty dict for Model Certification runs.
+        "assessment_context":    run.assessment_context if run.assessment_context else None,
         "generated_at":          time.time(),
     }
 

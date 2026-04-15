@@ -1914,6 +1914,11 @@ class AssuranceRun:
     self_attack_results: list[dict] = field(default_factory=list)
     # Regulatory readiness scores (Protocol v3)
     regulatory_readiness: dict = field(default_factory=dict)
+    # Deployment Assessment metadata (empty for Model Certification runs).
+    # Contains endpoint_host, system_prompt_sha512, system_prompt_length,
+    # use_case, tool_bindings_sha512, request_format, deployment_id, etc.
+    # The system prompt TEXT is never stored here — only its SHA-512.
+    assessment_context: dict = field(default_factory=dict)
     # Signature over the serialised run (populated by AssuranceReport)
     signature: str = ""
     pub_key_b64: str = ""
@@ -1947,6 +1952,8 @@ class AssuranceRunner:
         self_rate: bool = False,
         tier: str = "community",
         progress_callback: Any = None,
+        system_prompt: str | None = None,
+        assessment_context: dict | None = None,
     ) -> AssuranceRun:
         """Execute the assurance scenario library and return an AssuranceRun.
 
@@ -1956,6 +1963,15 @@ class AssuranceRunner:
             categories:           Limit to specific categories (None = all).
             fingerprint_scores:   Pre-computed behavioral fingerprint to embed.
             tier:                 BPoS tier (power-only categories gated).
+            system_prompt:        Optional system-level prompt to inject into every
+                                  scenario's message list. Used for Deployment
+                                  Assessments where the customer's deployment has
+                                  a specific system configuration being tested.
+                                  NEVER stored in the signed report — only its
+                                  SHA-512 hash is embedded in assessment_context.
+            assessment_context:   Optional metadata describing the deployment being
+                                  assessed (endpoint host, system_prompt SHA-512,
+                                  use_case, etc.). Stored in the signed report.
 
         Returns:
             Completed AssuranceRun (not yet signed — call AssuranceReport to sign).
@@ -1972,6 +1988,15 @@ class AssuranceRunner:
             if (categories is None or s["category"] in categories)
         ]
 
+        # Build assessment_context from passed-in metadata + auto-computed
+        # system prompt hash. Never include the system prompt TEXT here.
+        _ctx = dict(assessment_context or {})
+        if system_prompt:
+            import hashlib as _hl
+            _sp_sha512 = _hl.sha512(system_prompt.encode("utf-8")).hexdigest()
+            _ctx.setdefault("system_prompt_sha512", _sp_sha512)
+            _ctx.setdefault("system_prompt_length", len(system_prompt))
+
         run = AssuranceRun(
             run_id=run_id,
             model=model,
@@ -1981,11 +2006,48 @@ class AssuranceRunner:
             machine_id=self._machine_id,
             passport_id=self._passport_id,
             behavioral_fingerprint=fingerprint_scores or {},
+            assessment_context=_ctx,
         )
 
         prev_hash = ""
         category_counts: dict[str, list[bool]] = {}
         weighted_scores: list[tuple[float, float]] = []  # (weight, passed_float)
+
+        # Build the system message to inject if a deployment system_prompt is set
+        # This is how Deployment Assessments differ from Model Certifications:
+        # the customer's system prompt is prepended to every scenario message list
+        # so we test the model AS DEPLOYED, not as a base model.
+        _sys_msg = None
+        _sys_prompt_scrub_chunks: list[str] = []
+        if system_prompt:
+            _sys_msg = {"role": "system", "content": system_prompt}
+            # Build scrub chunks: any 40+ char substring of the system prompt that
+            # appears in a response must be redacted before storage to prevent
+            # customer IP leakage in the signed report. Split on common boundaries
+            # and keep chunks that are substantive (>= 40 chars).
+            import re as _re
+            _sp_chunks = _re.split(r'[\n.!?]+', system_prompt)
+            for _c in _sp_chunks:
+                _c = _c.strip()
+                if len(_c) >= 40:
+                    _sys_prompt_scrub_chunks.append(_c)
+            # Also add the full prompt for exact-match detection
+            if len(system_prompt.strip()) >= 40:
+                _sys_prompt_scrub_chunks.append(system_prompt.strip())
+
+        def _scrub_system_prompt_leakage(response_text: str) -> str:
+            """Redact any leaked system prompt content from a response before
+            it's stored in the signed report. This is critical: the fact that
+            a model echoed the system prompt is a finding we record, but we
+            must not leak the customer's IP in the artifact itself.
+            """
+            if not _sys_prompt_scrub_chunks or not response_text:
+                return response_text
+            out = response_text
+            for chunk in _sys_prompt_scrub_chunks:
+                if chunk and chunk in out:
+                    out = out.replace(chunk, "[SYSTEM_PROMPT_REDACTED]")
+            return out
 
         def _execute_prompt(prompt_or_turns):
             """Execute a single-turn prompt or multi-turn conversation.
@@ -1993,13 +2055,18 @@ class AssuranceRunner:
             Returns the final model response text.
             """
             if isinstance(prompt_or_turns, str):
-                # Single-turn: one user message
-                messages = [{"role": "user", "content": prompt_or_turns}]
+                # Single-turn: one user message (plus system prompt if configured)
+                messages = []
+                if _sys_msg:
+                    messages.append(_sys_msg)
+                messages.append({"role": "user", "content": prompt_or_turns})
                 result = collect_response(llm, messages, temperature=0.0)
                 return result.get("text", "").strip()
 
             # Multi-turn: iterate through turns, build conversation
             messages = []
+            if _sys_msg:
+                messages.append(_sys_msg)
             final_resp = ""
             for turn in prompt_or_turns:
                 if turn["role"] == "user":
@@ -2056,9 +2123,11 @@ class AssuranceRunner:
                 p, _ = score_scenario(scenario, resp)
                 variant_pass_floats.append(1.0 if p else 0.0)
                 label = "main" if i == 0 else f"variant {i}"
-                variant_responses.append((label, resp, p))
+                # Scrub system prompt leakage before storing (deployment assessments)
+                scrubbed_resp = _scrub_system_prompt_leakage(resp)
+                variant_responses.append((label, scrubbed_resp, p))
                 if i == 0:
-                    main_response = resp
+                    main_response = scrubbed_resp
 
             if consecutive_failures >= 3:
                 break

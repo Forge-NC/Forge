@@ -1056,6 +1056,23 @@ def handler(event):
                 api_key=api_key,
                 webhook_secret=webhook_secret,
             )
+        elif access_type == "deployment_assessment":
+            return _run_deployment_assessment(
+                order_id=order_id,
+                model_index=model_index,
+                model_name=model_name,
+                model_id=model_id,
+                endpoint_url=endpoint_url,
+                api_key=api_key,
+                webhook_secret=webhook_secret,
+                system_prompt=job_input.get("system_prompt", ""),
+                custom_headers=job_input.get("custom_headers", {}),
+                use_case=job_input.get("use_case", ""),
+                tool_bindings=job_input.get("tool_bindings", []),
+                request_format=job_input.get("request_format", "openai_compat"),
+                deployment_id=job_input.get("deployment_id", ""),
+                compliance_target=job_input.get("compliance_target", ""),
+            )
         elif access_type == "batch_break":
             if not HAS_VLLM:
                 return {
@@ -1256,6 +1273,246 @@ def _run_api_endpoint_audit(
         "assure_report_b64": assure_b64,
         "assure_pass_rate": assure_run.pass_rate,
         "category_pass_rates": break_result.category_pass_rates,
+    }
+
+
+def _run_deployment_assessment(
+    order_id: str,
+    model_index: int,
+    model_name: str,
+    model_id: str,
+    endpoint_url: str,
+    api_key: str,
+    webhook_secret: str,
+    system_prompt: str = "",
+    custom_headers: dict | None = None,
+    use_case: str = "",
+    tool_bindings: list | None = None,
+    request_format: str = "openai_compat",
+    deployment_id: str = "",
+    compliance_target: str = "",
+) -> dict:
+    """Run dual-pass Forge Parallax assessment against a CUSTOMER DEPLOYMENT.
+
+    Differs from _run_api_endpoint_audit in that:
+      - Customer's system_prompt is injected into every scenario message
+      - assessment_context with deployment metadata is embedded in the signed report
+      - report_type='deployment' tags the output as a Deployment Assessment
+      - System prompt is decrypted in memory only and never stored to disk here
+      - Response scrubbing removes any leaked system prompt content before signing
+
+    The system prompt is customer IP — handled with the same care as API keys.
+    """
+    from forge.break_runner import BreakRunner
+    from forge.models.openai_backend import OpenAIBackend
+    from forge.assurance import AssuranceRunner
+    from forge.assurance_report import generate_report
+    import hashlib as _hl
+    from urllib.parse import urlparse as _urlparse
+
+    # Build deployment metadata — never include cleartext system prompt
+    _sp_sha512 = _hl.sha512(system_prompt.encode("utf-8")).hexdigest() if system_prompt else ""
+    _endpoint_host = _urlparse(endpoint_url).netloc if endpoint_url else ""
+    _tool_bindings_sha512 = ""
+    if tool_bindings:
+        import json as _json
+        _tool_bindings_sha512 = _hl.sha512(
+            _json.dumps(tool_bindings, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+
+    assessment_context = {
+        "deployment_id": deployment_id,
+        "endpoint_host": _endpoint_host,
+        "system_prompt_sha512": _sp_sha512,
+        "system_prompt_length": len(system_prompt) if system_prompt else 0,
+        "use_case": use_case,
+        "tool_count": len(tool_bindings) if tool_bindings else 0,
+        "tool_bindings_sha512": _tool_bindings_sha512,
+        "request_format": request_format,
+        "compliance_target": compliance_target,
+        "assessed_at": int(time.time()) if 'time' in dir() else 0,
+    }
+
+    log.info(
+        "Starting deployment assessment: deployment=%s endpoint=%s system_prompt_len=%d use_case=%s",
+        deployment_id or "unknown",
+        _endpoint_host,
+        len(system_prompt) if system_prompt else 0,
+        use_case,
+    )
+
+    # Build LLM backend pointing at customer's endpoint
+    # NOTE: custom_headers support is a future enhancement — for v1 we use
+    # the existing Bearer auth via api_key parameter (covers OpenAI/Anthropic/
+    # most OpenAI-compat endpoints).
+    llm = OpenAIBackend(
+        model=model_id or model_name,
+        api_key=api_key,
+        base_url=endpoint_url.rstrip("/"),
+        stop_tokens=None,
+    )
+
+    # ── Pre-flight: endpoint attestation (configuration drift detection) ──
+    # Send a canonical identity probe before the audit; record SHA-512 of response.
+    # Same probe runs after the audit. If hashes differ → configuration drift.
+    _attestation_prompt = "Respond with your model name and version in one line."
+    try:
+        from forge.models.base import collect_response
+        _messages_attest = []
+        if system_prompt:
+            _messages_attest.append({"role": "system", "content": system_prompt})
+        _messages_attest.append({"role": "user", "content": _attestation_prompt})
+        _attest_start = collect_response(llm, _messages_attest, temperature=0.0)
+        _attest_start_sha = _hl.sha512(
+            _attest_start.get("text", "").strip().encode("utf-8")
+        ).hexdigest()
+        assessment_context["endpoint_attestation_start_sha512"] = _attest_start_sha
+    except Exception as exc:
+        log.warning("Pre-flight attestation failed: %s", exc)
+        assessment_context["endpoint_attestation_start_sha512"] = ""
+
+    # ── Progress reporting ──
+    _fs = endpoint_url.replace("/v1", "").replace("http://localhost:8199", "") or "https://forge-nc.dev"
+    if not _fs.startswith("http"):
+        _fs = "https://forge-nc.dev"
+    _progress_pass_count = 0
+
+    def _post(stage, cur=0, tot=0, pc=0):
+        post_audit_progress(_fs, order_id, webhook_secret, stage, cur, tot, pc)
+
+    def _progress(current, total, scenario_id, passed, latency_ms):
+        nonlocal _progress_pass_count
+        mark = "+" if passed else "x"
+        if passed:
+            _progress_pass_count += 1
+        log.info("  [%d/%d] [%s] %s (%dms)", current, total, mark, scenario_id, latency_ms)
+        if current % 2 == 0 or current == total:
+            _post("break_running", current, total, _progress_pass_count)
+
+    # ── Pass 1: Break (stress test) — WITH system prompt injected ──
+    log.info("Starting Break pass with deployment system prompt...")
+    _post("break_running", 0, 0)
+    runner = BreakRunner(
+        config_dir=FORGE_CONFIG_DIR,
+        machine_id=f"forge-deploy-{order_id[:8]}",
+        passport_id="deployment-worker",
+    )
+
+    break_result = runner.run(
+        llm=llm,
+        model=model_name,
+        mode="full",
+        include_fingerprint=True,
+        self_rate=True,
+        tier="power",
+        progress_callback=_progress,
+        system_prompt=system_prompt or None,
+        assessment_context=assessment_context,
+        report_type="deployment",
+    )
+
+    log.info(
+        "Break pass complete: %.1f%% (%d/%d)",
+        break_result.pass_rate * 100,
+        break_result.scenarios_passed,
+        break_result.scenarios_run,
+    )
+
+    # ── Pass 2: Assurance (verification) — WITH system prompt injected ──
+    log.info("Starting Assurance pass with deployment system prompt...")
+    _progress_pass_count = 0
+
+    def _progress_assure(current, total, scenario_id, passed, latency_ms):
+        nonlocal _progress_pass_count
+        mark = "+" if passed else "x"
+        if passed:
+            _progress_pass_count += 1
+        log.info("  [%d/%d] [%s] %s (%dms)", current, total, mark, scenario_id, latency_ms)
+        if current % 2 == 0 or current == total:
+            _post("assure_running", current, total, _progress_pass_count)
+
+    _post("assure_running", 0, 0)
+    assure_runner = AssuranceRunner(
+        config_dir=FORGE_CONFIG_DIR,
+        machine_id=f"forge-deploy-{order_id[:8]}",
+        passport_id="deployment-worker",
+    )
+    assure_run = assure_runner.run(
+        llm=llm,
+        model=model_name,
+        fingerprint_scores=break_result.fingerprint_scores,
+        self_rate=True,
+        tier="power",
+        progress_callback=_progress_assure,
+        system_prompt=system_prompt or None,
+        assessment_context=assessment_context,
+    )
+
+    # ── Post-flight: endpoint attestation (drift check) ──
+    try:
+        from forge.models.base import collect_response
+        _messages_attest = []
+        if system_prompt:
+            _messages_attest.append({"role": "system", "content": system_prompt})
+        _messages_attest.append({"role": "user", "content": _attestation_prompt})
+        _attest_end = collect_response(llm, _messages_attest, temperature=0.0)
+        _attest_end_sha = _hl.sha512(
+            _attest_end.get("text", "").strip().encode("utf-8")
+        ).hexdigest()
+        assure_run.assessment_context["endpoint_attestation_end_sha512"] = _attest_end_sha
+        if _attest_end_sha and assessment_context.get("endpoint_attestation_start_sha512"):
+            if _attest_end_sha != assessment_context["endpoint_attestation_start_sha512"]:
+                assure_run.assessment_context["configuration_drift_detected"] = True
+                log.warning("Configuration drift detected: endpoint attestation changed during assessment")
+            else:
+                assure_run.assessment_context["configuration_drift_detected"] = False
+    except Exception as exc:
+        log.warning("Post-flight attestation failed: %s", exc)
+
+    _post("signing", 0, 0)
+    matrix_comp = _fetch_matrix_comparison(assure_run.category_pass_rates)
+    assure_report = generate_report(
+        assure_run,
+        config_dir=FORGE_CONFIG_DIR,
+        matrix_comparison=matrix_comp,
+        report_type="deployment",
+    )
+
+    log.info(
+        "Assurance pass complete: %.1f%% (%d/%d)",
+        assure_run.pass_rate * 100,
+        sum(1 for r in assure_run.results if r.passed),
+        len(assure_run.results),
+    )
+
+    # ── Forge Parallax: cross-link the paired reports ──
+    break_result.report["paired_run_id"] = assure_report["run_id"]
+    assure_report["paired_run_id"] = break_result.report["run_id"]
+
+    import base64 as _b64
+    break_b64 = _b64.b64encode(json.dumps(break_result.report).encode()).decode()
+    assure_b64 = _b64.b64encode(json.dumps(assure_report).encode()).decode()
+
+    return {
+        "order_id": order_id,
+        "model_index": model_index,
+        "model_name": model_name,
+        "webhook_secret": webhook_secret,
+        "status": "completed",
+        "assessment_type": "deployment",
+        "deployment_id": deployment_id,
+        "run_id": break_result.run_id,
+        "run_id_paired": assure_report["run_id"],
+        "pass_rate": break_result.pass_rate,
+        "scenarios_run": break_result.scenarios_run,
+        "scenarios_passed": break_result.scenarios_passed,
+        "break_report_b64": break_b64,
+        "assure_report_b64": assure_b64,
+        "assure_pass_rate": assure_run.pass_rate,
+        "category_pass_rates": break_result.category_pass_rates,
+        "configuration_drift_detected": assure_run.assessment_context.get(
+            "configuration_drift_detected", False
+        ),
     }
 
 
