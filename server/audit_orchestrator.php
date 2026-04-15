@@ -469,6 +469,28 @@ if ($action === 'dispatch' && $method === 'POST') {
         json_out(400, ['error' => 'No models in order']);
     }
 
+    // ── External-runner dispatch mode: DO NOT hit RunPod. ────────────────
+    // The customer will complete the audit themselves via /api/v1/external/enroll
+    // and the in-VPC Docker runner (or the self-hosted Forge CLI). Mark all
+    // models as awaiting_external_runner so the admin + customer dashboard
+    // can track them, and exit cleanly.
+    $dispatch_mode = $order['dispatch_mode'] ?? 'forge_hosted';
+    if ($dispatch_mode === 'external_runner') {
+        foreach ($models as $i => &$model) {
+            if (($model['status'] ?? '') === 'completed') continue;
+            $model['status'] = 'awaiting_external_runner';
+        }
+        unset($model);
+        $order['models'] = $models;
+        $order['status'] = 'awaiting_external_runner';
+        update_audit_order($order_id, $order);
+        json_out(200, [
+            'ok' => true,
+            'dispatch_mode' => 'external_runner',
+            'next_step' => 'Customer enrolls at /api/v1/external/enroll and uploads signed report.',
+        ]);
+    }
+
     $callback_base = $config['callback_base_url'] ?? 'https://forge-nc.dev';
     $webhook_url = $callback_base . '/audit_orchestrator.php?action=runpod_complete';
 
