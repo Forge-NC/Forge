@@ -368,20 +368,31 @@ def _strip_auto_map_if_native(model_path: str) -> bool:
 
     try:
         config = json.loads(config_path.read_text())
-    except Exception:
+        log.info("Model config loaded: arch=%s, model_type=%s, auto_map=%s",
+                 config.get("architectures"), config.get("model_type"), bool(config.get("auto_map")))
+    except Exception as e:
+        log.warning("Failed to parse config.json: %s", e)
         return False
 
     auto_map = config.get("auto_map", {})
     if not auto_map:
+        log.info("No auto_map found in config — no stripping needed")
         return False
 
     # Check if the architecture is natively supported
     architectures = config.get("architectures", [])
     if not architectures:
+        log.warning("No architectures found in config.json")
         return False
 
     arch = architectures[0]
-    if arch not in _VLLM_NATIVE_ARCHITECTURES:
+
+    # ENTERPRISE EXAONE FIX: Force strip auto_map for EXAONE regardless of exact arch name
+    # Some repos use variants like "ExaoneForCausalLM" vs "ExaoneModel"
+    is_exaone = any("exaone" in a.lower() for a in architectures)
+    if is_exaone:
+        log.info("EXAONE detected — forcing auto_map removal for universal auditing capability")
+    elif arch not in _VLLM_NATIVE_ARCHITECTURES:
         log.info("Model %s has auto_map with non-native arch %s — keeping custom code", model_path, arch)
         return False
 
@@ -390,11 +401,18 @@ def _strip_auto_map_if_native(model_path: str) -> bool:
     if not config_bak.exists():
         import shutil
         shutil.copy2(str(config_path), str(config_bak))
+        log.info("Backed up original config to %s", config_bak)
 
     # Strip auto_map so vLLM uses its native implementation
-    del config["auto_map"]
+    original_auto_map = config.pop("auto_map", {})
     config_path.write_text(json.dumps(config, indent=2))
-    log.info("Stripped auto_map from %s — vLLM has native %s support (backup at config.json.vllm_bak)", model_path, arch)
+
+    if is_exaone:
+        log.info("STRIPPED auto_map from EXAONE model — bypassing trust_remote_code restrictions (backup: config.json.vllm_bak)")
+        log.info("Removed auto_map entries: %s", original_auto_map)
+    else:
+        log.info("Stripped auto_map from %s — vLLM has native %s support (backup at config.json.vllm_bak)", model_path, arch)
+
     return True
 
 
@@ -654,6 +672,20 @@ def _start_transformers_fallback(
     import threading
     import urllib.request
     import urllib.error
+    import os
+
+    # Registry vllm_only flag: some architectures (e.g. EXAONE-3.x) have NO in-tree
+    # transformers class. Their config.json carries auto_map pointing at remote modeling
+    # code, which transformers refuses to load without trust_remote_code=True. vLLM
+    # has its own native loader for these archs and is the only viable path; the
+    # transformers fallback is architecturally impossible. Fail fast with a clear msg.
+    reg_cfg = _get_registry_config(hf_repo)
+    if reg_cfg and reg_cfg.get("vllm_only"):
+        return None, "", (
+            f"vLLM-only model: {hf_repo} has no in-tree transformers class "
+            f"and the registry marks it vllm_only=true. Transformers fallback skipped. "
+            f"Fix the underlying vLLM failure instead."
+        )
 
     # Check if model uses compressed-tensors format (e.g. cyankiwi GLM-4.7).
     # Only vLLM/SGLang can load compressed-tensors — the transformers fallback cannot.
@@ -668,8 +700,8 @@ def _start_transformers_fallback(
     except Exception:
         pass
 
-    # Restore auto_map if we stripped it — the fallback venv has transformers 5.x
-    # which supports all custom code (RopeParameters, etc.)
+    # Restore auto_map for fallback — transformers can then load via custom code
+    # (with trust_remote_code=True passed explicitly below).
     config_path = Path(model_path) / "config.json"
     config_bak = Path(model_path) / "config.json.vllm_bak"
     if config_bak.exists():
@@ -694,7 +726,7 @@ try:
     except ImportError:
         import subprocess
         print("Installing gptqmodel (requires GPU, can't be pre-built in CI)...", flush=True)
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "gptqmodel"], timeout=300)
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "gptqmodel==1.2.5"], timeout=300)
         print("gptqmodel installed.", flush=True)
 
     import transformers
@@ -708,7 +740,7 @@ try:
     app = FastAPI()
     MODEL_PATH = "{model_path}"
 
-    print(f"Loading model from {{MODEL_PATH}} via transformers with trust_remote_code=True...", flush=True)
+    print(f"Loading model from {{MODEL_PATH}} via transformers 4.x with native trust_remote_code support...", flush=True)
     from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 
     # Check config first to diagnose architecture issues
@@ -732,7 +764,7 @@ try:
         if "meta tensors" in str(e):
             print(f"Standard load hit meta tensor error, trying GPTQModel.load(): {{e}}", flush=True)
             from gptqmodel import GPTQModel
-            model = GPTQModel.load(MODEL_PATH, device="cuda:0")
+            model = GPTQModel.load(MODEL_PATH, device="cuda:0", trust_remote_code=True)
         else:
             raise
     model.eval()
@@ -775,7 +807,7 @@ try:
                 temperature=max(temperature, 0.01),
                 pad_token_id=tokenizer.eos_token_id,
             )
-            # Add stop token IDs
+            # Add stop token IDs - EXAONE fix
             stop_ids = []
             for s in stop:
                 ids = tokenizer.encode(s, add_special_tokens=False)
@@ -784,7 +816,11 @@ try:
             if tokenizer.eos_token_id:
                 stop_ids.append(tokenizer.eos_token_id)
             if stop_ids:
-                gen_kwargs["eos_token_id"] = list(set(stop_ids))
+                # EXAONE models require eos_token_id as single int, not list
+                if "EXAONE" in MODEL_NAME:
+                    gen_kwargs["eos_token_id"] = stop_ids[0]  # Use first stop token
+                else:
+                    gen_kwargs["eos_token_id"] = list(set(stop_ids))
 
             output = model.generate(input_ids, **gen_kwargs)
 
@@ -1557,6 +1593,9 @@ def _run_model_weights_audit(
 
         # Pre-download from HuggingFace so vLLM gets a local path
         # (avoids vLLM/transformers HF download issues in containers)
+        # ENTERPRISE FIX: Optimize disk usage for large model downloads
+        os.environ["HF_HOME"] = "/tmp/hf_models"
+        os.environ["HF_HUB_CACHE"] = "/tmp/hf_models"
         if not model_source.startswith("http"):
             try:
                 os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)  # runpod base sets this but lacks the package
@@ -1584,8 +1623,14 @@ def _run_model_weights_audit(
         gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 1
         per_gpu_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3) if torch.cuda.is_available() else 48
 
-        # Build custom env from customer inputs
+        # Get registry configuration for verified models (including EXAONE)
+        reg_cfg = _get_registry_config(hf_repo)
+
+        # Build custom env from registry first, then customer inputs
         extra_env = {}
+        if reg_cfg and reg_cfg.get("vllm_env"):
+            extra_env.update(reg_cfg["vllm_env"])
+            log.info("Registry vllm_env for %s: %s", hf_repo, reg_cfg["vllm_env"])
         if hf_token:
             extra_env["HF_TOKEN"] = hf_token
         if custom_vllm_env:
@@ -1595,13 +1640,28 @@ def _run_model_weights_audit(
                     k, v = pair.split("=", 1)
                     extra_env[k.strip()] = v.strip()
 
+        # Build flags from registry first, then customer flags
+        registry_flags = ""
+        if reg_cfg:
+            reg_flag_list = reg_cfg.get("vllm_flags", [])
+            if reg_flag_list:
+                registry_flags = " ".join(reg_flag_list)
+                log.info("Registry vllm_flags for %s: %s", hf_repo, reg_flag_list)
+            # Override max_model_len from registry if specified
+            reg_max_len = reg_cfg.get("max_model_len")
+            if reg_max_len and "--max-model-len" not in (registry_flags + " " + vllm_flags):
+                registry_flags += f" --max-model-len {reg_max_len}"
+
+        # Combine registry flags with customer flags
+        combined_flags = (registry_flags + " " + vllm_flags).strip()
+
         vllm_proc, capture, served_model, stop_tokens, start_error = _start_vllm_with_fallback(
             model_path=model_source,
             hf_repo=hf_repo,
             gpu_count=gpu_count,
             per_gpu_gb=per_gpu_gb,
             custom_env=extra_env,
-            custom_flags=vllm_flags,
+            custom_flags=combined_flags,
             max_startup_minutes=60,
         )
 

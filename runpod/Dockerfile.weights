@@ -24,29 +24,22 @@ RUN pip install --no-cache-dir \
     cryptography>=41.0 \
     tiktoken>=0.7
 
-# Upgrade system transformers to 5.x so vLLM can load modern architectures
-# (exaone, glm4_moe_lite, etc.) that aren't in transformers 4.x.
+# Use vLLM's pinned transformers (4.57.x) — do NOT force-upgrade to 5.x.
+# vLLM 0.19 was tested against transformers 4.x; v5 changed config-loading
+# semantics and breaks vLLM's auto_map handling for archs like EXAONE.
 #
-# vLLM 0.19 pins transformers<5 but community confirms it works with 5.x.
-# The compressed-tensors package also pins <5, so we force both upgrades.
-# Both vLLM's inference engine and the transformers fallback use this.
-#
-# gptqmodel (required by transformers 5.x for AWQ loading) has no pre-built
-# wheels and requires nvidia-smi at build time — installed at runtime on the
-# GPU worker. See handler.py _start_transformers_fallback().
-#
-# Verified: vLLM 0.19 + transformers 5.x works per community (GitHub #34098).
-RUN pip install --no-cache-dir --force-reinstall --no-deps \
-    "transformers>=5.0,<6.0" \
-    "huggingface_hub>=1.5.0,<2.0" && \
-    pip install --no-cache-dir accelerate fastapi uvicorn && \
+# Note: EXAONE-3.x has NO in-tree transformers class (HF PR #34652 unmerged
+# as of Apr 2026). vLLM has its own native ExaoneForCausalLM and is the
+# only viable loader for EXAONE-3.x — that path does not depend on transformers
+# version at all. Models marked vllm_only=true in the registry skip the
+# transformers fallback entirely (see handler._start_transformers_fallback).
+RUN pip install --no-cache-dir accelerate fastapi uvicorn && \
     python -c "\
 import transformers, huggingface_hub; \
 tv=transformers.__version__; hv=huggingface_hub.__version__; \
 print(f'System transformers: {tv}'); print(f'System huggingface_hub: {hv}'); \
-assert int(tv.split('.')[0])>=5, f'Expected transformers 5.x, got {tv}'; \
-assert int(hv.split('.')[0])>=1, f'Expected huggingface_hub 1.x, got {hv}'; \
-print('All assertions passed')"
+assert int(tv.split('.')[0])==4, f'Expected transformers 4.x (vLLM 0.19 pin), got {tv}'; \
+print('Versions OK')"
 
 # Copy Forge package (changes frequently — keep last for cache efficiency)
 COPY forge/ /app/forge/
