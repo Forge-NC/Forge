@@ -11,10 +11,14 @@ FROM runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
 WORKDIR /app
 
 # Heavy deps first (cached by Docker layer cache after first build)
-# vllm 0.19.0 pins transformers>=4.56,<5 and upgrades torch to 2.10.0.
-# System state after this: transformers==4.57.6, huggingface_hub==0.36.2, torch==2.10.0
+# vLLM 0.19.1 (Apr 18, 2026) relaxed its transformers pin to allow >=5.5.1
+# (it disallows 5.0.* through 5.5.0 due to known regressions). We pin
+# transformers explicitly to 5.6.2 — EXAONE-3.x's modeling_exaone.py imports
+# RopeParameters which was added in transformers 5.0.0 and is NOT in 4.57.x.
+# torch is also upgraded to 2.10.0 by vllm.
 RUN pip install --no-cache-dir \
-    vllm==0.19.0 \
+    vllm==0.19.1 \
+    transformers==5.6.2 \
     huggingface_hub
 
 # Lightweight deps the audit chain needs
@@ -24,22 +28,26 @@ RUN pip install --no-cache-dir \
     cryptography>=41.0 \
     tiktoken>=0.7
 
-# Use vLLM's pinned transformers (4.57.x) — do NOT force-upgrade to 5.x.
-# vLLM 0.19 was tested against transformers 4.x; v5 changed config-loading
-# semantics and breaks vLLM's auto_map handling for archs like EXAONE.
-#
-# Note: EXAONE-3.x has NO in-tree transformers class (HF PR #34652 unmerged
-# as of Apr 2026). vLLM has its own native ExaoneForCausalLM and is the
-# only viable loader for EXAONE-3.x — that path does not depend on transformers
-# version at all. Models marked vllm_only=true in the registry skip the
-# transformers fallback entirely (see handler._start_transformers_fallback).
+# Architectural notes for future debuggers:
+# - EXAONE-3.x has NO in-tree transformers class (HF PR #34652 unmerged Apr 2026).
+#   The only loaders are: (a) vLLM's own native ExaoneForCausalLM, or (b)
+#   the model's own modeling_exaone.py via auto_map + trust_remote_code.
+# - vLLM uses transformers.AutoConfig for the config-parse step BEFORE its own
+#   model loader runs. For arches transformers doesn't know natively, auto_map
+#   must remain in config.json so AutoConfig can remote-load the config class.
+# - The model registry's vllm_only=true flag tells handler.py to (1) keep
+#   auto_map intact for these models and (2) skip the transformers fallback
+#   when vLLM fails (it's architecturally impossible — see _start_transformers_fallback).
+# - configuration_exaone.py imports `RopeParameters` which only exists in
+#   transformers 5.0+. Hence the explicit transformers 5.6.2 pin above.
 RUN pip install --no-cache-dir accelerate fastapi uvicorn && \
     python -c "\
 import transformers, huggingface_hub; \
 tv=transformers.__version__; hv=huggingface_hub.__version__; \
 print(f'System transformers: {tv}'); print(f'System huggingface_hub: {hv}'); \
-assert int(tv.split('.')[0])==4, f'Expected transformers 4.x (vLLM 0.19 pin), got {tv}'; \
-print('Versions OK')"
+assert tv == '5.6.2', f'Expected transformers 5.6.2 (EXAONE RopeParameters compat), got {tv}'; \
+from transformers.modeling_rope_utils import RopeParameters; \
+print('RopeParameters import OK — EXAONE-3.x configuration_exaone.py will load')"
 
 # Copy Forge package (changes frequently — keep last for cache efficiency)
 COPY forge/ /app/forge/
