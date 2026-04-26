@@ -352,13 +352,22 @@ def _is_vllm_known_arch(model_path: str) -> bool:
         return False
 
 
-def _strip_auto_map_if_native(model_path: str) -> bool:
-    """Strip auto_map from config.json if vLLM has native support for the architecture.
+def _strip_auto_map_if_native(model_path: str, hf_repo: str = "") -> bool:
+    """Strip auto_map from config.json if vLLM and transformers BOTH have native support.
 
-    Many HuggingFace model repos include custom modeling code via auto_map
-    that was written for a specific transformers version. When the Docker image
-    has a different transformers version, this custom code crashes on import —
-    even though vLLM has its own native implementation that works fine.
+    auto_map points transformers at remote code. Stripping it forces transformers to
+    use its in-tree class for the architecture — fine when one exists. But for arches
+    that vLLM supports natively while transformers does NOT (e.g. EXAONE-3.x — open
+    HF PR #34652), stripping auto_map breaks the config-parse step that vLLM still
+    delegates to transformers' AutoConfig before its own loader runs. Result: vLLM
+    fails with "Transformers does not recognize this architecture."
+
+    Rule:
+      - registry.vllm_only=true   → KEEP auto_map (vLLM needs transformers to remote-
+                                    load the config class for the parse step; vLLM's
+                                    own native implementation then handles inference)
+      - arch in _VLLM_NATIVE_ARCHITECTURES (and transformers in-tree) → STRIP auto_map
+      - everything else → keep auto_map (custom code is the only loader)
 
     Returns True if auto_map was stripped.
     """
@@ -379,7 +388,6 @@ def _strip_auto_map_if_native(model_path: str) -> bool:
         log.info("No auto_map found in config — no stripping needed")
         return False
 
-    # Check if the architecture is natively supported
     architectures = config.get("architectures", [])
     if not architectures:
         log.warning("No architectures found in config.json")
@@ -387,12 +395,17 @@ def _strip_auto_map_if_native(model_path: str) -> bool:
 
     arch = architectures[0]
 
-    # ENTERPRISE EXAONE FIX: Force strip auto_map for EXAONE regardless of exact arch name
-    # Some repos use variants like "ExaoneForCausalLM" vs "ExaoneModel"
-    is_exaone = any("exaone" in a.lower() for a in architectures)
-    if is_exaone:
-        log.info("EXAONE detected — forcing auto_map removal for universal auditing capability")
-    elif arch not in _VLLM_NATIVE_ARCHITECTURES:
+    # vllm_only models need auto_map intact so transformers can remote-load the
+    # config class. vLLM uses transformers.AutoConfig for the parse step before
+    # dispatching to its own native model implementation.
+    if hf_repo:
+        reg_cfg = _get_registry_config(hf_repo)
+        if reg_cfg and reg_cfg.get("vllm_only"):
+            log.info("Registry marks %s as vllm_only — KEEPING auto_map so transformers "
+                     "AutoConfig can register the model_type via remote code", hf_repo)
+            return False
+
+    if arch not in _VLLM_NATIVE_ARCHITECTURES:
         log.info("Model %s has auto_map with non-native arch %s — keeping custom code", model_path, arch)
         return False
 
@@ -403,15 +416,9 @@ def _strip_auto_map_if_native(model_path: str) -> bool:
         shutil.copy2(str(config_path), str(config_bak))
         log.info("Backed up original config to %s", config_bak)
 
-    # Strip auto_map so vLLM uses its native implementation
-    original_auto_map = config.pop("auto_map", {})
+    config.pop("auto_map", {})
     config_path.write_text(json.dumps(config, indent=2))
-
-    if is_exaone:
-        log.info("STRIPPED auto_map from EXAONE model — bypassing trust_remote_code restrictions (backup: config.json.vllm_bak)")
-        log.info("Removed auto_map entries: %s", original_auto_map)
-    else:
-        log.info("Stripped auto_map from %s — vLLM has native %s support (backup at config.json.vllm_bak)", model_path, arch)
+    log.info("Stripped auto_map from %s — vLLM + transformers both have native %s support (backup at config.json.vllm_bak)", model_path, arch)
 
     return True
 
@@ -493,9 +500,11 @@ def _start_vllm_with_fallback(
 
     capture = VllmOutputCapture()
 
-    # Strip auto_map from config.json if vLLM has native support for the architecture.
-    # Prevents crashes from broken custom code in HuggingFace repos.
-    _strip_auto_map_if_native(model_path)
+    # Strip auto_map from config.json if vLLM AND transformers both have native
+    # support. For vllm_only models (e.g. EXAONE-3.x where transformers has no
+    # in-tree class), auto_map is preserved so transformers' AutoConfig can
+    # remote-load the config class — vLLM's own loader still runs for inference.
+    _strip_auto_map_if_native(model_path, hf_repo)
 
     stop_tokens = _resolve_stop_tokens(model_path, hf_repo)
 
