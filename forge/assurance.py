@@ -1954,6 +1954,7 @@ class AssuranceRunner:
         progress_callback: Any = None,
         system_prompt: str | None = None,
         assessment_context: dict | None = None,
+        scenarios: list[dict] | None = None,
     ) -> AssuranceRun:
         """Execute the assurance scenario library and return an AssuranceRun.
 
@@ -1972,6 +1973,15 @@ class AssuranceRunner:
             assessment_context:   Optional metadata describing the deployment being
                                   assessed (endpoint host, system_prompt SHA-512,
                                   use_case, etc.). Stored in the signed report.
+            scenarios:            Optional explicit scenarios list. When set, OVERRIDES
+                                  the local _SCENARIOS library — used by self-hosted
+                                  Forge Certified Audits where the runner must execute
+                                  the scenario pack delivered in the sealed bundle,
+                                  not whatever code happens to live in the local
+                                  Forge install. The caller is responsible for
+                                  validating these scenarios against a hash before
+                                  calling. None falls back to local _SCENARIOS
+                                  filtered by categories.
 
         Returns:
             Completed AssuranceRun (not yet signed — call AssuranceReport to sign).
@@ -1982,9 +1992,15 @@ class AssuranceRunner:
         run_id = secrets.token_hex(8)
         started_at = time.time()
 
-        # All tiers get all scenarios — more complete data for the Matrix
+        # Bundle-supplied scenarios win when present (self-hosted FCA path).
+        # Otherwise fall back to local library filtered by category (free /break,
+        # forge-hosted runs where scenarios are in the worker image).
+        if scenarios is not None:
+            base_scenarios = scenarios
+        else:
+            base_scenarios = _SCENARIOS
         scenarios = [
-            s for s in _SCENARIOS
+            s for s in base_scenarios
             if (categories is None or s["category"] in categories)
         ]
 

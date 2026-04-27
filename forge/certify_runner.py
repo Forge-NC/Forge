@@ -234,9 +234,51 @@ def _verify_origin_signature(envelope: dict) -> None:
         raise CertifyError("envelope Origin signature did not verify")
 
 
+def _validate_bundled_scenarios(pack: dict) -> list[dict]:
+    """Verify the bundle's scenario pack against its declared content hash.
+
+    The runner is the trust boundary for self-hosted FCA. Even though the
+    bundle is sealed and Origin-signed, a malicious operator could in
+    principle manipulate the scenario list before signing the resulting
+    report — UNLESS we re-derive the hash from the bundled scenarios and
+    require it to equal what the bundle declares. The hash is also pinned
+    by the Origin envelope, so the chain is: Origin → envelope.scenario_pack_hash
+    → bundle.scenario_pack.hash → recomputed(bundle.scenario_pack.scenarios).
+    """
+    if not isinstance(pack, dict):
+        raise CertifyError("Bundle is missing scenario_pack block")
+    scenarios = pack.get("scenarios")
+    declared = pack.get("hash") or ""
+    scheme = pack.get("scheme") or ""
+    if not isinstance(scenarios, list) or not scenarios:
+        raise CertifyError("Bundle scenario_pack has no scenarios array")
+    if scheme != "forge.scenario-pack.v1":
+        raise CertifyError(f"Unknown scenario_pack scheme: {scheme!r}")
+    if not declared:
+        raise CertifyError("Bundle scenario_pack is missing 'hash'")
+
+    # Re-derive the canonical hash. MUST match forge.scenario_pack_export
+    # exactly (sort by id, sort_keys, no whitespace, ensure_ascii=False).
+    sorted_entries = sorted(scenarios, key=lambda s: s["id"])
+    canonical = json.dumps(
+        sorted_entries,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    computed = hashlib.sha512(canonical).hexdigest()
+    if not hmac.compare_digest(computed, declared):
+        raise CertifyError(
+            "Scenario pack hash mismatch — bundle was tampered with or "
+            "produced by a divergent exporter. Refusing to run."
+        )
+    return sorted_entries
+
+
 def _run_audit(bundle: dict, target_url_override: Optional[str], target_api_key: Optional[str]) -> dict:
     """Run break + assurance and return the assurance report with envelope attached."""
     from forge.assurance import AssuranceRunner
+    from forge.assurance_report import generate_report
     from forge.break_runner import BreakRunner
     from forge.models.openai_backend import OpenAIBackend
 
@@ -247,19 +289,42 @@ def _run_audit(bundle: dict, target_url_override: Optional[str], target_api_key:
     if not endpoint_url:
         raise CertifyError("No target endpoint_url (bundle and override both empty)")
 
+    # Validate and use ONLY the scenarios bundled in the sealed payload.
+    # The runner's local _SCENARIOS is intentionally NOT consulted for FCA
+    # — local Forge code may be modified by the operator; the bundle is the
+    # Origin-signed source of truth.
+    bundled_scenarios = _validate_bundled_scenarios(bundle.get("scenario_pack") or {})
+
     backend = OpenAIBackend(
         base_url=endpoint_url.rstrip("/"),
         api_key=target_api_key or os.environ.get("FORGE_TARGET_API_KEY", ""),
         model=model_id,
     )
 
-    break_result = BreakRunner(backend=backend, scenarios=None).run()
-    assure_result = AssuranceRunner(backend=backend, scenarios=None).run()
+    # BreakRunner runs the assurance suite + behavioral fingerprint and
+    # produces the break-side report; AssuranceRunner produces the
+    # paired assurance-side report. Both consume the SAME bundled scenarios.
+    break_runner = BreakRunner()
+    break_result = break_runner.run(
+        llm=backend,
+        model=model_id,
+        mode="full",
+        report_type="certify",
+        scenarios=bundled_scenarios,
+    )
 
-    break_result.report["paired_run_id"]  = assure_result.report["run_id"]
-    assure_result.report["paired_run_id"] = break_result.report["run_id"]
+    assure_runner = AssuranceRunner()
+    assure_run = assure_runner.run(
+        llm=backend,
+        model=model_id,
+        scenarios=bundled_scenarios,
+    )
+    assure_result_report = generate_report(assure_run, report_type="certify")
 
-    report = assure_result.report
+    break_result.report["paired_run_id"]    = assure_result_report["run_id"]
+    assure_result_report["paired_run_id"]   = break_result.report["run_id"]
+
+    report = assure_result_report
     report["_verification"] = {"external_envelope": envelope}
     return report
 

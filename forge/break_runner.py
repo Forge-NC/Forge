@@ -128,6 +128,7 @@ class BreakRunner:
         system_prompt: str | None = None,
         assessment_context: dict | None = None,
         report_type: str = "break",
+        scenarios: list[dict] | None = None,
     ) -> BreakResult:
         """Execute a break/stress run and return a BreakResult.
 
@@ -196,6 +197,7 @@ class BreakRunner:
             progress_callback=progress_callback,
             system_prompt=system_prompt,
             assessment_context=assessment_context,
+            scenarios=scenarios,
         )
         report = generate_report(
             assurance_run,
