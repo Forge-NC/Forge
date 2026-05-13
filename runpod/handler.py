@@ -727,16 +727,23 @@ import sys, os, traceback
 os.environ["HF_HUB_TRUST_REMOTE_CODE"] = "1"
 
 try:
-    # gptqmodel requires nvidia-smi at build time so it can't be baked into the Docker
-    # image (CI has no GPU). Install it here on the RunPod worker where nvidia-smi exists.
-    # Only runs once — subsequent loads use the cached install.
+    # gptqmodel has no pre-built wheels for our cuda/torch combo and needs
+    # nvidia-smi present at install time, so it cannot be baked into the
+    # Dockerfile (GHA runners have no GPU). It's installed once per worker
+    # cold-start; subsequent loads on the same worker hit the cache.
+    # NOTE: leave this UNPINNED. The earlier `==1.2.5` was a bad pin from
+    # the Apr 15 EXAONE recommendation script — that version has never
+    # existed on PyPI (releases skip 1.2.3 → 1.3.0), so the install
+    # always exit-1'd and the fallback path was dead. Apr 12 batch hit
+    # 35/37 with this line unpinned.
     try:
         import gptqmodel
     except ImportError:
         import subprocess
-        print("Installing gptqmodel (requires GPU, can't be pre-built in CI)...", flush=True)
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "gptqmodel==1.2.5"], timeout=300)
+        print("Installing gptqmodel (no prebuilt wheels, needs GPU at install time)...", flush=True)
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "gptqmodel"], timeout=300)
         print("gptqmodel installed.", flush=True)
+        import gptqmodel
 
     import transformers
     print(f"Transformers version: {{transformers.__version__}}", flush=True)
@@ -882,9 +889,13 @@ except Exception as exc:
     for attempt in range(360):  # 30 min
         time.sleep(5)
         if proc.poll() is not None:
-            # Process died — wait for stream to finish reading remaining output
+            # Process died — wait for stream to finish reading remaining output.
+            # Capture 30 lines of tail so the actual root cause (e.g. ModuleNotFoundError,
+            # CalledProcessError on pip install, weight key mismatch) lands in the
+            # batch_results record. 5-line tail was hiding everything but the bottom
+            # of the traceback.
             stream_thread.join(timeout=3)
-            fb_tail = "; ".join(fb_lines[-5:]) if fb_lines else "no output captured"
+            fb_tail = "; ".join(fb_lines[-30:]) if fb_lines else "no output captured"
             return None, "", f"Transformers fallback server exited with code {proc.returncode}: {fb_tail}"
         try:
             urllib.request.urlopen("http://localhost:8199/health", timeout=3)
@@ -1240,7 +1251,7 @@ def _run_api_endpoint_audit(
         mode="full",
         include_fingerprint=True,
         self_rate=True,
-        tier="power",  # Certified audits run all 38 scenarios
+        tier="power",  # Certified audits run all 74 scenarios (Forge Assurance Protocol v3)
         progress_callback=_progress,
     )
 
@@ -1834,7 +1845,7 @@ def _run_batch_break(
                     "model": hf_repo, "status": "failed",
                     "error": start_error,
                     "error_class": error_info.get("error_class", "unknown"),
-                    "vllm_last_lines": error_info.get("vllm_last_lines", [])[-10:],
+                    "vllm_last_lines": error_info.get("vllm_last_lines", [])[-30:],
                 }
                 results.append(_fail)
                 try:
