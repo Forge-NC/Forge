@@ -13,6 +13,7 @@ the orchestrator callback.
 import json
 import logging
 import os
+import signal
 import sys
 import time
 from pathlib import Path
@@ -563,7 +564,15 @@ def _start_vllm_with_fallback(
         # Clear capture for new attempt
         capture = VllmOutputCapture()
 
-        proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        # start_new_session=True puts vLLM and ALL its EngineCore subprocesses
+        # into their own process group, so we can SIGKILL the entire group on
+        # cleanup. Without this, vLLM's GPU-holding child workers survive a
+        # parent terminate/kill and leak VRAM into the next model load on
+        # warm RunPod workers — the root cause of the May 12 batch_break
+        # cascade where the 2nd-N models on a reused worker hit
+        # "Free memory on cuda:0 (0.43/23.67 GiB) less than 0.95 utilization".
+        proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                start_new_session=True)
 
         def _stream(p, cap):
             try:
@@ -865,9 +874,12 @@ except Exception as exc:
     # No separate venv needed — both vLLM and the fallback use the same transformers.
     fallback_python = "python"
     log.info("Starting transformers-direct fallback server for %s", hf_repo)
+    # Same start_new_session reasoning as the vLLM Popen — own process group
+    # so cleanup actually frees GPU memory across batch_break iterations.
     proc = subprocess.Popen(
         [fallback_python, str(server_script)],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        start_new_session=True,
     )
 
     fb_lines = []  # capture fallback output for diagnostics
@@ -2058,13 +2070,47 @@ def _run_batch_break(
                 pass
 
         finally:
+            # Kill the WHOLE process group, not just the parent. vLLM spawns
+            # EngineCore subprocesses that hold the GPU memory; SIGKILL on the
+            # parent does not reliably free that VRAM, which causes the next
+            # model on a warm RunPod worker to fail with "Free memory on cuda:0
+            # (0.43/23.67 GiB) less than 0.95 utilization". Popen above uses
+            # start_new_session=True so killpg targets the whole vLLM tree.
             if vllm_proc and vllm_proc.poll() is None:
-                log.info("Shutting down vLLM for %s", hf_repo)
-                vllm_proc.terminate()
+                log.info("Shutting down vLLM process group for %s", hf_repo)
+                try:
+                    os.killpg(os.getpgid(vllm_proc.pid), signal.SIGKILL)
+                except (ProcessLookupError, AttributeError, OSError):
+                    vllm_proc.kill()
                 try:
                     vllm_proc.wait(timeout=15)
                 except subprocess.TimeoutExpired:
-                    vllm_proc.kill()
+                    pass
+
+            # Wait for the GPU to actually report the freed memory before the
+            # next model loads. Driver release after process death is usually
+            # quick but not instant — without this poll vLLM's pre-flight
+            # `Free memory < 0.95 * total` check trips on warm-worker reuse.
+            try:
+                import torch as _t
+                if _t.cuda.is_available():
+                    import gc as _gc
+                    _gc.collect()
+                    _t.cuda.empty_cache()
+                    for _wait_attempt in range(60):  # up to 2 min
+                        free, total = _t.cuda.mem_get_info(0)
+                        if free / total >= 0.85:
+                            log.info("GPU released: %.1f / %.1f GiB free after %s",
+                                     free / 1024**3, total / 1024**3, hf_repo)
+                            break
+                        time.sleep(2)
+                    else:
+                        log.warning("GPU NOT released after 2min: %.2f / %.2f GiB free after %s — "
+                                    "next model load may fail",
+                                    free / 1024**3, total / 1024**3, hf_repo)
+            except Exception as _gpu_exc:
+                log.warning("GPU memory poll failed (non-fatal): %s", _gpu_exc)
+
             # Flush and remove batch log handler
             try:
                 _batch_log_handler.flush()
