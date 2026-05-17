@@ -619,13 +619,21 @@ def _start_vllm_with_fallback(
         error_class = error_info["error_class"]
         log.warning("Strategy '%s' failed: %s (%s)", label, error_info["error"], error_class)
 
-        # Kill the failed process
+        # Kill the failed process — killpg the WHOLE group, not just the parent.
+        # vLLM's EngineCore subprocesses hold the GPU memory and a parent-only
+        # terminate leaks them across strategy retries. Each retry also spawns a
+        # fresh process group (start_new_session=True above), so the outer
+        # finally-block killpg only knows the LAST strategy's PGID — earlier
+        # strategies' orphans would survive without this cleanup right here.
         if proc.poll() is None:
-            proc.terminate()
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, AttributeError, OSError):
+                proc.kill()
             try:
                 proc.wait(timeout=10)
             except Exception:
-                proc.kill()
+                pass
 
         # Decide whether to try next strategy based on error class
         if error_class == "marlin_compat" and strategy_idx == 0:
@@ -2086,6 +2094,45 @@ def _run_batch_break(
                     vllm_proc.wait(timeout=15)
                 except subprocess.TimeoutExpired:
                     pass
+
+            # Belt-and-suspenders: nvidia-smi for every PID still holding the
+            # GPU and SIGKILL it. The killpg above only targets the LAST
+            # spawned process group (vllm_proc points to whichever strategy or
+            # fallback ended the attempt). Earlier strategy retries spawned
+            # their own groups, and the inter-strategy cleanup in
+            # _start_vllm_with_fallback should reap them, but anything that
+            # leaks past either kill path (vLLM bug, subprocess that
+            # re-setsid()'d, fallback proc not tracked here) will hold VRAM and
+            # cause the next model's preflight "Free memory < 0.95" failure.
+            # This sweep catches them before the mem_get_info poll.
+            try:
+                smi = subprocess.run(
+                    ["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                self_pid = os.getpid()
+                survivors = []
+                for line in (smi.stdout or "").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        pid = int(line)
+                    except ValueError:
+                        continue
+                    if pid != self_pid:
+                        survivors.append(pid)
+                if survivors:
+                    log.warning("nvidia-smi found %d GPU-holding PIDs after killpg "
+                                "(%s) — SIGKILL'ing", len(survivors), survivors)
+                    for pid in survivors:
+                        try:
+                            os.kill(pid, signal.SIGKILL)
+                        except (ProcessLookupError, PermissionError):
+                            pass
+                    time.sleep(2)  # let the driver process the deaths
+            except Exception as _smi_exc:
+                log.warning("nvidia-smi GPU PID sweep failed (non-fatal): %s", _smi_exc)
 
             # Wait for the GPU to actually report the freed memory before the
             # next model loads. Driver release after process death is usually
