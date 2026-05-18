@@ -129,28 +129,45 @@ import re as _re
 
 
 def _resolve_chat_template(model_path: str, hf_repo: str) -> str | None:
-    """Check if model needs a chat template and return path to .jinja file if so.
+    """Single source of truth for chat-template resolution.
 
-    Returns None if the model already has a template or if it's a base model
-    that shouldn't be used for chat.
+    Returns a path to a .jinja template file when the caller MUST pass
+    --chat-template to vLLM, or None when no injection should happen.
+
+    Cases:
+      1. Tokenizer already defines `chat_template` → return None (vLLM reads
+         it from tokenizer_config.json directly).
+      2. Base / non-chat-tuned model → return None (won't be chat-tested).
+      3. Model name matches a known family in _MODEL_TEMPLATE_MAP → return
+         the family template. ALWAYS inject these — they are the correct
+         format for that model family and vLLM has no built-in fallback
+         since transformers 4.44 stopped supplying a default.
+      4. No family match → ChatML fallback, but ONLY for architectures
+         vLLM does not natively recognize. For native architectures (Llama,
+         Mistral, Qwen, etc.) with no family hit, returning None makes
+         vLLM fail with its native error so we know to add a proper
+         _MODEL_TEMPLATE_MAP entry rather than silently serve malformed
+         output from a generic template. This is the gate the May 12
+         ccd4c3b commit was reaching for — applied where it actually
+         belongs instead of blocking case 3.
     """
-    # Check if tokenizer already has a chat template
+    # Case 1: tokenizer carries its own template
     tok_cfg_path = Path(model_path) / "tokenizer_config.json"
     if tok_cfg_path.exists():
         try:
             tok_data = json.loads(tok_cfg_path.read_text())
             if tok_data.get("chat_template"):
-                return None  # already has one
+                return None
         except Exception:
             pass
 
-    # Check if it's a base model we should skip
+    # Case 2: known base model — skip chat testing entirely
     for pattern in _BASE_MODEL_SKIP:
         if _re.search(pattern, hf_repo, _re.IGNORECASE):
             log.warning("Skipping base model (not chat-tuned): %s", hf_repo)
             return None
 
-    # Match model name against known template families
+    # Case 3: specific family match — always inject
     model_lower = hf_repo.lower()
     for pattern, family in _MODEL_TEMPLATE_MAP:
         if _re.search(pattern, model_lower):
@@ -161,9 +178,20 @@ def _resolve_chat_template(model_path: str, hf_repo: str) -> str | None:
                 log.info("Model %s matched template family '%s'", hf_repo, family)
                 return str(tpl_path)
 
-    # Unknown model without template — use ChatML as last resort
-    # ChatML is the most widely compatible format
-    log.warning("Model %s has no chat template and no known family match — using ChatML fallback", hf_repo)
+    # Case 4: no family match. ChatML fallback is only safe when vLLM doesn't
+    # know the architecture — for vLLM-native architectures it would produce
+    # malformed output (e.g. injecting ChatML into a model that expects Mistral
+    # [INST] formatting). Fail explicitly here so the operator adds a real
+    # _MODEL_TEMPLATE_MAP entry.
+    if _is_vllm_known_arch(model_path):
+        log.error("Model %s has no tokenizer chat_template, no family match in "
+                  "_MODEL_TEMPLATE_MAP, and IS a vLLM-native architecture. Refusing "
+                  "ChatML fallback (would corrupt output). Add a _MODEL_TEMPLATE_MAP "
+                  "entry mapping this model to the correct family.", hf_repo)
+        return None
+
+    log.warning("Model %s has no chat template, no family match, and unknown "
+                "architecture — using ChatML fallback (best-effort).", hf_repo)
     tpl_path = Path("/tmp/.forge/chat_template_chatml_fallback.jinja")
     tpl_path.write_text(_CHAT_TEMPLATES["chatml"])
     return str(tpl_path)
@@ -532,11 +560,12 @@ def _start_vllm_with_fallback(
     ]
     if gpu_count > 1:
         base_cmd += ["--tensor-parallel-size", str(gpu_count)]
-    # Only force a chat template if the model doesn't have one natively.
-    # vLLM handles templates for models it recognizes — overriding with a
-    # generic fallback template (e.g. ChatML) breaks models like GLM that
-    # have their own formatting. Only use our template for truly unknown models.
-    if tpl and not _is_vllm_known_arch(model_path):
+    # _resolve_chat_template is the single source of truth: it returns a
+    # path only when --chat-template injection is genuinely required and
+    # safe (tokenizer lacks one, and we have a confident family match or
+    # an unknown architecture where ChatML is the best we can do). It
+    # returns None when injection would corrupt output. Inject if non-None.
+    if tpl:
         base_cmd += ["--chat-template", tpl]
     if custom_flags:
         import shlex
