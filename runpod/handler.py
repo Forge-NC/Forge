@@ -167,7 +167,26 @@ def _resolve_chat_template(model_path: str, hf_repo: str) -> str | None:
             log.warning("Skipping base model (not chat-tuned): %s", hf_repo)
             return None
 
-    # Case 3: specific family match — always inject
+    # Case 3a: registry-declared chat_template_family — explicit per-model
+    # override takes precedence over pattern matching. Use this when a
+    # specific quant repackage uses a non-obvious template (e.g. TheBloke's
+    # TinyLlama-1.1B-Chat is a ChatML/Zephyr quant despite the Llama-2 base)
+    # so handler.py doesn't accumulate per-model patterns in
+    # _MODEL_TEMPLATE_MAP — config belongs in the registry.
+    reg_cfg = _get_registry_config(hf_repo)
+    if reg_cfg:
+        reg_family = reg_cfg.get("chat_template_family")
+        if reg_family:
+            template_str = _CHAT_TEMPLATES.get(reg_family)
+            if template_str:
+                tpl_path = Path(f"/tmp/.forge/chat_template_{reg_family}.jinja")
+                tpl_path.write_text(template_str)
+                log.info("Model %s: registry chat_template_family='%s'", hf_repo, reg_family)
+                return str(tpl_path)
+            log.warning("Model %s: registry chat_template_family='%s' is unknown to "
+                        "_CHAT_TEMPLATES — falling through to pattern map", hf_repo, reg_family)
+
+    # Case 3b: pattern-map family match — covers entire model families
     model_lower = hf_repo.lower()
     for pattern, family in _MODEL_TEMPLATE_MAP:
         if _re.search(pattern, model_lower):
@@ -503,6 +522,57 @@ def _get_registry_config(hf_repo: str) -> dict | None:
     return None
 
 
+def _resolve_baseline_max_len(model_path: str, hf_repo: str) -> int:
+    """Pick the model's baseline --max-model-len from registry → config → default.
+
+    Strategies must not hardcode 4096: small-context models (e.g. TinyLlama-1.1B
+    with max_position_embeddings=2048) crash vLLM at preflight with
+    'User-specified max_model_len (4096) is greater than the derived max_model_len'.
+    """
+    reg = _get_registry_config(hf_repo)
+    if reg and reg.get("max_model_len"):
+        return int(reg["max_model_len"])
+
+    try:
+        cfg_data = json.loads((Path(model_path) / "config.json").read_text())
+        mpe = cfg_data.get("max_position_embeddings")
+        if isinstance(mpe, int) and 0 < mpe <= 4096:
+            return mpe
+    except Exception:
+        pass
+
+    return 4096
+
+
+def _is_awq_quantized(model_path: str, hf_repo: str) -> bool:
+    """Return True only when the model is genuinely AWQ-quantized.
+
+    Used to gate the "force --quantization awq" fallback strategy. Forcing AWQ
+    on a compressed-tensors checkpoint (e.g. NVIDIA Nemotron, GLM-4.7) makes
+    vLLM crash because it tries the wrong quant loader. The signal we trust:
+      1. registry.quantization == "awq"
+      2. config.json.quantization_config.quant_method == "awq"
+    Anything else (compressed-tensors, gptq, none) returns False.
+    """
+    reg = _get_registry_config(hf_repo)
+    if reg:
+        q = (reg.get("quantization") or "").lower()
+        if q == "awq":
+            return True
+        if q and q != "awq":
+            return False
+
+    try:
+        cfg_data = json.loads((Path(model_path) / "config.json").read_text())
+        qc = cfg_data.get("quantization_config") or {}
+        if (qc.get("quant_method") or "").lower() == "awq":
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
 def _start_vllm_with_fallback(
     model_path: str,
     hf_repo: str,
@@ -514,11 +584,16 @@ def _start_vllm_with_fallback(
 ) -> tuple["subprocess.Popen | None", "VllmOutputCapture", str, list[str], str | None]:
     """Start vLLM with a fallback chain. Returns (proc, capture, served_model, stop_tokens, error).
 
-    Fallback chain:
-      1. Default vLLM config
-      2. Explicit --quantization awq (if Marlin fails)
-      3. Reduced --max-model-len 2048 (if OOM)
-      4. --dtype float16 --enforce-eager (last resort)
+    Fallback chain (each strategy reuses --max-model-len derived from
+    _resolve_baseline_max_len → registry → config.json → 4096):
+      1. Default vLLM config @ baseline_max_len
+      2. Explicit --quantization awq @ baseline_max_len (only if model IS AWQ;
+         skipped for compressed-tensors / GPTQ / unquantized checkpoints)
+      3. Reduced --max-model-len @ reduced_max_len (if OOM or max_model_len)
+      4. --dtype float16 @ reduced_max_len (last resort)
+
+    Strategy 2 may be skipped at runtime via _is_awq_quantized so the indices
+    above are nominal; the loop iterates the filtered strategy list.
 
     If all attempts fail, returns (None, capture, "", [], error_string).
     """
@@ -571,22 +646,36 @@ def _start_vllm_with_fallback(
         import shlex
         base_cmd += shlex.split(custom_flags)
 
-    # Define fallback strategies: (label, extra_args)
-    strategies = [
-        ("default (max-model-len=4096)",
-         ["--max-model-len", "4096"]),
-        ("explicit AWQ quantization (non-Marlin)",
-         ["--max-model-len", "4096", "--quantization", "awq"]),
-        ("reduced context (max-model-len=2048)",
-         ["--max-model-len", "2048"]),
-        ("float16 + reduced context (last resort)",
-         ["--max-model-len", "2048", "--dtype", "float16"]),
+    # Strategies own --max-model-len. The baseline comes from registry →
+    # config.json max_position_embeddings → 4096 default, so models with
+    # native contexts smaller than 4096 (e.g. TinyLlama-1.1B at 2048) don't
+    # crash on the literal "max_model_len (4096) > derived" check. "Reduced"
+    # is at most 2048 and at most half the baseline — never bigger than
+    # the baseline. Strategies are skipped (set to None) when they don't
+    # apply to this model so we don't waste a 30-min vLLM attempt forcing,
+    # e.g., AWQ onto a compressed-tensors checkpoint.
+    baseline_max_len = _resolve_baseline_max_len(model_path, hf_repo)
+    reduced_max_len = max(1024, min(2048, baseline_max_len // 2 if baseline_max_len > 2048 else baseline_max_len))
+    is_awq = _is_awq_quantized(model_path, hf_repo)
+
+    strategies: list[tuple[str, list[str], int] | None] = [
+        (f"default (max-model-len={baseline_max_len})",
+         [], baseline_max_len),
+        # Only meaningful for AWQ checkpoints — forcing --quantization awq on a
+        # compressed-tensors model makes vLLM error out with the wrong loader.
+        (f"explicit AWQ quantization (non-Marlin, max-model-len={baseline_max_len})",
+         ["--quantization", "awq"], baseline_max_len) if is_awq else None,
+        (f"reduced context (max-model-len={reduced_max_len})",
+         [], reduced_max_len),
+        (f"float16 + reduced context (max-model-len={reduced_max_len}, last resort)",
+         ["--dtype", "float16"], reduced_max_len),
     ]
+    strategies = [s for s in strategies if s is not None]
 
     max_attempts_per_strategy = max_startup_minutes * 60 // 5  # 5s poll interval
 
-    for strategy_idx, (label, extra_args) in enumerate(strategies):
-        cmd = base_cmd + extra_args
+    for strategy_idx, (label, extra_args, max_len) in enumerate(strategies):
+        cmd = base_cmd + ["--max-model-len", str(max_len)] + extra_args
         log.info("vLLM attempt %d/%d: %s", strategy_idx + 1, len(strategies), label)
         log.info("vLLM command: %s", " ".join(cmd))
 
@@ -1865,17 +1954,18 @@ def _run_batch_break(
                         k, v = pair.split("=", 1)
                         extra_env[k.strip()] = v.strip()
 
-            # Build flags: registry flags + job-level flags
+            # Build flags: registry flags + job-level flags.
+            # max_model_len is owned by _start_vllm_with_fallback's strategy
+            # loop (via _resolve_baseline_max_len), so don't append it here —
+            # doing so would clobber the per-strategy --max-model-len that
+            # the loop sets after each retry, putting two conflicting flags
+            # on the command line.
             custom_flags = ""
             if reg_cfg:
                 reg_flags = reg_cfg.get("vllm_flags", [])
                 if reg_flags:
                     custom_flags = " ".join(reg_flags)
                     log.info("Registry vllm_flags for %s: %s", hf_repo, reg_flags)
-                # Override max_model_len from registry if specified
-                reg_max_len = reg_cfg.get("max_model_len")
-                if reg_max_len and f"--max-model-len" not in custom_flags:
-                    custom_flags += f" --max-model-len {reg_max_len}"
 
             vllm_proc, capture, served_model, stop_tokens, start_error = _start_vllm_with_fallback(
                 model_path=local_path,
