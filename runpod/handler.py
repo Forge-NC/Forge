@@ -522,6 +522,39 @@ def _get_registry_config(hf_repo: str) -> dict | None:
     return None
 
 
+def _post_audit_verify_registry(hf_repo: str, model_path: str, max_len_used: int) -> None:
+    """Graduate an auto-probed registry entry after a successful audit.
+
+    If the model was auto-onboarded by the orchestrator probe (source ==
+    "auto_probe"), POST the runtime-confirmed config back so the orchestrator can
+    mark the entry verified. Idempotent on the server side — it no-ops for manual
+    or already-verified entries.
+    """
+    reg = _get_registry_config(hf_repo) or {}
+    if reg.get("source") != "auto_probe":
+        return  # manual, already-verified, or unregistered — nothing to graduate
+
+    payload = {
+        "hf_repo": hf_repo,
+        "verified_max_model_len": max_len_used,
+        "verified_quantization": reg.get("quantization"),
+        "verified_chat_template_family": reg.get("chat_template_family"),
+        "verified_date": time.strftime("%Y-%m-%d"),
+    }
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            f"{FORGE_API_SERVER}/audit_orchestrator.php?action=registry_verify",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json",
+                     "X-Forge-Api-Secret": FORGE_API_SECRET},
+        )
+        urllib.request.urlopen(req, timeout=10)
+        log.info("Posted registry verification for %s (max_len=%d)", hf_repo, max_len_used)
+    except Exception as exc:
+        log.warning("Could not write back registry verification for %s: %s", hf_repo, exc)
+
+
 def _resolve_baseline_max_len(model_path: str, hf_repo: str) -> int:
     """Pick the model's baseline --max-model-len from registry → config → default.
 
@@ -1850,7 +1883,7 @@ def _run_model_weights_audit(
         log.info("Pre-flight passed, starting audit on %s", served_model)
 
         # ── Run audit against local vLLM (with resolved stop tokens) ──
-        return _run_api_endpoint_audit(
+        audit_result = _run_api_endpoint_audit(
             order_id=order_id,
             model_index=model_index,
             model_name=model_name,
@@ -1860,6 +1893,12 @@ def _run_model_weights_audit(
             webhook_secret=webhook_secret,
             stop_tokens=stop_tokens,
         )
+        # Graduate an auto-probed registry entry once the audit confirms it works.
+        if isinstance(audit_result, dict) and audit_result.get("status") == "completed":
+            _post_audit_verify_registry(
+                hf_repo, model_source,
+                _resolve_baseline_max_len(model_source, hf_repo))
+        return audit_result
 
     finally:
         if vllm_proc and vllm_proc.poll() is None:
@@ -2150,6 +2189,11 @@ def _run_batch_break(
 
             log.info("Reports uploaded for %s (break: %s, assure: %s)",
                      hf_repo, break_result.run_id, assure_report["run_id"])
+
+            # Graduate an auto-probed registry entry once the audit confirms it.
+            _post_audit_verify_registry(
+                hf_repo, local_path,
+                _resolve_baseline_max_len(local_path, hf_repo))
 
             # Track completed models so we can skip on re-run
             _completed_path = Path("/tmp/.forge/batch_completed.json")
