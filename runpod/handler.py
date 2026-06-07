@@ -1318,6 +1318,7 @@ def handler(event):
                 models=models,
                 forge_server=job_input.get("forge_server", "https://forge-nc.dev"),
                 vllm_env=job_input.get("vllm_env", ""),
+                force_reaudit=bool(job_input.get("force_reaudit", False)),
             )
         elif access_type == "model_weights":
             if not HAS_VLLM:
@@ -1916,6 +1917,7 @@ def _run_batch_break(
     models: list[str],
     forge_server: str = "https://forge-nc.dev",
     vllm_env: str = "",
+    force_reaudit: bool = False,
 ) -> dict:
     """Run uncertified /break --full on a list of models sequentially.
 
@@ -1952,7 +1954,10 @@ def _run_batch_break(
         log.info("Could not check server for existing reports, using local dedup only")
 
     for mi, hf_repo in enumerate(models):
-        if hf_repo in already_done:
+        # NOTE: this dedup is protocol-blind (skips any model with ANY prior report,
+        # including older-protocol ones). force_reaudit bypasses it for a full protocol
+        # re-run; the durable fix is a protocol_version-aware report_models query.
+        if hf_repo in already_done and not force_reaudit:
             log.info("=== Batch break %d/%d: %s — SKIPPED (already completed) ===", mi + 1, len(models), hf_repo)
             results.append({"model": hf_repo, "status": "skipped"})
             continue
