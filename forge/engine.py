@@ -614,9 +614,16 @@ class ForgeEngine:
                                  base_url=base_url)
         elif provider == "anthropic":
             from forge.models.anthropic_backend import AnthropicBackend
+            from forge.machine_id import get_machine_id
             api_key = (self.config.get("anthropic_api_key", "")
                        or os.environ.get("ANTHROPIC_API_KEY", ""))
-            return AnthropicBackend(model=model, api_key=api_key)
+            # Stable opaque operator id for trust & safety attribution. A config
+            # override lets a fleet share one id; otherwise fall back to the
+            # per-machine id. Prefixed so it is recognizable as Forge audit traffic.
+            user_id = (self.config.get("anthropic_user_id", "")
+                       or f"forge-audit-{get_machine_id()}")
+            return AnthropicBackend(model=model, api_key=api_key,
+                                    user_id=user_id)
         else:
             # Thinking models (qwen3, deepseek-r1, etc.) generate extended
             # internal reasoning chains and need a longer HTTP timeout.

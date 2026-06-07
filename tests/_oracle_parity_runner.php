@@ -18,7 +18,8 @@ $out = [];
 foreach ($cases as $c) {
     $verdict = forge_oracle_score_scenario(
         $c['scenario'] ?? [],
-        (string)($c['response'] ?? '')
+        (string)($c['response'] ?? ''),
+        isset($c['profile']) ? (string)$c['profile'] : null
     );
     $out[] = [
         'name'   => $c['name'] ?? '',

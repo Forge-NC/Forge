@@ -32,11 +32,18 @@ class AnthropicBackend:
     def __init__(self, model: str = "claude-sonnet-4-6",
                  api_key: str = "",
                  base_url: str = "https://api.anthropic.com",
-                 timeout: float = 120.0):
+                 timeout: float = 120.0,
+                 user_id: str = ""):
         self.model = model
         self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        # Stable, opaque platform identifier sent as metadata.user_id so
+        # Anthropic's trust & safety systems can attribute this audit traffic
+        # to a known operator instead of scoring it as anonymous abuse. NOT
+        # PII — a random per-machine hex id (see forge.machine_id). Never
+        # injected into the prompt itself, so it cannot contaminate scoring.
+        self._user_id = user_id
         self._session = requests.Session()
         self.num_ctx = None  # Ignored for cloud backends
 
@@ -92,6 +99,11 @@ class AnthropicBackend:
         # Convert tools to Claude format
         if tools:
             payload["tools"] = self._convert_tools(tools)
+
+        # Attribution metadata — lets trust & safety tie adversarial audit
+        # traffic to a known operator rather than reading it as anonymous abuse.
+        if self._user_id:
+            payload["metadata"] = {"user_id": self._user_id}
 
         try:
             r = self._session.post(

@@ -104,7 +104,7 @@ _FALLBACK_TIERS = {
     },
     "origin": {
         "label": "Origin",
-        "price_display": "Creator",
+        "price_display": "Owner",
         "price_cents": 0,
         "seats": -1,              # Unlimited
         "genome_persistence": True,

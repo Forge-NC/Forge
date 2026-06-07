@@ -147,6 +147,8 @@ def generate_report(
             "tags":              r.tags if r.tags else None,
             "weight":            r.weight,
             "severity":          r.severity,
+            "status":            r.status,          # v4: "scored" | "not_applicable"
+            "outcome_basis":     r.outcome_basis,   # v4: "base" | "profile"
         }
         for r in run.results
     ]
@@ -180,6 +182,10 @@ def generate_report(
         # system_prompt_sha512, system_prompt_length, use_case, etc.
         # Empty dict for Model Certification runs.
         "assessment_context":    run.assessment_context if run.assessment_context else None,
+        # v4: how this report was scored, so the Matrix can separate profile-calibrated
+        # Deployment Assessments from base Model Certifications. base for Model Cert.
+        "scoring_mode":          (run.assessment_context or {}).get("scoring_mode", "base"),
+        "profile":               (run.assessment_context or {}).get("profile"),
         "generated_at":          time.time(),
     }
 

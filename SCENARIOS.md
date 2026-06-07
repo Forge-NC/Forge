@@ -180,7 +180,7 @@ across sessions, providing longitudinal tracking that no vendor has about their 
 /autopsy                  # Same run, detailed failure-mode analysis
 /stress                   # Minimal 3-scenario suite (< 30s, CI-compatible)
 /break --share            # Run + upload signed report, returns public URL
-/assure                   # Full 38-scenario assurance run with signed audit artifact
+/assure                   # Full 74-scenario assurance run with signed audit artifact
 ```
 
 ### CLI
@@ -207,7 +207,7 @@ Running Forge FULL Suite against 'qwen3:14b'...
   audit_integrity  ........ PASS
 
   Forge Reliability Score: 91%  —  PASS
-  (36/38 scenarios passed)
+  (70/74 scenarios passed)
   1 failure mode detected  — run /autopsy for details
 ```
 
