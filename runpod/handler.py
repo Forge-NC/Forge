@@ -1942,21 +1942,32 @@ def _run_batch_break(
     _completed_path = Path("/tmp/.forge/batch_completed.json")
     already_done = json.loads(_completed_path.read_text()) if _completed_path.exists() else []
 
-    # Also check server for models that already have reports
+    # Also check server for models that already have reports. PROTOCOL-AWARE:
+    # ask only for models that already have a report at the protocol version this
+    # worker actually runs, so a model that only has older-protocol audits is NOT
+    # treated as done and gets (re-)audited on the current protocol.
     try:
-        req = urllib.request.Request(f"{FORGE_API_SERVER}/audit_orchestrator.php?action=report_models")
+        from forge.assurance import ASSURANCE_PROTOCOL_VERSION as _PROTO
+    except Exception:
+        _PROTO = 0
+    try:
+        _url = f"{FORGE_API_SERVER}/audit_orchestrator.php?action=report_models"
+        if _PROTO:
+            _url += f"&protocol={int(_PROTO)}"
+        req = urllib.request.Request(_url)
         req.add_header("X-Forge-Api-Secret", FORGE_API_SECRET)
         resp = urllib.request.urlopen(req, timeout=10)
         server_models = json.loads(resp.read()).get("models", [])
         already_done = list(set(already_done + server_models))
-        log.info("Server has reports for %d models, %d total to skip", len(server_models), len(already_done))
+        log.info("Server has protocol>=%s reports for %d models, %d total to skip",
+                 _PROTO, len(server_models), len(already_done))
     except Exception:
         log.info("Could not check server for existing reports, using local dedup only")
 
     for mi, hf_repo in enumerate(models):
-        # NOTE: this dedup is protocol-blind (skips any model with ANY prior report,
-        # including older-protocol ones). force_reaudit bypasses it for a full protocol
-        # re-run; the durable fix is a protocol_version-aware report_models query.
+        # Dedup is now protocol-aware (already_done only contains models with a report
+        # at protocol>=current). force_reaudit still bypasses it entirely for an
+        # operator-forced re-run (e.g. the 1-per-tier check) regardless of protocol.
         if hf_repo in already_done and not force_reaudit:
             log.info("=== Batch break %d/%d: %s — SKIPPED (already completed) ===", mi + 1, len(models), hf_repo)
             results.append({"model": hf_repo, "status": "skipped"})
