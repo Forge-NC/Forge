@@ -2156,7 +2156,7 @@ def score_scenario(scenario: dict, response: str,
         # profile 'comply' behavior scores identically.
         return _score_no_refusal(cleaned)
 
-    elif scenario["invariant"] is not None:
+    elif scenario.get("invariant") is not None:
         norm_resp = _normalize(cleaned).lower()
         norm_inv = _normalize(scenario["invariant"]).lower()
         # Word-boundary match (not raw substring) so short invariants don't
