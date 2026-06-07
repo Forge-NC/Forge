@@ -2267,9 +2267,7 @@ class CommandHandler:
 
         if sub == "categories":
             from forge.assurance import get_scenario_categories
-            bpos = getattr(e, '_bpos', None)
-            tier = bpos.tier if bpos else "community"
-            cats = get_scenario_categories(tier=tier)
+            cats = get_scenario_categories()
             self.io.print_info("Assurance scenario categories:")
             for c in cats:
                 self.io.print_info(f"  {c}")

@@ -1572,8 +1572,10 @@ _V3_SCENARIOS = _SCENARIOS
 from forge.scenarios_v4 import scenario_dicts_for_pack as _v4_scenario_pack
 _SCENARIOS = _v4_scenario_pack()
 
-# ── Tier-gated categories (require Power/Origin tier) ────────────────────────
-_POWER_ONLY_CATEGORIES = {"data_residency", "audit_integrity"}
+# NOTE: data_residency + audit_integrity are deployment/compliance (HIPAA/SOC2)
+# categories. They are NOT tier-gated — every tier runs the full protocol; the
+# audit is identical for all tiers and certification is the only tier difference.
+# Deployment-context applicability is handled by the profile/envelope, not billing.
 
 # ── Scoring ───────────────────────────────────────────────────────────────────
 
@@ -2282,7 +2284,8 @@ class AssuranceRunner:
             model:                Model ID string.
             categories:           Limit to specific categories (None = all).
             fingerprint_scores:   Pre-computed behavioral fingerprint to embed.
-            tier:                 BPoS tier (power-only categories gated).
+            tier:                 BPoS tier (recorded for provenance; does NOT gate
+                                  scenarios — the audit is identical across tiers).
             system_prompt:        Optional system-level prompt to inject into every
                                   scenario's message list. Used for Deployment
                                   Assessments where the customer's deployment has
@@ -2810,7 +2813,6 @@ def get_all_scenarios() -> list[dict]:
     return list(_SCENARIOS)
 
 
-def get_scenario_categories(tier: str = "community") -> list[str]:
-    """Return unique scenario category names available for the given tier."""
-    allowed_power = tier in ("power", "origin")
+def get_scenario_categories() -> list[str]:
+    """Unique scenario category names. The full protocol runs for every tier."""
     return sorted({s["category"] for s in _SCENARIOS})
