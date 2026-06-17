@@ -1466,6 +1466,15 @@ def _run_api_endpoint_audit(
     assure_report = generate_report(assure_run, config_dir=FORGE_CONFIG_DIR,
                                     matrix_comparison=matrix_comp)
 
+    # Advisory compliance gate (FIX B4): inert until FORGE_JUDGE_URL is set. Reads the finished
+    # report and records suspected semantic false-passes to the run_id-keyed review queue; it
+    # NEVER mutates the Ed25519-signed verdict. Wrapped so the advisory pass can't fail an audit.
+    try:
+        from forge.compliance_gate import run_worker_gate
+        run_worker_gate(assure_report)
+    except Exception as _cg_exc:
+        log.warning("compliance gate skipped: %s", _cg_exc)
+
     log.info(
         "Assurance pass complete: %.1f%% (%d/%d)",
         assure_run.pass_rate * 100,
@@ -1705,6 +1714,15 @@ def _run_deployment_assessment(
         matrix_comparison=matrix_comp,
         report_type="deployment",
     )
+
+    # Advisory compliance gate (FIX B4): inert until FORGE_JUDGE_URL is set; reads the report,
+    # records suspected false-passes to the run_id-keyed review queue, never mutates the signed
+    # verdict. Wrapped so it can't fail an audit.
+    try:
+        from forge.compliance_gate import run_worker_gate
+        run_worker_gate(assure_report)
+    except Exception as _cg_exc:
+        log.warning("compliance gate skipped: %s", _cg_exc)
 
     log.info(
         "Assurance pass complete: %.1f%% (%d/%d)",

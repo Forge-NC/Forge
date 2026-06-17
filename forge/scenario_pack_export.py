@@ -64,6 +64,14 @@ def build_pack(scenarios: list[dict] = None, version: int = None) -> dict:
     """Build the canonical pack dict from a scenarios list + version."""
     scenarios = scenarios if scenarios is not None else _SCENARIOS
     version = version if version is not None else ASSURANCE_PROTOCOL_VERSION
+    # Belt-and-suspenders: never seal dev-only underscore-prefixed keys
+    # (_profile/_probe_pass/_probe_fail hold expected answers) into a pack
+    # shipped to external runners. Upstream already strips these; this makes
+    # the exporter self-protecting regardless of the scenarios source.
+    scenarios = [
+        {k: v for k, v in s.items() if not k.startswith("_")}
+        for s in scenarios
+    ]
     canonical = _canonical_scenarios_bytes(scenarios)
     digest = hashlib.sha512(canonical).hexdigest()
     sorted_entries = json.loads(canonical.decode("utf-8"))

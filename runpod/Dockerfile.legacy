@@ -1,0 +1,42 @@
+# Forge Certified Audit — Legacy Custom Code Image
+# For auditing models requiring custom code (EXAONE, etc.) via transformers 4.x
+#
+# Uses transformers 4.x which supports custom code without security restrictions.
+# Dedicated container for models that fail on modern transformers 5.x security.
+
+FROM runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
+
+WORKDIR /app
+
+# ENTERPRISE FIX: Increase disk space and optimize storage for large model downloads
+# Clean system cache and setup efficient model storage
+RUN apt-get update && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
+    && mkdir -p /tmp/hf_models && chmod 777 /tmp/hf_models
+
+# Heavy deps first - use vLLM's native transformers 4.x pinning
+# vllm 0.19.0 pins transformers>=4.56,<5 - keep this for custom code support
+RUN pip install --no-cache-dir \
+    vllm==0.19.0 \
+    huggingface_hub
+
+# Lightweight deps the audit chain needs
+RUN pip install --no-cache-dir \
+    runpod \
+    requests>=2.28 \
+    cryptography>=41.0 \
+    tiktoken>=0.7
+
+# Keep vLLM's native transformers 4.x for universal custom code support
+# transformers 4.57 supports most architectures without trust_remote_code restrictions
+RUN pip install --no-cache-dir accelerate fastapi uvicorn && \
+    python -c "\
+import transformers, huggingface_hub; \
+tv=transformers.__version__; hv=huggingface_hub.__version__; \
+print(f'Legacy transformers: {tv}'); print(f'huggingface_hub: {hv}'); \
+assert int(tv.split('.')[0])==4, f'Expected transformers 4.x for custom code support, got {tv}'; \
+print('Legacy custom code container ready')"
+
+# Copy handler (from current directory)
+COPY handler.py /app/handler.py
+
+CMD ["python", "-u", "handler.py"]

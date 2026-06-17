@@ -1,7 +1,7 @@
 {
   "signature_version": 1,
   "description": "Forge threat signatures \u2014 260 patterns from gitleaks (MIT), curated injections, supply chain, and PII detectors.",
-  "generated": "2026-06-06T08:00:06Z",
+  "generated": "2026-06-17T08:00:06Z",
   "sources": {
     "gitleaks": 221,
     "curated": 40,
@@ -1942,5 +1942,5 @@
       "description": "20+ file writes in 60s \u2014 possible ransomware or exfil staging"
     }
   ],
-  "sha512": "171e8862a41d38c554dfa46869df2dccdcb9614bae980e3bb434f60566a9dd03e7f8eafdc16dbf23702d2306821810b78fdc49559e448d29210edadf84ed78a8"
+  "sha512": "6c1f3ba3e71c03fe419cedc4992087d89ebf6a969b31c949f6a4165dda2a7b834222a8fe788bf4197d577c10d4e1472e66e5d67581b0eb1691f001a8991107eb"
 }
