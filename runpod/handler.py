@@ -1252,6 +1252,12 @@ def handler(event):
     """RunPod serverless handler — runs Forge Certified Audit."""
     job_input = event["input"]
 
+    # Judge-scoring jobs are NOT audit orders — they carry no order_id / webhook / model.
+    # Route them before any order or remote-log machinery (which requires order_id). The live
+    # panel (fj_live_panel) dispatches these to score pre-built prompts with the 24B.
+    if job_input.get("access_type") == "judge":
+        return _run_judge(job_input)
+
     order_id = job_input["order_id"]
     model_index = int(job_input.get("model_index", 0))
     model_name = job_input.get("model_name", "unknown")
@@ -1345,12 +1351,6 @@ def handler(event):
                 vllm_flags=job_input.get("vllm_flags", ""),
                 custom_vllm_env=job_input.get("vllm_env", ""),
             )
-        elif access_type == "judge":
-            # Forge Judge inference (the GPU half of the live panel). Runs on every tier
-            # because it ships in this shared weights image. Loads base 4-bit + LoRA adapter,
-            # runs pre-built prompts, returns raw generations. The VPS builds the prompts and
-            # post_validates the output. No vLLM (uses transformers+PEFT) and no order webhook.
-            return _run_judge(job_input)
         else:
             return {
                 "order_id": order_id,
