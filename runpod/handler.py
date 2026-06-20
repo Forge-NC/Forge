@@ -1387,6 +1387,9 @@ def _run_judge(job_input: dict) -> dict:
     import tarfile
     import urllib.request
 
+    os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")     # fast multi-threaded base-model download
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
     base = job_input.get("base", "")
     adapter_url = job_input.get("adapter_url", "")
     fj_secret = job_input.get("fj_secret", "")
@@ -1405,7 +1408,11 @@ def _run_judge(job_input: dict) -> dict:
 
     # fetch + extract the adapter (~150MB) from the operator's own server
     try:
-        req = urllib.request.Request(adapter_url, headers=({"X-FJ-Secret": fj_secret} if fj_secret else {}))
+        _hdrs = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                 "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}   # Cloudflare 403s the default urllib UA
+        if fj_secret:
+            _hdrs["X-FJ-Secret"] = fj_secret
+        req = urllib.request.Request(adapter_url, headers=_hdrs)
         data = urllib.request.urlopen(req, timeout=600).read()
         adir = "/tmp/fj_judge_adapter"
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:

@@ -42,7 +42,7 @@ RUN pip install --no-cache-dir \
 #   transformers 5.0+. Hence the explicit transformers 5.6.2 pin above.
 # accelerate/fastapi/uvicorn for vLLM + transformers fallback; peft+bitsandbytes for the
 # Forge Judge inference path (base 4-bit NF4 + LoRA adapter), matching the validated eval stack.
-RUN pip install --no-cache-dir accelerate fastapi uvicorn "peft>=0.13" "bitsandbytes>=0.45" && \
+RUN pip install --no-cache-dir accelerate fastapi uvicorn "peft>=0.13" "bitsandbytes>=0.45" hf_transfer && \
     python -c "\
 import transformers, huggingface_hub; \
 tv=transformers.__version__; hv=huggingface_hub.__version__; \
