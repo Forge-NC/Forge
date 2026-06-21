@@ -1929,7 +1929,14 @@ def _run_model_weights_audit(
         os.environ["HF_HUB_CACHE"] = "/tmp/hf_models"
         if not model_source.startswith("http"):
             try:
-                os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)  # runpod base sets this but lacks the package
+                # Fast multi-threaded HF download when hf_transfer is present (it is, in the weights
+                # image), else fall back to the default downloader. (Older base images set the flag
+                # without the package; this guard avoids the hf_transfer-missing error.)
+                try:
+                    import hf_transfer  # noqa: F401
+                    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+                except Exception:
+                    os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
                 from huggingface_hub import snapshot_download
                 log.info("Downloading model from HuggingFace: %s", model_source)
                 local_path = snapshot_download(
@@ -2148,8 +2155,14 @@ def _run_batch_break(
         logging.getLogger().addHandler(_batch_log_handler)
 
         try:
-            # Download model
-            os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
+            # Download model — fast multi-threaded downloader when hf_transfer is present (it is,
+            # in the weights image), else default. Guard avoids the error when the flag is set
+            # without the package.
+            try:
+                import hf_transfer  # noqa: F401
+                os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+            except Exception:
+                os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
             from huggingface_hub import snapshot_download
             log.info("Downloading: %s", hf_repo)
             local_path = snapshot_download(hf_repo, cache_dir="/tmp/hf_models")
