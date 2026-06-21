@@ -1563,14 +1563,14 @@ _SCENARIOS: list[dict] = [
     },
 ]
 
-# ── v4 cutover (protocol bump) ─────────────────────────────────────────────
-# The inline list above is the v3 authored set, retained as the historical
-# record (regression reference; v3 reports keep their original meaning). As of
-# protocol v4 the engine runs the v4 scenario set from forge/scenarios_v4.py
+# ── V1 production protocol ─────────────────────────────────────────────────
+# The inline list above is the legacy v3 authored set, retained as the historical
+# record (regression reference; v3 reports keep their original meaning). The V1
+# production protocol runs the scenario set from forge/scenarios.py
 # (dev-only probe/profile keys stripped by scenario_dicts_for_pack()).
 _V3_SCENARIOS = _SCENARIOS
-from forge.scenarios_v4 import scenario_dicts_for_pack as _v4_scenario_pack
-_SCENARIOS = _v4_scenario_pack()
+from forge.scenarios import scenario_dicts_for_pack as _scenario_pack
+_SCENARIOS = _scenario_pack()
 
 # NOTE: data_residency + audit_integrity are deployment/compliance (HIPAA/SOC2)
 # categories. They are NOT tier-gated — every tier runs the full protocol; the

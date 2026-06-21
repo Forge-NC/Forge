@@ -58,6 +58,10 @@ COPY pyproject.toml /app/
 # Inline panel (judge + jury), incl. the byte-identical trained-prompt files
 COPY runpod/panel/ /app/panel/
 
+# Isolated judge runner — runs in its own process so a torn-down model-under-test vLLM
+# can't corrupt the judge's CUDA/NVML allocator state (NVML CUDACachingAllocator assert).
+COPY runpod/judge_subproc.py /app/judge_subproc.py
+
 # Copy handler
 COPY runpod/handler.py /app/handler.py
 

@@ -1377,105 +1377,64 @@ def handler(event):
 
 
 def _run_judge(job_input: dict) -> dict:
-    """Forge Judge inference job: base (4-bit NF4) + the trained LoRA adapter, run the provided
-    pre-built prompts, return raw generations. Faithful to the validated eval loader
-    (fj_runpod_eval_bootstrap.sh): distinct pad token, left padding, deterministic greedy decode,
-    and a B=1 vs B=8 self-check (correctness > speed). The adapter is fetched from the operator's
-    own server (the fjtrain secret dir); the base is loaded normally. Smart half (build_prompt /
-    post_validate / tally) stays on the VPS in fj_live_panel.
+    """Forge Judge inference — runs in a FRESH SUBPROCESS (judge_subproc.py).
 
-    Input : {base, adapter_url, fj_secret, prompts:[...], max_new_tokens?, max_len?}
+    The weights-audit path tears down the model-under-test vLLM in THIS worker process, then
+    needs the 24B judge. Loading + generating in the same process inherits a corrupted CUDA/NVML
+    allocator state from the torn-down vLLM (the canary hit
+    `NVML_SUCCESS == r INTERNAL ASSERT FAILED at CUDACachingAllocator.cpp:1154` on the first
+    generate()). A separate process gives the judge a clean CUDA context. Same base 4-bit NF4 +
+    LoRA adapter + B=1/B=8 self-check loader lives in judge_subproc.run_judge. Fails soft: any
+    subprocess error returns status=failed so the panel degrades to jury-only.
+
+    Input : {base, adapter_url, fj_secret, prompts:[...], max_new_tokens?, max_len?, judge_timeout_s?}
     Output: {status, generations:[...], batch_size, n}
     """
-    import glob
-    import io
-    import os
-    import tarfile
-    import urllib.request
+    import json as _json
+    import os as _os
+    import subprocess as _sp
+    import sys as _sys
+    import tempfile as _tf
 
-    os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")     # fast multi-threaded base-model download
-    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
-
-    base = job_input.get("base", "")
-    adapter_url = job_input.get("adapter_url", "")
-    fj_secret = job_input.get("fj_secret", "")
-    prompts = job_input.get("prompts") or []
-    max_new_tokens = int(job_input.get("max_new_tokens", 320))
-    max_len = int(job_input.get("max_len", 4096))
-    if not base or not adapter_url:
+    if not job_input.get("base") or not job_input.get("adapter_url"):
         return {"status": "failed", "error": "judge job requires 'base' and 'adapter_url'"}
 
-    try:
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-        from peft import PeftModel
-    except Exception as exc:
-        return {"status": "failed", "error": f"judge deps missing (peft/bitsandbytes): {exc}"}
+    here = _os.path.dirname(_os.path.abspath(__file__))
+    script = _os.path.join(here, "judge_subproc.py")
+    if not _os.path.exists(script):
+        script = "/app/judge_subproc.py"
+    if not _os.path.exists(script):
+        return {"status": "failed", "error": f"judge_subproc.py not found (looked in {here} and /app)"}
 
-    # fetch + extract the adapter (~150MB) from the operator's own server
+    fin = _tf.NamedTemporaryFile("w", suffix=".judgein.json", delete=False, encoding="utf-8")
+    fout = fin.name + ".out"
     try:
-        _hdrs = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                 "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}   # Cloudflare 403s the default urllib UA
-        if fj_secret:
-            _hdrs["X-FJ-Secret"] = fj_secret
-        req = urllib.request.Request(adapter_url, headers=_hdrs)
-        data = urllib.request.urlopen(req, timeout=600).read()
-        adir = "/tmp/fj_judge_adapter"
-        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
-            tf.extractall(adir)
-        cfgs = glob.glob(os.path.join(adir, "**", "adapter_config.json"), recursive=True)
-        if not cfgs:
-            return {"status": "failed", "error": "adapter_config.json not found in adapter archive"}
-        adapter_dir = os.path.dirname(cfgs[0])
-    except Exception as exc:
-        return {"status": "failed", "error": f"adapter fetch/extract failed: {exc}"}
-
-    try:
-        # fix_mistral_regex=True: the Mistral-Small-24B tokenizer ships a known-bad regex that
-        # otherwise tokenizes INCORRECTLY (transformers warns + says to set this). The judge base
-        # is always Mistral-Small-24B, so pass it; fall back if an older transformers lacks the kwarg.
+        _json.dump(job_input, fin)
+        fin.close()
+        timeout_s = int(job_input.get("judge_timeout_s", 2400))
         try:
-            tok = AutoTokenizer.from_pretrained(base, fix_mistral_regex=True)
-        except TypeError:
-            tok = AutoTokenizer.from_pretrained(base)
-        tok.pad_token = tok.unk_token if tok.unk_token is not None else tok.eos_token
-        tok.padding_side = "left"
-        bnb = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
-                                 bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_use_double_quant=True)
-        base_model = AutoModelForCausalLM.from_pretrained(
-            base, quantization_config=bnb, device_map="cuda", dtype=torch.bfloat16)
-        model = PeftModel.from_pretrained(base_model, adapter_dir)
-        model.eval()
-    except Exception as exc:
-        log.exception("judge model load failed")
-        return {"status": "failed", "error": f"judge model load failed: {exc}"}
-
-    def _gen(rws, bs):
-        outs = []
-        for s in range(0, len(rws), bs):
-            chunk = rws[s:s + bs]
-            rendered = [tok.apply_chat_template([{"role": "user", "content": p}],
-                                                tokenize=False, add_generation_prompt=True) for p in chunk]
-            enc = tok(rendered, return_tensors="pt", padding=True, truncation=True,
-                      max_length=max_len).to(model.device)
-            with torch.no_grad():
-                out = model.generate(**enc, max_new_tokens=max_new_tokens, do_sample=False,
-                                     pad_token_id=tok.pad_token_id)
-            outs.extend(tok.batch_decode(out[:, enc["input_ids"].shape[1]:], skip_special_tokens=True))
-        return outs
-
-    try:
-        if not prompts:
-            return {"status": "completed", "generations": [], "batch_size": 1, "n": 0}
-        sample = prompts[:8]
-        b1, b8 = _gen(sample, 1), _gen(sample, 8)
-        bsz = 8 if b1 == b8 else 1
-        gens = (b1 if bsz == 1 else b8) + (_gen(prompts[8:], bsz) if len(prompts) > 8 else [])
-        log.info("judge: scored %d prompts (batch_size=%d)", len(gens), bsz)
-        return {"status": "completed", "generations": gens, "batch_size": bsz, "n": len(gens)}
-    except Exception as exc:
-        log.exception("judge generation failed")
-        return {"status": "failed", "error": f"judge generation failed: {exc}"}
+            proc = _sp.run([_sys.executable, script, fin.name, fout],
+                           capture_output=True, text=True, timeout=timeout_s)
+        except _sp.TimeoutExpired:
+            return {"status": "failed", "error": f"judge subprocess timed out after {timeout_s}s"}
+        if not _os.path.exists(fout):
+            tail = (proc.stderr or proc.stdout or "")[-600:]
+            return {"status": "failed",
+                    "error": f"judge subprocess produced no output (rc={proc.returncode}): {tail}"}
+        try:
+            with open(fout, encoding="utf-8") as f:
+                res = _json.load(f)
+        except Exception as exc:
+            return {"status": "failed", "error": f"unreadable judge output: {exc}"}
+        log.info("judge subprocess done: status=%s n=%s",
+                 (res or {}).get("status"), (res or {}).get("n"))
+        return res
+    finally:
+        for p in (fin.name, fout):
+            try:
+                _os.unlink(p)
+            except OSError:
+                pass
 
 
 def _attach_inline_panel(report: dict, job_input: dict) -> None:
