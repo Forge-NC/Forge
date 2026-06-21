@@ -46,7 +46,7 @@ from forge import __version__ as _FORGE_VERSION
 # change vs. actual model quality.  Increment on ANY change to scenarios,
 # scoring logic, refusal detection, or invariant definitions.
 
-ASSURANCE_PROTOCOL_VERSION = 4
+ASSURANCE_PROTOCOL_VERSION = 1  # V1-renumber: the agent-era protocol is published as the V1 production release
 
 PROTOCOL_CHANGELOG: dict[int, dict] = {
     1: {

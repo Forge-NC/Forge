@@ -55,6 +55,9 @@ print('RopeParameters import OK — EXAONE-3.x configuration_exaone.py will load
 COPY forge/ /app/forge/
 COPY pyproject.toml /app/
 
+# Inline panel (judge + jury), incl. the byte-identical trained-prompt files
+COPY runpod/panel/ /app/panel/
+
 # Copy handler
 COPY runpod/handler.py /app/handler.py
 

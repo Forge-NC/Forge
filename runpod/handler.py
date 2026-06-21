@@ -1248,9 +1248,15 @@ def post_audit_progress(forge_server: str, order_id: str, webhook_secret: str,
         pass
 
 
+_JOB_INPUT: dict = {}  # current job's input; set at handler() entry so audit handlers (explicit-arg
+                       # signatures) can reach the inline-panel config without threading it through.
+
+
 def handler(event):
     """RunPod serverless handler — runs Forge Certified Audit."""
     job_input = event["input"]
+    global _JOB_INPUT
+    _JOB_INPUT = job_input if isinstance(job_input, dict) else {}
 
     # Judge-scoring jobs are NOT audit orders — they carry no order_id / webhook / model.
     # Route them before any order or remote-log machinery (which requires order_id). The live
@@ -1425,7 +1431,13 @@ def _run_judge(job_input: dict) -> dict:
         return {"status": "failed", "error": f"adapter fetch/extract failed: {exc}"}
 
     try:
-        tok = AutoTokenizer.from_pretrained(base)
+        # fix_mistral_regex=True: the Mistral-Small-24B tokenizer ships a known-bad regex that
+        # otherwise tokenizes INCORRECTLY (transformers warns + says to set this). The judge base
+        # is always Mistral-Small-24B, so pass it; fall back if an older transformers lacks the kwarg.
+        try:
+            tok = AutoTokenizer.from_pretrained(base, fix_mistral_regex=True)
+        except TypeError:
+            tok = AutoTokenizer.from_pretrained(base)
         tok.pad_token = tok.unk_token if tok.unk_token is not None else tok.eos_token
         tok.padding_side = "left"
         bnb = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
@@ -1464,6 +1476,49 @@ def _run_judge(job_input: dict) -> dict:
     except Exception as exc:
         log.exception("judge generation failed")
         return {"status": "failed", "error": f"judge generation failed: {exc}"}
+
+
+def _attach_inline_panel(report: dict, job_input: dict) -> None:
+    """Inline panel stage: run the independent panel (trained 24B judge + OpenRouter jury) over the
+    just-finished audit's evidence, on THIS warm worker, and attach it to report['_verification']
+    ['panel'] as advisory metadata. NO separate GPU cold-start, NO cron — it's a stage of the audit
+    job. Fails SOFT (never raises) so a panel error can never affect the audit result.
+
+    Opt-in via job_input: panel_enabled=true, panel_tier ('paid'|'free'), openrouter_key,
+    judge_base + judge_adapter_url + fj_secret (24B; omitted -> jury-only). The 24B runs only after
+    the model-under-test has been torn down (this is called at the end of the audit), and run_panel
+    guards it so an OOM/load failure degrades to jury-only rather than breaking anything."""
+    try:
+        if not job_input.get("panel_enabled"):
+            return
+        if job_input.get("_defer_panel"):
+            return  # weights path runs the panel AFTER the model-under-test's vLLM is torn down (VRAM freed)
+        if not isinstance(report, dict) or not report.get("results"):
+            return
+        from panel.panel_runner import run_panel
+        from forge.assurance import get_all_scenarios
+        scn_by_id = {s["id"]: s for s in get_all_scenarios()}
+        or_key = job_input.get("openrouter_key", "") or ""
+        tier = job_input.get("panel_tier", "paid")
+        j_base = job_input.get("judge_base", "")
+        j_adapter = job_input.get("judge_adapter_url", "")
+        j_secret = job_input.get("fj_secret", "")
+        judge_generate = None
+        if j_base and j_adapter:
+            def judge_generate(prompts):
+                # Reuse the standalone judge loader on this warm worker (MUT already torn down).
+                res = _run_judge({"base": j_base, "adapter_url": j_adapter,
+                                  "fj_secret": j_secret, "prompts": prompts})
+                if res.get("status") == "completed":
+                    return res.get("generations") or []
+                raise RuntimeError(res.get("error", "judge generate failed"))
+        panel = run_panel(report, scn_by_id, openrouter_key=or_key,
+                          judge_generate=judge_generate, tier=tier, log=log.info)
+        report.setdefault("_verification", {})["panel"] = panel
+        log.info("inline panel attached: n_cases=%s judge_scored=%s flips=%s",
+                 panel.get("n_cases"), panel.get("judge_scored"), len(panel.get("flips") or []))
+    except Exception as exc:
+        log.warning("inline panel skipped (non-fatal): %s", exc)
 
 
 def _run_api_endpoint_audit(
@@ -1592,6 +1647,9 @@ def _run_api_endpoint_audit(
     # Reports are saved server-side by the orchestrator callback, not uploaded
     # directly. Cloudflare blocks data center POST requests with security content.
     import base64 as _b64
+
+    # Inline panel (judge + jury) over the break report's evidence — on this warm worker, advisory.
+    _attach_inline_panel(break_result.report, _JOB_INPUT)
 
     # Compress reports for the RunPod output payload
     break_b64 = _b64.b64encode(json.dumps(break_result.report).encode()).decode()
@@ -1838,6 +1896,8 @@ def _run_deployment_assessment(
     assure_report["paired_run_id"] = break_result.report["run_id"]
 
     import base64 as _b64
+    # Inline panel (judge + jury) over the break report's evidence — on this warm worker, advisory.
+    _attach_inline_panel(break_result.report, _JOB_INPUT)
     break_b64 = _b64.b64encode(json.dumps(break_result.report).encode()).decode()
     assure_b64 = _b64.b64encode(json.dumps(assure_report).encode()).decode()
 
@@ -2004,21 +2064,47 @@ def _run_model_weights_audit(
         log.info("Pre-flight passed, starting audit on %s", served_model)
 
         # ── Run audit against local vLLM (with resolved stop tokens) ──
-        audit_result = _run_api_endpoint_audit(
-            order_id=order_id,
-            model_index=model_index,
-            model_name=model_name,
-            model_id=served_model,
-            endpoint_url="http://localhost:8199/v1",
-            api_key="not-needed",
-            webhook_secret=webhook_secret,
-            stop_tokens=stop_tokens,
-        )
+        # DEFER the inline panel: the model-under-test's vLLM still owns the GPU here, so the
+        # 24B judge can't load yet. Run the audit WITHOUT the panel, then free the VRAM and run it.
+        _JOB_INPUT["_defer_panel"] = True
+        try:
+            audit_result = _run_api_endpoint_audit(
+                order_id=order_id,
+                model_index=model_index,
+                model_name=model_name,
+                model_id=served_model,
+                endpoint_url="http://localhost:8199/v1",
+                api_key="not-needed",
+                webhook_secret=webhook_secret,
+                stop_tokens=stop_tokens,
+            )
+        finally:
+            _JOB_INPUT.pop("_defer_panel", None)
         # Graduate an auto-probed registry entry once the audit confirms it works.
         if isinstance(audit_result, dict) and audit_result.get("status") == "completed":
             _post_audit_verify_registry(
                 hf_repo, model_source,
                 _resolve_baseline_max_len(model_source, hf_repo))
+            # Free the model-under-test's VRAM, THEN run the inline panel (judge + jury) on the
+            # freed GPU and re-attach it to the break report.
+            if vllm_proc and vllm_proc.poll() is None:
+                log.info("Tearing down model-under-test vLLM to free VRAM for the inline panel")
+                vllm_proc.terminate()
+                try:
+                    vllm_proc.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    vllm_proc.kill()
+                vllm_proc = None
+                import time as _t
+                _t.sleep(3)  # let the GPU reclaim VRAM before the judge loads
+            try:
+                import base64 as _b64p
+                if audit_result.get("break_report_b64"):
+                    _rep = json.loads(_b64p.b64decode(audit_result["break_report_b64"]))
+                    _attach_inline_panel(_rep, _JOB_INPUT)
+                    audit_result["break_report_b64"] = _b64p.b64encode(json.dumps(_rep).encode()).decode()
+            except Exception as _pexc:
+                log.warning("post-teardown inline panel failed (non-fatal): %s", _pexc)
         return audit_result
 
     finally:
@@ -2301,6 +2387,9 @@ def _run_batch_break(
             # Cross-link paired reports (Parallax)
             break_result.report["paired_run_id"] = assure_report["run_id"]
             assure_report["paired_run_id"] = break_result.report["run_id"]
+
+            # Inline panel (judge + jury) over the break report's evidence — on this warm worker, advisory.
+            _attach_inline_panel(break_result.report, _JOB_INPUT)
 
             # Upload both reports to server
             break_b64 = _b64.b64encode(json.dumps(break_result.report).encode()).decode()
