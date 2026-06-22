@@ -8,7 +8,7 @@ paying customer through:
        enrollment endpoint; receive a single-use download URL.
     3. Download the sealed bundle, open it with the private X25519 key.
     4. Verify the envelope's Origin signature offline.
-    5. Run the Forge Crucible Assurance Protocol against the audit target
+    5. Run the Forge Assurance Protocol against the audit target
        (pulled from the bundle's `target` block).
     6. Sign the final report with the bundle's child Ed25519 seed.
     7. POST the signed report to the ingest endpoint with an HMAC upload
@@ -132,7 +132,7 @@ def certify_audit(
     _verify_origin_signature(envelope)
 
     # ── 5. Run the audit ─────────────────────────────────────────────────
-    log.info("Running Crucible Assurance Protocol …")
+    log.info("Running Forge Assurance Protocol …")
     report = _run_audit(bundle, target_endpoint_url, target_api_key)
 
     # ── 6. Sign the report with the bundle's child Ed25519 seed ──────────

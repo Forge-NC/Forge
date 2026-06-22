@@ -19,10 +19,10 @@ Forge is live and publicly available:
 
 ### Current Stats
 - ~56,448 lines Python (forge/) + ~18,890 lines tests + ~18,407 lines server PHP
-- **74 assurance scenarios across 8 categories** (was 38 at launch; 74 as of 2026-04-13)
+- **161 assurance scenarios across 16 categories** (PROTO V1 production protocol; built up from 38 → 55 → 74 across four pre-release drafts)
 - Compliance maps: EU AI Act / NIST AI RMF / ISO 42001 / SOC2 / HIPAA — **adding NIST 800-53 / CMMC 2.0 / FedRAMP** to open federal/DoD market
 - `/break` consolidated (all flags collapsed into one command; no more `--full`)
-- 1,318 passing tests (pytest-verified), 59 slash commands, 28 AI tools, 14 themes
+- 1,334 passing tests (pytest-verified), 59 slash commands, 28 AI tools, 14 themes
 - Forge Crucible: 9-layer security pipeline (pattern scanner → semantic anomaly → behavioral tripwire → canary trap → threat intelligence → command guard → path sandbox → plan verifier → forensic auditor)
 - Ed25519-signed reports + hash-chained scenarios + Origin countersignature pipeline
 - Forge Matrix live, public /report views live, /verify tool live

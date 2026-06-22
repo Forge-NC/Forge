@@ -217,7 +217,7 @@ def _assert_origin_signature(envelope: dict, origin_pubkey_b64: str) -> None:
 # ── Audit execution ───────────────────────────────────────────────────────
 
 def run_audit(bundle: dict, cfg: RunnerConfig) -> dict:
-    """Run the Forge Crucible Assurance Protocol and return the signed report."""
+    """Run the Forge Assurance Protocol and return the signed report."""
     from forge.assurance import AssuranceRunner
     from forge.assurance_report import generate_report
     from forge.break_runner import BreakRunner
