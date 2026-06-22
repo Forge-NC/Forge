@@ -2847,8 +2847,8 @@ class CommandHandler:
 
         Requires a paid order with dispatch_mode=external_runner on your
         Forge NC account. Generates a one-time keypair, enrolls the order,
-        downloads a sealed bundle, runs the full 74-scenario Crucible
-        Assurance Protocol, signs the report with the bundled child key,
+        downloads a sealed bundle, runs the full Forge Assurance
+        Protocol, signs the report with the bundled child key,
         and uploads. On success, prints the certified report URL and
         transparency log leaf index.
         """

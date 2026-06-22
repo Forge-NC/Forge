@@ -1,6 +1,6 @@
 # Forge External Runner
 
-Customer-side audit runner for Forge Certified Audits (self-hosted) and Deployment Assessments (in-VPC). Runs inside a lean Python Docker container, executes the Forge Crucible Assurance Protocol against a target endpoint, and uploads a cryptographically signed report to forge-nc.dev.
+Customer-side audit runner for Forge Certified Audits (self-hosted) and Deployment Assessments (in-VPC). Runs inside a lean Python Docker container, executes the Forge Assurance Protocol against a target endpoint, and uploads a cryptographically signed report to forge-nc.dev.
 
 **Image:** `ghcr.io/forge-nc/forge-external-runner:v1`
 **Source:** `runner/` in this repo

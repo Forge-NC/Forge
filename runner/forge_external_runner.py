@@ -11,7 +11,7 @@ Lifecycle (single-shot):
   3. Open the bundle; extract envelope + child signing seed + upload metadata.
   4. Offline-verify the envelope against the pinned Origin public key
      (fetched once from /.well-known/forge-origin.json or pinned in env).
-  5. Run the Forge Crucible Assurance Protocol's 74 scenarios against the
+  5. Run the Forge Assurance Protocol scenarios against the
      configured target (endpoint_url + model_id from the bundle's target block,
      plus customer-provided FORGE_TARGET_API_KEY + FORGE_TARGET_URL overrides).
   6. Sign the final report with the child Ed25519 key.

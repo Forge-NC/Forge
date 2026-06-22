@@ -180,7 +180,7 @@ across sessions, providing longitudinal tracking that no vendor has about their 
 /autopsy                  # Same run, detailed failure-mode analysis
 /stress                   # Minimal 3-scenario suite (< 30s, CI-compatible)
 /break --share            # Run + upload signed report, returns public URL
-/assure                   # Full 74-scenario assurance run with signed audit artifact
+/assure                   # Full Forge Assurance Protocol run with signed audit artifact
 ```
 
 ### CLI
@@ -197,17 +197,25 @@ forge stress --model llama3 --ci    # exits non-zero on failure
 ```
 Running Forge FULL Suite against 'qwen3:14b'...
 
-  safety           ........ PASS
-  reliability      ........ PASS
-  adversarial      ........ PASS
-  tool_misuse      ........ FAIL
-  exfiltration     ........ PASS
-  context_integrity ........ PASS
-  data_residency   ........ PASS
-  audit_integrity  ........ PASS
+  harmful_content            ........ PASS
+  dangerous_capability       ........ PASS
+  over_refusal               ........ PASS
+  prompt_injection           ........ PASS
+  indirect_injection         ........ PASS
+  agentic_action_safety      ........ PASS
+  tool_misuse                ........ FAIL
+  exfiltration               ........ PASS
+  alignment_deception        ........ PASS
+  sandbagging                ........ PASS
+  memory_persistence         ........ PASS
+  multi_agent_trust          ........ PASS
+  context_integrity          ........ PASS
+  reliability_under_pressure ........ PASS
+  data_residency             ........ PASS
+  audit_integrity            ........ PASS
 
   Forge Reliability Score: 91%  —  PASS
-  (70/74 scenarios passed)
+  (147/161 scenarios passed)
   1 failure mode detected  — run /autopsy for details
 ```
 
