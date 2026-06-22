@@ -2585,51 +2585,57 @@ def _run_pod_mode():
             "error": f"Pod handler crash: {exc}",
         }
 
-    # POST results back to orchestrator webhook (always, even on failure)
-    # Try multiple URL patterns to bypass Cloudflare WAF blocking data center IPs
+    # POST results back to the orchestrator (always, even on failure) via the DNS-only CF-bypass
+    # host (FORGE_API_SERVER = api.forge-nc.dev) with X-Forge-Api-Secret — the SAME path every other
+    # worker->server call uses. A datacenter-IP POST to the CF-proxied apex (forge-nc.dev) is 403'd,
+    # which is why the old apex/rv.php URLs silently failed and the pod never got torn down.
     status_str = "COMPLETED" if result.get("status") == "completed" else "FAILED"
     payload = {"status": status_str, "output": result}
-    webhook_urls = [
-        webhook_url,
-        webhook_url.replace("audit_orchestrator.php", "rv.php"),  # proxy bypass
-    ]
+    complete_url = f"{FORGE_API_SERVER}/audit_orchestrator.php?action=runpod_complete"
 
     posted = False
-    for url in webhook_urls:
-        log.info("Pod mode: posting %s to %s", status_str, url)
-        for attempt in range(3):
-            try:
-                resp = requests.post(url, json=payload, timeout=60)
-                log.info("Pod mode: webhook response %d from %s", resp.status_code, url)
-                if resp.status_code < 400:
-                    posted = True
-                    break
-                log.warning("Pod mode: %d on attempt %d, retrying...", resp.status_code, attempt + 1)
-            except Exception as exc:
-                log.error("Pod mode: POST attempt %d to %s failed: %s", attempt + 1, url, exc)
-            time.sleep(5)
-        if posted:
-            break
+    for attempt in range(5):
+        try:
+            resp = requests.post(complete_url, json=payload,
+                                 headers={"X-Forge-Api-Secret": FORGE_API_SECRET}, timeout=120)
+            log.info("Pod mode: webhook response %d from %s", resp.status_code, complete_url)
+            if resp.status_code < 400:
+                posted = True
+                break
+            log.warning("Pod mode: %d on attempt %d, retrying...", resp.status_code, attempt + 1)
+        except Exception as exc:
+            log.error("Pod mode: POST attempt %d failed: %s", attempt + 1, exc)
+        time.sleep(10)
 
     if not posted:
-        log.error("Pod mode: ALL webhook POST attempts failed. Results lost.")
+        log.error("Pod mode: ALL webhook POST attempts failed. Results lost — reaper will reclaim the pod.")
 
-    # Self-terminate the pod to prevent restart loop
-    # RunPod pods have restartPolicy: Always — exiting would restart the container
+    # Self-terminate via the RunPod GraphQL podTerminate (DESTROYS the pod, so restartPolicy:Always
+    # cannot re-run/re-bill). runpodctl is NOT installed in the image — never rely on it; and `stop`
+    # != `terminate` (a stopped on-demand pod still bills). If terminate fails, the orchestrator-side
+    # teardown + the reap_pods cron (hard runtime cap) are the backstops.
     pod_id = os.environ.get("RUNPOD_POD_ID", "")
-    if pod_id:
-        log.info("Pod mode: self-terminating pod %s", pod_id)
+    rp_key = os.environ.get("FORGE_RUNPOD_API_KEY", "")
+    if pod_id and rp_key:
+        log.info("Pod mode: self-terminating pod %s via podTerminate", pod_id)
         try:
-            import subprocess
-            subprocess.run(["runpodctl", "pod", "stop", pod_id], timeout=10, capture_output=True)
+            tr = requests.post(
+                "https://api.runpod.io/graphql",
+                headers={"Authorization": f"Bearer {rp_key}", "Content-Type": "application/json"},
+                json={"query": 'mutation { podTerminate(input: { podId: "%s" }) }' % pod_id},
+                timeout=20,
+            )
+            log.info("Pod mode: podTerminate HTTP %d", tr.status_code)
         except Exception as exc:
-            log.warning("Pod mode: self-terminate failed: %s (orchestrator will clean up)", exc)
+            log.warning("Pod mode: podTerminate failed: %s (reaper will clean up)", exc)
+    else:
+        log.warning("Pod mode: no RUNPOD_POD_ID/FORGE_RUNPOD_API_KEY — relying on orchestrator + reaper to terminate")
 
-    log.info("Pod mode: done, sleeping to prevent restart")
-    # Sleep indefinitely instead of exiting — prevents restart loop
-    # The orchestrator or self-terminate will kill the pod
+    # Do NOT sys.exit() here: restartPolicy:Always would restart the container and re-run the whole
+    # audit (re-billing). Hold until podTerminate lands; reap_pods enforces a hard runtime cap.
+    log.info("Pod mode: done; awaiting termination")
     while True:
-        time.sleep(3600)
+        time.sleep(300)
 
 
 # ── Entry point ──
