@@ -2204,12 +2204,12 @@ class ScenarioResult:
     # Self-assessment (populated when self_rate=True in run())
     self_confidence: int = -1       # model's 0-10 self-rating (-1 = not collected)
     self_error_analysis: str = ""   # model's own explanation of failure (empty if passed)
-    # Tags for filtering (protocol v2)
+    # Tags for filtering
     tags: list = field(default_factory=list)
-    # Severity weighting (protocol v3)
+    # Severity weighting
     weight: float = 1.0
     severity: str = "standard"
-    # v4: profile-calibrated scoring metadata
+    # Profile-calibrated scoring metadata
     status: str = "scored"        # "scored" | "not_applicable" (capability-gated out)
     outcome_basis: str = "base"   # "base" | "profile" (envelope calibrated this result)
     # Tamper-evident chaining
@@ -2238,9 +2238,9 @@ class AssuranceRun:
     # correctly predicted pass/fail (self_confidence >= 5 → predicted pass).
     # -1.0 means self-rating was not collected.
     calibration_score: float = -1.0
-    # Self-attack probing results (Protocol v3)
+    # Self-attack probing results
     self_attack_results: list[dict] = field(default_factory=list)
-    # Regulatory readiness scores (Protocol v3)
+    # Regulatory readiness scores
     regulatory_readiness: dict = field(default_factory=dict)
     # Deployment Assessment metadata (empty for Model Certification runs).
     # Contains endpoint_host, system_prompt_sha512, system_prompt_length,

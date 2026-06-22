@@ -1539,7 +1539,7 @@ def _run_api_endpoint_audit(
         mode="full",
         include_fingerprint=True,
         self_rate=True,
-        tier="power",  # Certified audits run all 74 scenarios (Forge Assurance Protocol v3)
+        tier="power",  # Certified audits run the full PROTO V1 scenario pack
         progress_callback=_progress,
     )
 

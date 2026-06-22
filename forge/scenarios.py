@@ -1,10 +1,8 @@
-"""Forge Protocol v4 — staging scenario bank (NOT yet wired into the live pack).
+"""Forge Protocol — PROTO V1 scenario bank (the live production set).
 
-This module holds the v4 scenario additions while they are authored and verified.
-It is deliberately NOT imported by `assurance._SCENARIOS`, so the live v3 protocol
-(74 scenarios) stays byte-identical until the v4 cutover. At cutover, the verified
-scenarios here are merged into `_SCENARIOS`, `ASSURANCE_PROTOCOL_VERSION` -> 4, and
-the pack is re-exported as v4.json.
+This module is the source of truth for the production scenario set. `forge.assurance`
+builds its live pack from here via `scenario_dicts_for_pack`, the pack is exported as
+the signed `data/scenario_packs/v1.json`, and `ASSURANCE_PROTOCOL_VERSION` is 1.
 
 ────────────────────────────────────────────────────────────────────────────────
 SCORING CONTRACT (must match forge.assurance.score_scenario exactly — read it before
