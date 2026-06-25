@@ -1890,6 +1890,7 @@ def _reclaim_gpu_after_vllm(vllm_proc, label: str = "") -> None:
     on tight-VRAM tiers (the bug that hung small-tier panel runs). So: killpg the WHOLE process
     group, SIGKILL any PID still on the GPU per nvidia-smi, then poll mem_get_info until the driver
     reports the memory free. Mirrors the batch-path cleanup; non-fatal throughout."""
+    import os, signal, subprocess, time  # handler imports these per-function, not module-level
     if vllm_proc and vllm_proc.poll() is None:
         log.info("Reclaiming GPU: killing vLLM process group %s", label)
         try:
@@ -1929,25 +1930,14 @@ def _reclaim_gpu_after_vllm(vllm_proc, label: str = "") -> None:
             time.sleep(2)
     except Exception as _smi_exc:
         log.warning("nvidia-smi GPU PID sweep failed (non-fatal): %s", _smi_exc)
-    # Poll until the GPU actually reports the freed memory before the judge loads.
-    try:
-        import torch as _t
-        if _t.cuda.is_available():
-            import gc as _gc
-            _gc.collect()
-            _t.cuda.empty_cache()
-            for _wait_attempt in range(60):  # up to 2 min
-                free, total = _t.cuda.mem_get_info(0)
-                if free / total >= 0.85:
-                    log.info("GPU released: %.1f / %.1f GiB free %s",
-                             free / 1024**3, total / 1024**3, label)
-                    break
-                time.sleep(2)
-            else:
-                log.warning("GPU NOT released after 2min: %.2f / %.2f GiB free %s",
-                            free / 1024**3, total / 1024**3, label)
-    except Exception as _gpu_exc:
-        log.warning("GPU memory poll failed (non-fatal): %s", _gpu_exc)
+    # Settle: let the driver reclaim the freed VRAM. Deliberately NO torch calls in the handler
+    # process here — querying/emptying CUDA in THIS process right after SIGKILL'ing the vLLM that
+    # shared the GPU can wedge the handler's CUDA context with no timeout and hang the whole run
+    # (observed: a panel run sat for an hour at exactly this point). The judge loads in its own
+    # fresh-context subprocess; if VRAM is still short it OOMs and degrades to jury-only (logged),
+    # which never hangs.
+    time.sleep(15)
+    log.info("GPU reclaim settle done %s", label)
 
 
 def _run_model_weights_audit(
