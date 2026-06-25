@@ -1883,6 +1883,73 @@ def _run_deployment_assessment(
     }
 
 
+def _reclaim_gpu_after_vllm(vllm_proc, label: str = "") -> None:
+    """Fully free GPU VRAM after a model-under-test vLLM run, BEFORE loading the 24B judge (or the
+    next model on a warm worker). vLLM spawns EngineCore subprocesses that hold the VRAM; a
+    parent-only terminate()/kill() leaves ~20GB allocated (the child survives), which OOMs the judge
+    on tight-VRAM tiers (the bug that hung small-tier panel runs). So: killpg the WHOLE process
+    group, SIGKILL any PID still on the GPU per nvidia-smi, then poll mem_get_info until the driver
+    reports the memory free. Mirrors the batch-path cleanup; non-fatal throughout."""
+    if vllm_proc and vllm_proc.poll() is None:
+        log.info("Reclaiming GPU: killing vLLM process group %s", label)
+        try:
+            os.killpg(os.getpgid(vllm_proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, AttributeError, OSError):
+            vllm_proc.kill()
+        try:
+            vllm_proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            pass
+    # Belt-and-suspenders: SIGKILL anything else still holding the GPU.
+    try:
+        smi = subprocess.run(
+            ["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=10,
+        )
+        self_pid = os.getpid()
+        survivors = []
+        for line in (smi.stdout or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                pid = int(line)
+            except ValueError:
+                continue
+            if pid != self_pid:
+                survivors.append(pid)
+        if survivors:
+            log.warning("nvidia-smi found %d GPU-holding PIDs after killpg (%s) — SIGKILL'ing",
+                        len(survivors), survivors)
+            for pid in survivors:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+            time.sleep(2)
+    except Exception as _smi_exc:
+        log.warning("nvidia-smi GPU PID sweep failed (non-fatal): %s", _smi_exc)
+    # Poll until the GPU actually reports the freed memory before the judge loads.
+    try:
+        import torch as _t
+        if _t.cuda.is_available():
+            import gc as _gc
+            _gc.collect()
+            _t.cuda.empty_cache()
+            for _wait_attempt in range(60):  # up to 2 min
+                free, total = _t.cuda.mem_get_info(0)
+                if free / total >= 0.85:
+                    log.info("GPU released: %.1f / %.1f GiB free %s",
+                             free / 1024**3, total / 1024**3, label)
+                    break
+                time.sleep(2)
+            else:
+                log.warning("GPU NOT released after 2min: %.2f / %.2f GiB free %s",
+                            free / 1024**3, total / 1024**3, label)
+    except Exception as _gpu_exc:
+        log.warning("GPU memory poll failed (non-fatal): %s", _gpu_exc)
+
+
 def _run_model_weights_audit(
     order_id: str,
     model_index: int,
@@ -2053,16 +2120,12 @@ def _run_model_weights_audit(
                 _resolve_baseline_max_len(model_source, hf_repo))
             # Free the model-under-test's VRAM, THEN run the inline panel (judge + jury) on the
             # freed GPU and re-attach it to the break report.
-            if vllm_proc and vllm_proc.poll() is None:
-                log.info("Tearing down model-under-test vLLM to free VRAM for the inline panel")
-                vllm_proc.terminate()
-                try:
-                    vllm_proc.wait(timeout=30)
-                except subprocess.TimeoutExpired:
-                    vllm_proc.kill()
-                vllm_proc = None
-                import time as _t
-                _t.sleep(3)  # let the GPU reclaim VRAM before the judge loads
+            # Fully reclaim the GPU before the judge loads (killpg the vLLM EngineCore tree +
+            # nvidia-smi SIGKILL sweep + mem_get_info poll). A parent-only kill leaves ~20GB held
+            # and OOMs the 24B judge on 24GB tiers — the bug that hung small-tier panel runs.
+            log.info("Tearing down model-under-test vLLM to free VRAM for the inline panel")
+            _reclaim_gpu_after_vllm(vllm_proc, "(pre-judge)")
+            vllm_proc = None
             try:
                 import base64 as _b64p
                 if audit_result.get("break_report_b64"):

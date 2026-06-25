@@ -26,6 +26,11 @@ import urllib.request
 def run_judge(job_input: dict) -> dict:
     os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
     os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    # Reduce CUDA fragmentation so the 4-bit 24B fits cleanly on tight-VRAM tiers after the
+    # model-under-test vLLM is reclaimed (the OOM error message itself recommends this). Set both
+    # names: PyTorch 2.10 reads PYTORCH_ALLOC_CONF, older builds PYTORCH_CUDA_ALLOC_CONF.
+    os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
     base = job_input.get("base", "")
     adapter_url = job_input.get("adapter_url", "")
