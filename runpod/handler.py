@@ -1483,8 +1483,34 @@ def _attach_inline_panel(report: dict, job_input: dict) -> None:
                 if res.get("status") == "completed":
                     return res.get("generations") or []
                 raise RuntimeError(res.get("error", "judge generate failed"))
-        panel = run_panel(report, scn_by_id, openrouter_key=or_key,
-                          judge_generate=judge_generate, tier=tier, log=log.info)
+        # Panel WATCHDOG: run the panel in a daemon thread with a hard wall-clock cap so a hung
+        # judge/jury can NEVER block report finalization + pod self-termination. A prior run wedged
+        # silently at this stage (GPU 0%, 0 OpenRouter calls) and billed ~3h doing nothing. Budget =
+        # judge cap + 1h for the jury; tune via job_input.panel_timeout_s. On timeout we abandon the
+        # panel (advisory) and let the audit finalize — the panel never affects the audit verdict.
+        import threading
+        panel_timeout_s = int(job_input.get("panel_timeout_s", j_timeout + 3600))
+        _box = {}
+        def _run_panel_thread():
+            try:
+                _box["panel"] = run_panel(report, scn_by_id, openrouter_key=or_key,
+                                          judge_generate=judge_generate, tier=tier, log=log.info)
+            except Exception as e:
+                _box["err"] = e
+        _t = threading.Thread(target=_run_panel_thread, name="forge-panel", daemon=True)
+        log.info("inline panel starting (watchdog cap %ss = judge %ss + jury budget)", panel_timeout_s, j_timeout)
+        _t.start()
+        _t.join(panel_timeout_s)
+        if _t.is_alive():
+            log.warning("panel watchdog: exceeded %ss — ABANDONING panel so the audit finalizes "
+                        "(advisory only, never affects the audit verdict)", panel_timeout_s)
+            report.setdefault("_verification", {})["panel"] = {
+                "advisory": True, "n_cases": 0,
+                "note": f"panel abandoned by watchdog after {panel_timeout_s}s"}
+            return
+        if "err" in _box:
+            raise _box["err"]
+        panel = _box.get("panel") or {"advisory": True, "n_cases": 0, "note": "panel returned nothing"}
         report.setdefault("_verification", {})["panel"] = panel
         log.info("inline panel attached: n_cases=%s judge_scored=%s flips=%s",
                  panel.get("n_cases"), panel.get("judge_scored"), len(panel.get("flips") or []))

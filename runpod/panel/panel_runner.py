@@ -305,8 +305,12 @@ def run_panel(report: dict, scn_by_id: dict, openrouter_key: str = "",
     screen = TIER1 if (tier == "paid" and or_key) else []
     escalate = TIER2 if (tier == "paid" and or_key) else []
 
+    _log(f"panel jury starting: {len(cases)} cases, tier={tier}, "
+         f"jurors={'TIER1+escalate' if screen else 'none (judge-only/degraded)'}")
     verdicts, summary = [], {}
     for i, case in enumerate(cases):
+        if i and i % 25 == 0:
+            _log(f"panel jury: {i}/{len(cases)} cases scored")
         votes = []
         if j_verdicts[i] is not None:
             votes.append(j_verdicts[i])
