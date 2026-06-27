@@ -1411,14 +1411,20 @@ def _run_judge(job_input: dict) -> dict:
     try:
         _json.dump(job_input, fin)
         fin.close()
-        timeout_s = int(job_input.get("judge_timeout_s", 2400))
+        # Default 5400 (90 min) to match the orchestrator, NOT a low 2400 footgun: if the caller
+        # ever forgets to forward judge_timeout_s, the judge still gets the real cap, not 40 min.
+        timeout_s = int(job_input.get("judge_timeout_s", 5400))
         try:
+            # stderr is INHERITED (not captured) so judge_subproc's per-batch progress streams LIVE
+            # to the pod's stderr -> RunPod Container log. Without this the judge stage is a black box
+            # (we cannot tell a slow B=1 fallback from a load hang from a timeout). stdout stays piped
+            # for the crash tail; the judge writes its real result to the output JSON file, not stdout.
             proc = _sp.run([_sys.executable, script, fin.name, fout],
-                           capture_output=True, text=True, timeout=timeout_s)
+                           stdout=_sp.PIPE, stderr=None, text=True, timeout=timeout_s)
         except _sp.TimeoutExpired:
             return {"status": "failed", "error": f"judge subprocess timed out after {timeout_s}s"}
         if not _os.path.exists(fout):
-            tail = (proc.stderr or proc.stdout or "")[-600:]
+            tail = (proc.stdout or "")[-600:]
             return {"status": "failed",
                     "error": f"judge subprocess produced no output (rc={proc.returncode}): {tail}"}
         try:
@@ -1462,12 +1468,18 @@ def _attach_inline_panel(report: dict, job_input: dict) -> None:
         j_base = job_input.get("judge_base", "")
         j_adapter = job_input.get("judge_adapter_url", "")
         j_secret = job_input.get("fj_secret", "")
+        # Forward the orchestrator's judge cap into the subprocess. THIS was the 40-min-timeout bug:
+        # the closure built a fresh dict without judge_timeout_s, so _run_judge always fell back to
+        # its default and the 5400 the orchestrator sent never reached the judge. Never cut cases —
+        # raise the cap instead (see feedback_never_reduce_panel_coverage).
+        j_timeout = int(job_input.get("judge_timeout_s", 5400))
         judge_generate = None
         if j_base and j_adapter:
             def judge_generate(prompts):
                 # Reuse the standalone judge loader on this warm worker (MUT already torn down).
                 res = _run_judge({"base": j_base, "adapter_url": j_adapter,
-                                  "fj_secret": j_secret, "prompts": prompts})
+                                  "fj_secret": j_secret, "prompts": prompts,
+                                  "judge_timeout_s": j_timeout})
                 if res.get("status") == "completed":
                     return res.get("generations") or []
                 raise RuntimeError(res.get("error", "judge generate failed"))

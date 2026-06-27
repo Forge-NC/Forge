@@ -40,6 +40,9 @@ def run_judge(job_input: dict) -> dict:
     max_len = int(job_input.get("max_len", 4096))
     if not base or not adapter_url:
         return {"status": "failed", "error": "judge job requires 'base' and 'adapter_url'"}
+    # stderr streams to the parent handler's Container log (handler runs us with stderr inherited),
+    # so each milestone is visible live instead of the whole stage being a black box.
+    print(f"[judge] subprocess start: {len(prompts)} cases, fetching adapter", file=sys.stderr, flush=True)
 
     try:
         import torch
@@ -63,6 +66,7 @@ def run_judge(job_input: dict) -> dict:
         if not cfgs:
             return {"status": "failed", "error": "adapter_config.json not found in adapter archive"}
         adapter_dir = os.path.dirname(cfgs[0])
+        print("[judge] adapter fetched + extracted; loading 24B base (4-bit NF4)", file=sys.stderr, flush=True)
     except Exception as exc:
         return {"status": "failed", "error": f"adapter fetch/extract failed: {exc}"}
 
@@ -85,9 +89,18 @@ def run_judge(job_input: dict) -> dict:
     except Exception as exc:
         return {"status": "failed", "error": f"judge model load failed: {exc}"}
 
-    def _gen(rws, bs):
+    def _progress(msg):
+        # stderr is inherited by the parent handler -> streams LIVE to the RunPod Container log,
+        # so the judge stage is no longer a black box: we can see the batch decision + per-batch
+        # rate and tell a slow B=1 fallback from a load hang from a real timeout.
+        print(f"[judge] {msg}", file=sys.stderr, flush=True)
+
+    _progress("model loaded (24B 4-bit NF4 + LoRA); starting scoring")
+
+    def _gen(rws, bs, tag=None, base_done=0, total=0):
         outs = []
-        for s in range(0, len(rws), bs):
+        nb = (len(rws) + bs - 1) // bs
+        for bi, s in enumerate(range(0, len(rws), bs)):
             chunk = rws[s:s + bs]
             rendered = [tok.apply_chat_template([{"role": "user", "content": p}],
                                                 tokenize=False, add_generation_prompt=True) for p in chunk]
@@ -97,6 +110,8 @@ def run_judge(job_input: dict) -> dict:
                 out = model.generate(**enc, max_new_tokens=max_new_tokens, do_sample=False,
                                      pad_token_id=tok.pad_token_id)
             outs.extend(tok.batch_decode(out[:, enc["input_ids"].shape[1]:], skip_special_tokens=True))
+            if tag:
+                _progress(f"{tag} batch {bi + 1}/{nb} (B={bs}) scored={base_done + min(s + bs, len(rws))}/{total}")
         return outs
 
     try:
@@ -105,7 +120,11 @@ def run_judge(job_input: dict) -> dict:
         sample = prompts[:8]
         b1, b8 = _gen(sample, 1), _gen(sample, 8)
         bsz = 8 if b1 == b8 else 1
-        gens = (b1 if bsz == 1 else b8) + (_gen(prompts[8:], bsz) if len(prompts) > 8 else [])
+        _progress(f"batch-determinism self-check: B=1 {'==' if bsz == 8 else '!='} B=8 -> using B={bsz} "
+                  f"for the remaining {max(0, len(prompts) - 8)} cases ({len(prompts)} total)")
+        rest = _gen(prompts[8:], bsz, tag="main", base_done=8, total=len(prompts)) if len(prompts) > 8 else []
+        gens = (b1 if bsz == 1 else b8) + rest
+        _progress(f"scoring complete: {len(gens)}/{len(prompts)} generations at B={bsz}")
         return {"status": "completed", "generations": gens, "batch_size": bsz, "n": len(gens)}
     except Exception as exc:
         return {"status": "failed", "error": f"judge generation failed: {exc}"}
