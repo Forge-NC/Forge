@@ -22,7 +22,7 @@ import json
 import re
 import urllib.request
 import urllib.error
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as _FuturesTimeout
 
 from .fj_schema import build_prompt, post_validate
 from .fj_fewshot import FEWSHOT
@@ -219,16 +219,31 @@ def _or_vote(juror, prompt, full_resp, category, temperature, key):
     return post_validate(obj, full_resp, category)["_final_verdict"]
 
 
-def _or_votes(prompt, full_resp, category, jurors, passes, key):
+def _or_votes(prompt, full_resp, category, jurors, passes, key, wall_timeout=150):
+    # HARD per-call-group wall clock. The old `with ThreadPoolExecutor() as ex: ex.map(...)` blocked
+    # forever if a single OpenRouter request stalled past urllib's socket timeout (an idle-but-open
+    # connection doesn't always trip it) — shutdown(wait=True) waited on the hung thread, which wedged
+    # a whole pod for 2h. Now: submit + as_completed(timeout); on timeout take the votes we have and
+    # never wait on stragglers (shutdown wait=False) so one stuck juror can't block the panel.
     tasks = []
     for j in jurors:
         for p in range(passes):
             tasks.append((j, 0.0 if passes == 1 else round(0.2 * p, 2)))
     out = []
-    with ThreadPoolExecutor(max_workers=min(8, len(tasks) or 1)) as ex:
-        for r in ex.map(lambda t: _or_vote(t[0], prompt, full_resp, category, t[1], key), tasks):
+    ex = ThreadPoolExecutor(max_workers=min(8, len(tasks) or 1))
+    futs = [ex.submit(_or_vote, t[0], prompt, full_resp, category, t[1], key) for t in tasks]
+    try:
+        for f in as_completed(futs, timeout=wall_timeout):
+            try:
+                r = f.result()
+            except Exception:
+                r = None
             if r is not None:
                 out.append(r)
+    except _FuturesTimeout:
+        pass  # a juror stalled past wall_timeout — proceed with the votes collected so far
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
     return out
 
 
