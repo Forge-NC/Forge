@@ -301,9 +301,12 @@ def run_panel(report: dict, scn_by_id: dict, openrouter_key: str = "",
     prompts_judge = [case_prompt(c, "") for c in cases]
     prompts_or = [case_prompt(c, FEWSHOT) for c in cases]
 
+    import time as _time
     # 24B judge — one batch on the warm worker, byte-decoded then post-validated.
     j_verdicts = [None] * len(cases)
     judge_scored = 0
+    judge_err = None
+    judge_unparsed = 0
     if judge_generate is not None:
         try:
             gens = judge_generate(prompts_judge) or []
@@ -311,9 +314,12 @@ def run_panel(report: dict, scn_by_id: dict, openrouter_key: str = "",
                 obj = parse_json(byte_level_decode(g))
                 if isinstance(obj, dict):
                     j_verdicts[i] = post_validate(obj, c["response_full"], c["category"])["_final_verdict"]
+                else:
+                    judge_unparsed += 1
             judge_scored = sum(v is not None for v in j_verdicts)
-            _log(f"panel: 24B scored {judge_scored}/{len(cases)}")
+            _log(f"panel: 24B scored {judge_scored}/{len(cases)} ({judge_unparsed} unparseable, {len(gens)} gens)")
         except Exception as exc:
+            judge_err = str(exc)
             _log(f"panel: 24B failed ({exc}); jury-only")
 
     or_key = openrouter_key or ""
@@ -322,10 +328,12 @@ def run_panel(report: dict, scn_by_id: dict, openrouter_key: str = "",
 
     _log(f"panel jury starting: {len(cases)} cases, tier={tier}, "
          f"jurors={'TIER1+escalate' if screen else 'none (judge-only/degraded)'}")
+    jury_t0 = _time.monotonic()
+    n_escalated = 0
     verdicts, summary = [], {}
     for i, case in enumerate(cases):
         if i and i % 25 == 0:
-            _log(f"panel jury: {i}/{len(cases)} cases scored")
+            _log(f"panel jury: {i}/{len(cases)} cases scored ({round(_time.monotonic() - jury_t0)}s elapsed)")
         votes = []
         if j_verdicts[i] is not None:
             votes.append(j_verdicts[i])
@@ -333,6 +341,7 @@ def run_panel(report: dict, scn_by_id: dict, openrouter_key: str = "",
             votes += _or_votes(prompts_or[i], case["response_full"], case["category"], screen, 1, or_key)
             top, frac, ndec = tally(votes)
             if not (ndec >= 2 and frac >= 0.75) and escalate:
+                n_escalated += 1
                 votes += _or_votes(prompts_or[i], case["response_full"], case["category"], escalate, TIER2_PASSES, or_key)
         label, conf, ndec = tally(votes)
         flip = (label is not None) and (label != ("pass" if case["oracle_passed"] else "fail"))
@@ -347,5 +356,18 @@ def run_panel(report: dict, scn_by_id: dict, openrouter_key: str = "",
         })
 
     flips = [v for v in verdicts if v["flip"]]
+    jury_elapsed = round(_time.monotonic() - jury_t0, 1)
+    n_no_decision = sum(1 for v in verdicts if v["panel_verdict"] is None)
+    _log(f"panel jury done: {len(cases)} cases in {jury_elapsed}s, {n_escalated} escalated, "
+         f"{n_no_decision} no-decision, {len(flips)} flips vs oracle")
     return {"n_cases": len(cases), "judge_scored": judge_scored, "tier": tier,
-            "summary": summary, "flips": flips, "advisory": True}
+            "summary": summary, "flips": flips, "advisory": True,
+            "diagnostics": {"jury": {
+                "judge_error": judge_err,
+                "judge_unparsed": judge_unparsed,
+                "jury_elapsed_s": jury_elapsed,
+                "n_escalated": n_escalated,
+                "n_no_decision": n_no_decision,
+                "screen_jurors": [j["slug"] for j in screen],
+                "escalate_jurors": [j["slug"] for j in escalate],
+            }}}
