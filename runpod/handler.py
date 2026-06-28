@@ -1395,6 +1395,8 @@ def _run_judge(job_input: dict) -> dict:
     import subprocess as _sp
     import sys as _sys
     import tempfile as _tf
+    import threading as _th
+    import time as _time
 
     if not job_input.get("base") or not job_input.get("adapter_url"):
         return {"status": "failed", "error": "judge job requires 'base' and 'adapter_url'"}
@@ -1408,35 +1410,79 @@ def _run_judge(job_input: dict) -> dict:
 
     fin = _tf.NamedTemporaryFile("w", suffix=".judgein.json", delete=False, encoding="utf-8")
     fout = fin.name + ".out"
+    fprog = fin.name + ".progress"   # judge_subproc rewrites this each step; survives a timeout-kill
     try:
         _json.dump(job_input, fin)
         fin.close()
-        # Default 5400 (90 min) to match the orchestrator, NOT a low 2400 footgun: if the caller
-        # ever forgets to forward judge_timeout_s, the judge still gets the real cap, not 40 min.
+        # Default 5400 (90 min) to match the orchestrator, NOT a low 2400 footgun.
         timeout_s = int(job_input.get("judge_timeout_s", 5400))
+        # Popen (not run) so we can STREAM the judge subprocess's stdout+stderr to OUR logger
+        # line-by-line WHILE it runs. log.info goes to both the pod stderr (Container log) AND the
+        # RemoteLogHandler (server log -> Intelligence tab), so the judge stage is observable LIVE in
+        # the readable channel instead of only the inaccessible Container log. The judge writes its
+        # real RESULT to fout (a file) and incremental progress to fprog (so partial state survives a
+        # timeout-kill) — neither goes through this stream.
+        proc = _sp.Popen([_sys.executable, script, fin.name, fout, fprog],
+                         stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True, bufsize=1)
+
+        def _pump():
+            try:
+                for line in proc.stdout:
+                    line = line.rstrip()
+                    if line:
+                        log.info("[judge] %s", line)
+            except Exception:
+                pass
+
+        pump_t = _th.Thread(target=_pump, name="judge-log-pump", daemon=True)
+        pump_t.start()
+
+        start = _time.monotonic()
+        timed_out = False
+        while proc.poll() is None:
+            if _time.monotonic() - start > timeout_s:
+                timed_out = True
+                log.warning("[judge] TIMEOUT after %ss — killing subprocess", timeout_s)
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                break
+            _time.sleep(2)
         try:
-            # stderr is INHERITED (not captured) so judge_subproc's per-batch progress streams LIVE
-            # to the pod's stderr -> RunPod Container log. Without this the judge stage is a black box
-            # (we cannot tell a slow B=1 fallback from a load hang from a timeout). stdout stays piped
-            # for the crash tail; the judge writes its real result to the output JSON file, not stdout.
-            proc = _sp.run([_sys.executable, script, fin.name, fout],
-                           stdout=_sp.PIPE, stderr=None, text=True, timeout=timeout_s)
-        except _sp.TimeoutExpired:
-            return {"status": "failed", "error": f"judge subprocess timed out after {timeout_s}s"}
+            proc.wait(timeout=20)
+        except Exception:
+            pass
+        pump_t.join(timeout=5)
+
+        # The progress sidecar is the durable record (the streamed log lines die with the pod's
+        # Container log; this file's contents ride home in the delivered report's diagnostics).
+        prog = {}
+        try:
+            if _os.path.exists(fprog):
+                with open(fprog, encoding="utf-8") as pf:
+                    prog = _json.load(pf)
+        except Exception:
+            prog = {}
+
+        if timed_out:
+            log.warning("judge subprocess TIMED OUT after %ss; last progress: %s", timeout_s, prog)
+            return {"status": "failed", "error": f"judge subprocess timed out after {timeout_s}s",
+                    "diag": {**prog, "timed_out": True, "timeout_s": timeout_s}}
         if not _os.path.exists(fout):
-            tail = (proc.stdout or "")[-600:]
             return {"status": "failed",
-                    "error": f"judge subprocess produced no output (rc={proc.returncode}): {tail}"}
+                    "error": f"judge subprocess produced no output (rc={proc.returncode})",
+                    "diag": {**prog, "returncode": proc.returncode}}
         try:
             with open(fout, encoding="utf-8") as f:
                 res = _json.load(f)
         except Exception as exc:
-            return {"status": "failed", "error": f"unreadable judge output: {exc}"}
-        log.info("judge subprocess done: status=%s n=%s",
-                 (res or {}).get("status"), (res or {}).get("n"))
+            return {"status": "failed", "error": f"unreadable judge output: {exc}", "diag": prog}
+        log.info("judge subprocess done: status=%s n=%s batch=%s",
+                 (res or {}).get("status"), (res or {}).get("n"), (res or {}).get("batch_size"))
         return res
     finally:
-        for p in (fin.name, fout):
+        for p in (fin.name, fout, fprog):
             try:
                 _os.unlink(p)
             except OSError:
@@ -1473,6 +1519,11 @@ def _attach_inline_panel(report: dict, job_input: dict) -> None:
         # its default and the 5400 the orchestrator sent never reached the judge. Never cut cases —
         # raise the cap instead (see feedback_never_reduce_panel_coverage).
         j_timeout = int(job_input.get("judge_timeout_s", 5400))
+        # Capture the judge's full diagnostics (timings, batch decision, vram, scored count,
+        # error+traceback) so they ride home in the delivered report — the ONLY readback channel that
+        # survives (Container log is inaccessible, the live log channel can drop). Surfaced at
+        # report._verification.panel.diagnostics.judge.
+        judge_diag_box = {}
         judge_generate = None
         if j_base and j_adapter:
             def judge_generate(prompts):
@@ -1480,6 +1531,10 @@ def _attach_inline_panel(report: dict, job_input: dict) -> None:
                 res = _run_judge({"base": j_base, "adapter_url": j_adapter,
                                   "fj_secret": j_secret, "prompts": prompts,
                                   "judge_timeout_s": j_timeout})
+                judge_diag_box.clear()
+                judge_diag_box.update({"status": res.get("status"), "error": res.get("error"),
+                                       "batch_size": res.get("batch_size"), "n": res.get("n"),
+                                       "diag": res.get("diag")})
                 if res.get("status") == "completed":
                     return res.get("generations") or []
                 raise RuntimeError(res.get("error", "judge generate failed"))
@@ -1503,17 +1558,27 @@ def _attach_inline_panel(report: dict, job_input: dict) -> None:
         _t.join(panel_timeout_s)
         if _t.is_alive():
             log.warning("panel watchdog: exceeded %ss — ABANDONING panel so the audit finalizes "
-                        "(advisory only, never affects the audit verdict)", panel_timeout_s)
+                        "(advisory only). judge diag: %s", panel_timeout_s, judge_diag_box)
             report.setdefault("_verification", {})["panel"] = {
                 "advisory": True, "n_cases": 0,
-                "note": f"panel abandoned by watchdog after {panel_timeout_s}s"}
+                "note": f"panel abandoned by watchdog after {panel_timeout_s}s",
+                "diagnostics": {"judge": judge_diag_box}}
             return
         if "err" in _box:
-            raise _box["err"]
+            # The panel thread raised (e.g. judge errored AND jury-only path also failed). Still
+            # deliver the judge diagnostics so we can see why, instead of a bare exception.
+            report.setdefault("_verification", {})["panel"] = {
+                "advisory": True, "n_cases": 0, "note": f"panel error: {_box['err']}",
+                "diagnostics": {"judge": judge_diag_box}}
+            log.warning("inline panel thread error: %s; judge diag: %s", _box["err"], judge_diag_box)
+            return
         panel = _box.get("panel") or {"advisory": True, "n_cases": 0, "note": "panel returned nothing"}
+        if isinstance(panel, dict):
+            panel.setdefault("diagnostics", {})["judge"] = judge_diag_box
         report.setdefault("_verification", {})["panel"] = panel
-        log.info("inline panel attached: n_cases=%s judge_scored=%s flips=%s",
-                 panel.get("n_cases"), panel.get("judge_scored"), len(panel.get("flips") or []))
+        log.info("inline panel attached: n_cases=%s judge_scored=%s flips=%s judge_status=%s batch=%s",
+                 panel.get("n_cases"), panel.get("judge_scored"), len(panel.get("flips") or []),
+                 judge_diag_box.get("status"), judge_diag_box.get("batch_size"))
     except Exception as exc:
         log.warning("inline panel skipped (non-fatal): %s", exc)
 
