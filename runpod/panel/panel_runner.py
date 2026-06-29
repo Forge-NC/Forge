@@ -326,35 +326,72 @@ def run_panel(report: dict, scn_by_id: dict, openrouter_key: str = "",
     screen = TIER1 if (tier == "paid" and or_key) else []
     escalate = TIER2 if (tier == "paid" and or_key) else []
 
-    _log(f"panel jury starting: {len(cases)} cases, tier={tier}, "
-         f"jurors={'TIER1+escalate' if screen else 'none (judge-only/degraded)'}")
-    jury_t0 = _time.monotonic()
-    n_escalated = 0
-    verdicts, summary = [], {}
-    for i, case in enumerate(cases):
-        if i and i % 25 == 0:
-            _log(f"panel jury: {i}/{len(cases)} cases scored ({round(_time.monotonic() - jury_t0)}s elapsed)")
+    def _flip_of(label, oracle_passed):
+        return (label is not None) and (label != ("pass" if oracle_passed else "fail"))
+
+    # PRESERVE THE JUDGE: write a judge-only panel to the report NOW, before the slow network jury.
+    # If the jury later hangs and the watchdog abandons the panel thread, this judge work (which can
+    # take ~99min) is already persisted in the report instead of being thrown away — the exact bug
+    # that discarded a fully-completed 483/483 judge run. The handler must not clobber this on abandon.
+    if judge_scored:
+        jf = [{"scenario_id": cases[i]["scenario_id"], "variant_index": cases[i]["variant_index"],
+               "category": cases[i]["category"], "judge_24b": j_verdicts[i],
+               "oracle_passed": cases[i]["oracle_passed"],
+               "flip": _flip_of(j_verdicts[i], cases[i]["oracle_passed"])}
+              for i in range(len(cases)) if j_verdicts[i] is not None]
+        report.setdefault("_verification", {})["panel"] = {
+            "n_cases": len(cases), "judge_scored": judge_scored, "tier": tier,
+            "flips": [f for f in jf if f["flip"]], "advisory": True,
+            "partial": "judge-only (jury pending)",
+            "diagnostics": {"jury": {"judge_error": judge_err, "judge_unparsed": judge_unparsed}}}
+
+    # Score one case = judge vote + jury votes. Pulled out so cases run CONCURRENTLY below (483
+    # sequential cases was ~2.3h and blew the watchdog; parallel-across-cases is ~minutes).
+    def _score_case(i):
+        case = cases[i]
         votes = []
         if j_verdicts[i] is not None:
             votes.append(j_verdicts[i])
+        esc = 0
         if screen:
             votes += _or_votes(prompts_or[i], case["response_full"], case["category"], screen, 1, or_key)
             top, frac, ndec = tally(votes)
             if not (ndec >= 2 and frac >= 0.75) and escalate:
-                n_escalated += 1
+                esc = 1
                 votes += _or_votes(prompts_or[i], case["response_full"], case["category"], escalate, TIER2_PASSES, or_key)
         label, conf, ndec = tally(votes)
-        flip = (label is not None) and (label != ("pass" if case["oracle_passed"] else "fail"))
-        summary[f"verdict_{label}"] = summary.get(f"verdict_{label}", 0) + 1
-        if flip:
-            summary["flip"] = summary.get("flip", 0) + 1
-        verdicts.append({
-            "scenario_id": case["scenario_id"], "variant_index": case["variant_index"],
-            "category": case["category"], "panel_verdict": label,
-            "panel_confidence": round(conf, 3), "n_decided": ndec,
-            "judge_24b": j_verdicts[i], "oracle_passed": case["oracle_passed"], "flip": flip,
-        })
+        return {"scenario_id": case["scenario_id"], "variant_index": case["variant_index"],
+                "category": case["category"], "panel_verdict": label,
+                "panel_confidence": round(conf, 3), "n_decided": ndec,
+                "judge_24b": j_verdicts[i], "oracle_passed": case["oracle_passed"],
+                "flip": _flip_of(label, case["oracle_passed"]), "_escalated": esc}
 
+    _log(f"panel jury starting: {len(cases)} cases (parallel), tier={tier}, "
+         f"jurors={'TIER1+escalate' if screen else 'none (judge-only/degraded)'}")
+    jury_t0 = _time.monotonic()
+    verdicts = [None] * len(cases)
+    done = 0
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futs = {ex.submit(_score_case, i): i for i in range(len(cases))}
+        for f in as_completed(futs):
+            i = futs[f]
+            try:
+                verdicts[i] = f.result()
+            except Exception:
+                verdicts[i] = {"scenario_id": cases[i]["scenario_id"], "variant_index": cases[i]["variant_index"],
+                               "category": cases[i]["category"], "panel_verdict": None, "panel_confidence": 0.0,
+                               "n_decided": 0, "judge_24b": j_verdicts[i],
+                               "oracle_passed": cases[i]["oracle_passed"], "flip": False, "_escalated": 0}
+            done += 1
+            if done % 50 == 0:
+                _log(f"panel jury: {done}/{len(cases)} cases scored ({round(_time.monotonic() - jury_t0)}s elapsed)")
+
+    summary = {}
+    for v in verdicts:
+        summary[f"verdict_{v['panel_verdict']}"] = summary.get(f"verdict_{v['panel_verdict']}", 0) + 1
+        if v["flip"]:
+            summary["flip"] = summary.get("flip", 0) + 1
+    n_escalated = sum(v.get("_escalated", 0) for v in verdicts)
     flips = [v for v in verdicts if v["flip"]]
     jury_elapsed = round(_time.monotonic() - jury_t0, 1)
     n_no_decision = sum(1 for v in verdicts if v["panel_verdict"] is None)
