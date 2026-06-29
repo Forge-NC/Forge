@@ -1557,12 +1557,22 @@ def _attach_inline_panel(report: dict, job_input: dict) -> None:
         _t.start()
         _t.join(panel_timeout_s)
         if _t.is_alive():
-            log.warning("panel watchdog: exceeded %ss — ABANDONING panel so the audit finalizes "
-                        "(advisory only). judge diag: %s", panel_timeout_s, judge_diag_box)
-            report.setdefault("_verification", {})["panel"] = {
-                "advisory": True, "n_cases": 0,
-                "note": f"panel abandoned by watchdog after {panel_timeout_s}s",
-                "diagnostics": {"judge": judge_diag_box}}
+            existing = (report.get("_verification") or {}).get("panel")
+            if isinstance(existing, dict) and existing.get("judge_scored"):
+                # run_panel persisted the COMPLETED judge verdicts to the report before the jury ran.
+                # The jury is what overran — KEEP the judge work (it can be ~99min) instead of
+                # discarding it. This is the fix for the bug that threw away a full 483/483 judge run.
+                existing.setdefault("diagnostics", {})["judge"] = judge_diag_box
+                existing["note"] = f"jury abandoned by watchdog after {panel_timeout_s}s; judge verdicts preserved"
+                log.warning("panel watchdog: jury exceeded %ss — kept judge-only panel (judge_scored=%s)",
+                            panel_timeout_s, existing.get("judge_scored"))
+            else:
+                log.warning("panel watchdog: exceeded %ss — ABANDONING panel so the audit finalizes "
+                            "(advisory only). judge diag: %s", panel_timeout_s, judge_diag_box)
+                report.setdefault("_verification", {})["panel"] = {
+                    "advisory": True, "n_cases": 0,
+                    "note": f"panel abandoned by watchdog after {panel_timeout_s}s",
+                    "diagnostics": {"judge": judge_diag_box}}
             return
         if "err" in _box:
             # The panel thread raised (e.g. judge errored AND jury-only path also failed). Still
