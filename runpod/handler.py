@@ -1264,6 +1264,11 @@ def handler(event):
     if job_input.get("access_type") == "judge":
         return _run_judge(job_input)
 
+    # Panel-only re-run: score an ALREADY-COMPLETED break report with the judge+jury, NO re-audit.
+    # Also carries no order_id — route before the order machinery.
+    if job_input.get("access_type") == "panel_only":
+        return _run_panel_only(job_input)
+
     order_id = job_input["order_id"]
     model_index = int(job_input.get("model_index", 0))
     model_name = job_input.get("model_name", "unknown")
@@ -1487,6 +1492,65 @@ def _run_judge(job_input: dict) -> dict:
                 _os.unlink(p)
             except OSError:
                 pass
+
+
+def _run_panel_only(job_input: dict) -> dict:
+    """Run the inline panel (judge + jury) against an ALREADY-COMPLETED break report, NO re-audit.
+
+    Lets us re-score ANY existing /break run (from anyone) and iterate the judge/jury cheaply
+    (~judge time, not a fresh ~1.8h audit). Fetches the report by run_id from the server, runs the
+    panel (GPU is free here — no model-under-test to tear down), writes the panel back.
+
+    Input: {access_type:'panel_only', report_run_id, panel_enabled, judge_base, judge_adapter_url,
+            fj_secret, openrouter_key, panel_tier, judge_timeout_s, panel_timeout_s}
+    """
+    import requests as _rq
+    run_id = job_input.get("report_run_id", "")
+    if not run_id:
+        return {"status": "failed", "error": "panel_only requires report_run_id"}
+
+    # Stream live to the readable log channel keyed on the run_id (judge pump -> log.info -> here).
+    rh = RemoteLogHandler(FORGE_API_SERVER, run_id, flush_every=5)
+    rh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
+    logging.getLogger().addHandler(rh)
+    try:
+        log.info("panel_only: fetching report %s", run_id)
+        try:
+            resp = _rq.get(f"{FORGE_API_SERVER}/audit_orchestrator.php?action=get_report_for_panel",
+                           params={"run_id": run_id},
+                           headers={"X-Forge-Api-Secret": FORGE_API_SECRET}, timeout=180)
+            report = resp.json() if resp.status_code < 400 else None
+        except Exception as exc:
+            return {"status": "failed", "error": f"panel_only: report fetch failed: {exc}"}
+        if not isinstance(report, dict) or not report.get("results"):
+            return {"status": "failed", "error": f"panel_only: report {run_id} not found or has no results"}
+
+        # GPU is already free (no MUT in this job), so run the panel directly — no _defer_panel.
+        job_input["panel_enabled"] = True
+        job_input.pop("_defer_panel", None)
+        _attach_inline_panel(report, job_input)
+        panel = (report.get("_verification") or {}).get("panel") or {}
+        log.info("panel_only: panel done n_cases=%s judge_scored=%s flips=%s",
+                 panel.get("n_cases"), panel.get("judge_scored"), len(panel.get("flips") or []))
+
+        # Persist the panel back onto the stored report.
+        try:
+            sr = _rq.post(f"{FORGE_API_SERVER}/audit_orchestrator.php?action=save_panel",
+                          json={"run_id": run_id, "panel": panel},
+                          headers={"X-Forge-Api-Secret": FORGE_API_SECRET}, timeout=180)
+            saved = sr.status_code < 400
+            log.info("panel_only: save_panel HTTP %s", sr.status_code)
+        except Exception as exc:
+            return {"status": "failed", "error": f"panel_only: save failed: {exc}",
+                    "n_cases": panel.get("n_cases"), "judge_scored": panel.get("judge_scored")}
+        return {"status": "completed", "run_id": run_id, "saved": saved,
+                "n_cases": panel.get("n_cases"), "judge_scored": panel.get("judge_scored"),
+                "flips": len(panel.get("flips") or [])}
+    finally:
+        try:
+            logging.getLogger().removeHandler(rh)
+        except Exception:
+            pass
 
 
 def _attach_inline_panel(report: dict, job_input: dict) -> None:
