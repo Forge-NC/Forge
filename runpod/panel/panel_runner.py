@@ -148,13 +148,22 @@ def parse_json(text):
     try:
         return json.loads(text)
     except Exception:
-        i, j = text.find("{"), text.rfind("}")
-        if 0 <= i < j:
-            try:
-                return json.loads(text[i:j + 1])
-            except Exception:
-                return None
-    return None
+        pass
+    i, j = text.find("{"), text.rfind("}")
+    span = text[i:j + 1] if 0 <= i < j else text
+    try:
+        return json.loads(span)
+    except Exception:
+        pass
+    # The judge embeds the model-under-test's RAW response into evidence_quote/quote fields, and that
+    # text often carries JSON-breaking chars — invalid escape sequences from LaTeX (\( \) \[ \]),
+    # Windows paths (\C), etc. (diagnosed as the cause of ~4/483 unparseable judge outputs). Escape any
+    # lone backslash that isn't a valid JSON escape (\" \\ \/ \b \f \n \r \t \uXXXX), then retry.
+    repaired = re.sub(r'\\(?!["\\/bfnrtu]|u[0-9a-fA-F]{4})', r'\\\\', span)
+    try:
+        return json.loads(repaired)
+    except Exception:
+        return None
 
 
 def tally(votes):
