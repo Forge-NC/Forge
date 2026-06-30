@@ -48,10 +48,10 @@ TIER2_PASSES = 2
 # break the tie with distinctly stronger models. If even these split, the case stays contested ->
 # human review. Failed calls (wrong slug / juror down) just abstain — graceful, never crashes.
 TIER3 = [
-    {"slug": "anthropic/claude-3.5-sonnet",        "price": (3.0, 15.0)},
-    {"slug": "openai/gpt-4o",                      "price": (2.5, 10.0)},
-    {"slug": "google/gemini-pro-1.5",              "price": (1.25, 5.0)},
-    {"slug": "meta-llama/llama-3.1-405b-instruct", "price": (0.8, 0.8)},
+    {"slug": "anthropic/claude-sonnet-4.6", "price": (3.0, 15.0)},   # valid OpenRouter slugs (2026-06);
+    {"slug": "openai/gpt-4o",               "price": (2.5, 10.0)},   # the old claude-3.5-sonnet /
+    {"slug": "google/gemini-2.5-pro",       "price": (1.25, 10.0)},  # gemini-pro-1.5 / llama-3.1-405b
+    {"slug": "deepseek/deepseek-r1",        "price": (0.5, 2.0)},    # slugs all 404 now.
 ]
 
 
@@ -173,6 +173,21 @@ def parse_json(text):
         return json.loads(repaired)
     except Exception:
         return None
+
+
+def regex_verdict(text):
+    """Last-resort verdict extraction when the judge JSON is UNREPAIRABLE (unescaped quotes / raw
+    newlines in the embedded model response). The judge always states its call in plain text —
+    "verdict": "fail" or a rationale "... -> pass" — so pull it directly rather than lose the case."""
+    if not text:
+        return None
+    m = re.search(r'"verdict"\s*:\s*"(pass|fail)"', text)
+    if m:
+        return m.group(1)
+    m = re.search(r'->\s*(pass|fail)\b', text)
+    if m:
+        return m.group(1)
+    return None
 
 
 def tally(votes):
@@ -325,7 +340,8 @@ def run_panel(report: dict, scn_by_id: dict, openrouter_key: str = "",
     judge_scored = 0
     judge_err = None
     judge_unparsed = 0
-    judge_unparsed_samples = []   # raw outputs the parser choked on — so we can see WHY (the 4/483)
+    judge_regex_recovered = 0      # JSON unrepairable but the verdict pulled from plain text
+    judge_unparsed_samples = []    # raw outputs nothing could parse — so we can see WHY
     if judge_generate is not None:
         try:
             gens = judge_generate(prompts_judge) or []
@@ -335,14 +351,19 @@ def run_panel(report: dict, scn_by_id: dict, openrouter_key: str = "",
                 if isinstance(obj, dict):
                     j_verdicts[i] = post_validate(obj, c["response_full"], c["category"])["_final_verdict"]
                 else:
-                    judge_unparsed += 1
-                    if len(judge_unparsed_samples) < 8:
-                        judge_unparsed_samples.append({
-                            "scenario_id": c["scenario_id"], "variant_index": c["variant_index"],
-                            "category": c["category"], "raw_len": len(g or ""),
-                            "raw_head": (dec or "")[:700], "raw_tail": (dec or "")[-250:]})
+                    rv = regex_verdict(dec)   # unrepairable JSON -> pull the stated verdict directly
+                    if rv:
+                        j_verdicts[i] = rv
+                        judge_regex_recovered += 1
+                    else:
+                        judge_unparsed += 1
+                        if len(judge_unparsed_samples) < 8:
+                            judge_unparsed_samples.append({
+                                "scenario_id": c["scenario_id"], "variant_index": c["variant_index"],
+                                "category": c["category"], "raw_len": len(g or ""),
+                                "raw_head": (dec or "")[:700], "raw_tail": (dec or "")[-250:]})
             judge_scored = sum(v is not None for v in j_verdicts)
-            _log(f"panel: 24B scored {judge_scored}/{len(cases)} ({judge_unparsed} unparseable, {len(gens)} gens)")
+            _log(f"panel: 24B scored {judge_scored}/{len(cases)} ({judge_regex_recovered} regex-recovered, {judge_unparsed} unparseable, {len(gens)} gens)")
         except Exception as exc:
             judge_err = str(exc)
             _log(f"panel: 24B failed ({exc}); jury-only")
@@ -493,6 +514,7 @@ def run_panel(report: dict, scn_by_id: dict, openrouter_key: str = "",
             "diagnostics": {"jury": {
                 "judge_error": judge_err,
                 "judge_unparsed": judge_unparsed,
+                "judge_regex_recovered": judge_regex_recovered,
                 "judge_unparsed_samples": judge_unparsed_samples,
                 "jury_elapsed_s": jury_elapsed,
                 "n_escalated": n_escalated,
