@@ -69,7 +69,8 @@ def run_judge(job_input: dict, prog_path: str = "") -> dict:
     base = job_input.get("base", "")
     adapter_url = job_input.get("adapter_url", "")
     fj_secret = job_input.get("fj_secret", "")
-    max_new_tokens = int(job_input.get("max_new_tokens", 320))
+    max_new_tokens = int(job_input.get("max_new_tokens", 400))  # 320 truncated the verdict field when
+    #                                the judge quoted a long code block into evidence_quote (1/483 case)
     max_len = int(job_input.get("max_len", 4096))
     diag["max_new_tokens"] = max_new_tokens
     diag["max_len"] = max_len
