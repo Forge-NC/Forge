@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as _FuturesTimeout
@@ -201,28 +202,43 @@ def tally(votes):
 
 
 # ── OpenRouter caller (lean copy of fj_adjudicate.call_model) ──────────────────────
-def call_model(key, slug, prompt, temperature, timeout=120, json_format=True):
+def call_model(key, slug, prompt, temperature, timeout=120, json_format=True, _retries=3):
     body = {"model": slug, "messages": [{"role": "user", "content": prompt}],
             "temperature": temperature, "max_tokens": 1500}
     if json_format:
         body["response_format"] = {"type": "json_object"}
-    req = urllib.request.Request(
-        OPENROUTER_URL, data=json.dumps(body).encode("utf-8"),
-        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json",
-                 "HTTP-Referer": "https://forge-nc.dev", "X-Title": "Forge Inline Panel"},
-        method="POST")
-    try:
-        raw = urllib.request.urlopen(req, timeout=timeout).read()
-    except urllib.error.HTTPError as e:
-        detail = ""
+    data = json.dumps(body).encode("utf-8")
+    raw = None
+    for _attempt in range(_retries):
+        req = urllib.request.Request(
+            OPENROUTER_URL, data=data,
+            headers={"Authorization": "Bearer " + key, "Content-Type": "application/json",
+                     "HTTP-Referer": "https://forge-nc.dev", "X-Title": "Forge Inline Panel"},
+            method="POST")
         try:
-            detail = e.read().decode("utf-8", "replace")[:200]
+            raw = urllib.request.urlopen(req, timeout=timeout).read()
+            break
+        except urllib.error.HTTPError as e:
+            detail = ""
+            try:
+                detail = e.read().decode("utf-8", "replace")[:200]
+            except Exception:
+                pass
+            if e.code == 400 and json_format and ("response format" in detail.lower() or "json_object" in detail.lower()):
+                return call_model(key, slug, prompt, temperature, timeout, json_format=False)
+            # RETRY transient rate-limit / server errors with backoff. The frontier adjudicators
+            # rate-limit under concurrent load — this is why 18 contested cases got <3 votes and never
+            # resolved. Retrying recovers those instead of silently dropping the juror.
+            if e.code in (408, 409, 429, 500, 502, 503, 504, 529) and _attempt < _retries - 1:
+                time.sleep(1.5 * (_attempt + 1))
+                continue
+            return None
         except Exception:
-            pass
-        if e.code == 400 and json_format and ("response format" in detail.lower() or "json_object" in detail.lower()):
-            return call_model(key, slug, prompt, temperature, timeout, json_format=False)
-        return None
-    except Exception:
+            if _attempt < _retries - 1:
+                time.sleep(1.0 * (_attempt + 1))
+                continue
+            return None
+    if raw is None:
         return None
     text = raw.decode("utf-8", "replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
     text = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith(":")).strip()
