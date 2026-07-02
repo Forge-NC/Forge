@@ -48,12 +48,20 @@ TIER2_PASSES = 2
 # TIER3 = FRONTIER adjudicators. Run ONLY on cases the trained judge + mid-tier jury contest, to
 # break the tie with distinctly stronger models. If even these split, the case stays contested ->
 # human review. Failed calls (wrong slug / juror down) just abstain — graceful, never crashes.
+# Resolution needs >=3 clean votes. This roster is 5 STRONG models that all return clean JSON, so
+# >=3 reliably come back even if one is slow. Explicitly NO reasoning models (deepseek-r1, o1) — they
+# wrap the verdict in <think> prose that is not parseable JSON, so their vote is dropped even when
+# they answer in time. That starved the quorum (only 2 votes/case) and left contested cases stuck.
+# TIER3 also runs on a longer wall-clock (TIER3_TIMEOUT) so a slow-but-clean model (gemini-2.5-pro's
+# thinking) finishes instead of being guillotined at the 150s juror default.
 TIER3 = [
-    {"slug": "anthropic/claude-sonnet-4.6", "price": (3.0, 15.0)},   # valid OpenRouter slugs (2026-06);
-    {"slug": "openai/gpt-4o",               "price": (2.5, 10.0)},   # the old claude-3.5-sonnet /
-    {"slug": "google/gemini-2.5-pro",       "price": (1.25, 10.0)},  # gemini-pro-1.5 / llama-3.1-405b
-    {"slug": "deepseek/deepseek-r1",        "price": (0.5, 2.0)},    # slugs all 404 now.
+    {"slug": "anthropic/claude-sonnet-4.6", "price": (3.0, 15.0)},
+    {"slug": "openai/gpt-4o",               "price": (2.5, 10.0)},
+    {"slug": "google/gemini-2.5-pro",       "price": (1.25, 10.0)},
+    {"slug": "deepseek/deepseek-chat",      "price": (0.14, 0.28)},   # v3 (NOT r1): fast, clean JSON
+    {"slug": "mistralai/mistral-large",     "price": (2.0, 6.0)},     # 5th vote for a robust quorum
 ]
+TIER3_TIMEOUT = 300   # frontier adjudicators get a longer wall-clock than the 150s juror default
 
 
 # ── byte-level BPE decode (copied from fj_common; the Ġ/Ċ fix) ─────────────────────
@@ -492,7 +500,8 @@ def run_panel(report: dict, scn_by_id: dict, openrouter_key: str = "",
     if contested_idx and or_key and tier == "paid":
         _log(f"panel adjudication: escalating {len(contested_idx)} contested cases to the frontier tier")
         def _adjudicate(i):
-            votes = _or_votes(prompts_or[i], cases[i]["response_full"], cases[i]["category"], TIER3, 1, or_key)
+            votes = _or_votes(prompts_or[i], cases[i]["response_full"], cases[i]["category"], TIER3, 1, or_key,
+                              wall_timeout=TIER3_TIMEOUT)   # frontier models get more time than the 150s default
             label, conf, ndec = tally(votes)
             return i, label, conf, ndec
         with ThreadPoolExecutor(max_workers=6) as ex:
