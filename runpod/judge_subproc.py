@@ -224,6 +224,19 @@ def run_judge(job_input: dict, prog_path: str = "") -> dict:
                  f"not per-case truncation; keeping originals to protect the run budget")
             diag["rescue_skipped_systemic"] = len(rescue_idx)
             rescue_idx = []
+        # Time-budget guard: the rescue runs BEFORE run_judge returns, i.e. INSIDE the handler's
+        # timeout->SIGKILL boundary (completed gens are written to the output file only on return; the
+        # progress sidecar holds diag, not gens). If a rescue could push total wall-time near
+        # judge_timeout_s, SKIP it and keep the completed pass -- losing the whole 483-case pass to a
+        # mid-rescue kill is far worse than leaving one case unparsed. Fail-safe: skipping == graceful.
+        _timeout_s = int(job_input.get("judge_timeout_s", 5400))
+        _rescue_mnt = min(max(max_new_tokens * 3, max_new_tokens + 1), 1536)
+        _est_rescue_s = len(rescue_idx) * (_rescue_mnt / 25.0)   # ~25 tok/s worst-case, B=1
+        if rescue_idx and (time.monotonic() - t0) + _est_rescue_s > 0.85 * _timeout_s:
+            emit(f"rescue SKIPPED: no time budget (elapsed {int(time.monotonic() - t0)}s + est "
+                 f"{int(_est_rescue_s)}s > 85% of {_timeout_s}s); keeping the completed pass")
+            diag["rescue_skipped_time"] = len(rescue_idx)
+            rescue_idx = []
         if rescue_idx and max_new_tokens < 1536:      # rescue only helps if it grants MORE tokens
             saved_mnt = max_new_tokens
             max_new_tokens = min(max(saved_mnt * 3, saved_mnt + 1), 1536)
