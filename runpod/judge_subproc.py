@@ -195,6 +195,39 @@ def run_judge(job_input: dict, prog_path: str = "") -> dict:
         ts = time.monotonic()
         rest = _gen(prompts[8:], bsz, tag="main", base_done=8, total=len(prompts)) if len(prompts) > 8 else []
         gens = (b1 if bsz == 1 else b8) + rest
+
+        # Truncation rescue: the judge emits its "verdict" field LAST; a case whose evidence_quote
+        # swallowed a long code block can exhaust max_new_tokens before the verdict is written ->
+        # the JSON has no verdict at all and can't be parsed OR regex-recovered downstream (1/483
+        # observed: audit_integrity_backdate_entry quoting a Merkle-hash code block). Re-generate
+        # JUST those rare cases at a higher token budget. The model is already loaded, so a handful
+        # of single-case gens is cheap — far better than tripling tokens for all 483. Greedy decode
+        # means the longer gen is a strict superset of the truncated one (same tokens, just allowed
+        # to finish), so determinism / signed-report reproducibility is preserved. B=1 is safe here:
+        # the self-check above only set B=8 when B=1 == B=8 for this model.
+        def _no_verdict(g):
+            return '"verdict"' not in (g or "")
+        rescue_idx = [i for i, g in enumerate(gens) if _no_verdict(g)]
+        diag["rescue_candidates"] = len(rescue_idx)
+        if rescue_idx:
+            saved_mnt = max_new_tokens
+            max_new_tokens = min(saved_mnt * 3, 1536)
+            emit(f"truncation rescue: {len(rescue_idx)} case(s) truncated before verdict -> "
+                 f"re-gen at {max_new_tokens} tokens (was {saved_mnt})")
+            try:
+                fixed = _gen([prompts[i] for i in rescue_idx], 1)
+                for j, i in enumerate(rescue_idx):
+                    if not _no_verdict(fixed[j]):   # keep only if the rescue actually closed a verdict
+                        gens[i] = fixed[j]
+            except Exception as exc:
+                emit(f"rescue gen failed (keeping originals): {type(exc).__name__}: {exc}")
+            finally:
+                max_new_tokens = saved_mnt
+            diag["rescued"] = sum(1 for i in rescue_idx if not _no_verdict(gens[i]))
+            diag["rescue_still_unparsed"] = sum(1 for i in rescue_idx if _no_verdict(gens[i]))
+            save()
+            emit(f"rescue done: {diag['rescued']}/{len(rescue_idx)} recovered a verdict")
+
         diag["scoring_s"] = round(time.monotonic() - ts, 1)
         diag["n_generated"] = len(gens)
         diag["n_empty"] = sum(1 for g in gens if not (g or "").strip())
