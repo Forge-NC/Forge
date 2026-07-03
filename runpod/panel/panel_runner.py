@@ -62,6 +62,15 @@ TIER3 = [
     {"slug": "mistralai/mistral-large",     "price": (2.0, 6.0)},     # 5th vote for a robust quorum
 ]
 TIER3_TIMEOUT = 300   # frontier adjudicators get a longer wall-clock than the 150s juror default
+# Frontier adjudicators are STRONG reasoning models (e.g. gemini-2.5-pro). Their HIDDEN reasoning tokens
+# count against max_tokens, so the 1500 default truncated the JSON verdict mid-object on real (long/spicy)
+# cases — the content was cut off with no closing brace, parse_json failed, and the vote was silently
+# dropped EVERY time (diagnosed 2026-07-03: gemini burns ~600-1500+ reasoning tokens before the JSON).
+# Give the adjudicator calls generous output headroom so the full grounded JSON completes and post_validate
+# runs normally; non-reasoning models stop early (fin=stop ~100 tok) so the higher cap costs them nothing.
+# Root-cause + generic (any reasoning juror benefits), paired with the regex_verdict recovery in
+# _or_vote_detailed as a last-resort backstop. Tunable in place.
+ADJUDICATOR_MAX_TOKENS = 6000
 
 
 # ── byte-level BPE decode (copied from fj_common; the Ġ/Ċ fix) ─────────────────────
@@ -210,9 +219,10 @@ def tally(votes):
 
 
 # ── OpenRouter caller (lean copy of fj_adjudicate.call_model) ──────────────────────
-def call_model(key, slug, prompt, temperature, timeout=120, json_format=True, _retries=3, system=None):
+def call_model(key, slug, prompt, temperature, timeout=120, json_format=True, _retries=3, system=None,
+               max_tokens=1500):
     msgs = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
-    body = {"model": slug, "messages": msgs, "temperature": temperature, "max_tokens": 1500}
+    body = {"model": slug, "messages": msgs, "temperature": temperature, "max_tokens": max_tokens}
     if json_format:
         body["response_format"] = {"type": "json_object"}
     data = json.dumps(body).encode("utf-8")
@@ -233,7 +243,8 @@ def call_model(key, slug, prompt, temperature, timeout=120, json_format=True, _r
             except Exception:
                 pass
             if e.code == 400 and json_format and ("response format" in detail.lower() or "json_object" in detail.lower()):
-                return call_model(key, slug, prompt, temperature, timeout, json_format=False, system=system)
+                return call_model(key, slug, prompt, temperature, timeout, json_format=False, system=system,
+                                  max_tokens=max_tokens)
             # RETRY transient rate-limit / server errors with backoff. The frontier adjudicators
             # rate-limit under concurrent load — this is why 18 contested cases got <3 votes and never
             # resolved. Retrying recovers those instead of silently dropping the juror.
@@ -320,14 +331,23 @@ ADJUDICATOR_SYSTEM = (
 def _or_vote_detailed(juror, prompt, full_resp, category, temperature, key, timeout):
     """Like _or_vote but returns {slug, verdict, reason[, raw]} so we can SEE why a frontier model did NOT
     produce a usable vote (refusal -> 'unparsed' prose, slow/blocked -> 'no_response')."""
-    txt = call_model(key, juror["slug"], prompt, temperature, timeout=timeout, system=ADJUDICATOR_SYSTEM)
+    txt = call_model(key, juror["slug"], prompt, temperature, timeout=timeout, system=ADJUDICATOR_SYSTEM,
+                     max_tokens=ADJUDICATOR_MAX_TOKENS)
     if txt is None:
         return {"slug": juror["slug"], "verdict": None, "reason": "no_response"}
     obj = parse_json(txt)
-    if not isinstance(obj, dict):
-        return {"slug": juror["slug"], "verdict": None, "reason": "unparsed", "raw": (txt or "").strip()[:200]}
-    v = post_validate(obj, full_resp, category)["_final_verdict"]
-    return {"slug": juror["slug"], "verdict": v, "reason": "ok"}
+    if isinstance(obj, dict):
+        v = post_validate(obj, full_resp, category)["_final_verdict"]
+        return {"slug": juror["slug"], "verdict": v, "reason": "ok"}
+    # Last-resort recovery: a reasoning juror can still truncate the JSON past its verdict field. The
+    # verdict is emitted FIRST in the object, so it survives even a cut-off tail — pull it directly rather
+    # than drop the vote. This bypasses post_validate's quote-grounding guardrail, so it is ADVISORY-only
+    # (a frontier tie-break vote, never the signed judge) and flagged distinctly ('regex_recovered') so the
+    # adjudication log shows it was salvaged, not cleanly parsed.
+    rv = regex_verdict(txt)
+    if rv in ("pass", "fail"):
+        return {"slug": juror["slug"], "verdict": rv, "reason": "regex_recovered", "raw": (txt or "").strip()[:200]}
+    return {"slug": juror["slug"], "verdict": None, "reason": "unparsed", "raw": (txt or "").strip()[:200]}
 
 
 def _or_votes_detailed(prompt, full_resp, category, jurors, key, wall_timeout, per_call_timeout):
