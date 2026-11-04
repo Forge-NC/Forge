@@ -1,20 +1,26 @@
 """Proof of Inference — cryptographic proof that a model forward pass ran.
 
-Challenge-response protocol:
+Challenge-response protocol (every call carries the machine's X-Forge-Token):
+  Client asks:   get_challenge {machine_id, pub_key_b64}; the first ask binds this
+                 machine's public key to its token on the server.
   Server sends:  {challenge_id, probe_prompt, expected_category, nonce, expires_at}
   Client runs:   The probe_prompt through the local LLM, classifies the response,
                  hashes it with the nonce, signs the payload with its machine key.
-  Client returns: {challenge_id, response_category, response_hash, latency_ms,
-                   tokens_generated, passport_id, machine_id, signed_at, signature}
-  Server checks:  Signature, latency plausibility, category match, nonce freshness.
+  Client returns: {payload_b64, signature}: payload_b64 is the exact JSON bytes that
+                 were signed ({challenge_id, response_category, response_hash,
+                 latency_ms, tokens_generated, passport_id, machine_id, signed_at}),
+                 so the server never re-encodes them.
+  Server checks:  Signature against the key bound to the token (never one sent with
+                 the proof), that the challenge is this machine's, open and unexpired,
+                 signing time, latency plausibility, category match.
 
 This proves computation happened — the "work" is inference, not hashing.
 The fleet's capability matrix entries are cryptographically defended.
 
 Machine signing key:
     Generated once on first use.  Stored at ~/.forge/machine_signing_key.pem.
-    The Ed25519 public key is registered with the challenge server at activation
-    time and accompanies each proof response for server-side verification.
+    Bound to the machine's token on its first get_challenge; the server accepts
+    no other key for that token afterwards.
 
 Requires: cryptography>=41.0  (pip install cryptography)
 If cryptography is unavailable, challenges are declined gracefully.
@@ -238,13 +244,14 @@ class ProofOfInference:
             "tokens_generated":  tokens_generated,
             "passport_id":       self._passport_id,
             "machine_id":        self._machine_id,
-            "pub_key_b64":       self._pub_b64,
             "signed_at":         signed_at,
         }
         payload_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
         signature = _sign_payload(self._private_key, payload_bytes)
 
+        # The fields for local use, plus the signed bytes and signature the server checks.
         proof = dict(payload)
+        proof["payload_b64"] = base64.b64encode(payload_bytes).decode("ascii")
         proof["signature"] = signature
 
         log.info(
