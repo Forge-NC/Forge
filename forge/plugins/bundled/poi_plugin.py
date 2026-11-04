@@ -67,14 +67,18 @@ def register_poi_handlers(
                 })
                 return
 
-            # Attempt to POST the proof to the challenge server
+            # Attempt to POST the proof to the challenge server: only the signed bytes and
+            # the signature, under this machine's token.
             challenge_url = engine.config.get("challenge_url", "")
-            if challenge_url:
+            token = engine.config.get("telemetry_token", "")
+            if challenge_url and token:
                 try:
                     import requests
                     resp = requests.post(
-                        challenge_url + "/submit",
-                        json=proof,
+                        challenge_url + "?action=submit",
+                        json={"payload_b64": proof["payload_b64"],
+                              "signature":   proof["signature"]},
+                        headers={"X-Forge-Token": token},
                         timeout=15,
                     )
                     server_ok = resp.status_code == 200
@@ -114,5 +118,36 @@ def register_poi_handlers(
         )
         t.start()
 
+    def request_challenge() -> dict | None:
+        """Ask the challenge server for a challenge and hand it to the bus.
+
+        Sends this machine's public key with the ask; the server binds it to the
+        machine's token the first time and refuses any other key after that.
+        Returns the challenge, or None (no server, no token, no key, or refused).
+        """
+        challenge_url = engine.config.get("challenge_url", "")
+        token = engine.config.get("telemetry_token", "")
+        pub = poi.public_key_b64 if poi._ensure_key() else ""
+        if not (challenge_url and token and pub and machine_id):
+            return None
+        try:
+            import requests
+            resp = requests.post(
+                challenge_url + "?action=get_challenge",
+                json={"machine_id": machine_id, "pub_key_b64": pub},
+                headers={"X-Forge-Token": token},
+                timeout=15,
+            )
+        except Exception as exc:
+            log.warning("PoI challenge request failed: %s", exc)
+            return None
+        if resp.status_code != 200:
+            log.info("PoI challenge refused: HTTP %d", resp.status_code)
+            return None
+        challenge = resp.json()
+        bus.emit("challenge.received", challenge)
+        return challenge
+
+    engine.request_poi_challenge = request_challenge
     bus.subscribe("challenge.received", on_challenge_received, priority=50)
     log.debug("Proof of Inference event bridge registered.")
